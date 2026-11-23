@@ -1,0 +1,8 @@
+{
+  "name": "Trading Empire — Global Financial Simulation",
+  "description": "Massively multiplayer financial and economic simulation game with a central price-time priority matching engine, simulated crypto and stock exchanges, real estate auctions, business management, banking, and real-time shared world state.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

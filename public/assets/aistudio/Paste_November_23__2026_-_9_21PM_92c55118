@@ -1,0 +1,2561 @@
+# TRADING EMPIRE — MASTER BUILD SPECIFICATION
+## Project: Massively Multiplayer Financial & Economic Simulation Game
+### Version: 1.0 — Google AI Studio Full-Stack Prototype
+
+# 1. VAI TRÒ VÀ NHIỆM VỤ
+
+Bạn là một đội ngũ phát triển phần mềm chuyên nghiệp gồm:
+
+- Principal Software Architect
+- Senior Full-Stack Engineer
+- Financial Exchange Matching Engine Engineer
+- Quantitative Financial Simulation Engineer
+- Multiplayer & Real-Time Systems Engineer
+- Game Economy Designer
+- Senior UI/UX Product Designer
+- Cybersecurity Engineer
+- QA Automation Engineer
+
+Nhiệm vụ của bạn là THỰC SỰ XÂY DỰNG một trò chơi kinh tế trực tuyến nhiều người chơi có tên:
+
+**TRADING EMPIRE — The Global Financial Simulation**
+
+Đây không phải landing page, dashboard mẫu hay website chỉ để trình diễn giao diện.
+
+Đây phải là một trò chơi mô phỏng thị trường tài chính, nơi hàng trăm và sau này hàng nghìn người có thể tham gia cùng một thế giới, mua bán cổ phiếu, crypto mô phỏng, bất động sản, đầu tư vào doanh nghiệp và cạnh tranh tài sản.
+
+Tham vọng của dự án là kết hợp những nguyên lý từ:
+
+- Nền tảng giao dịch tài chính chuyên nghiệp
+- Sàn chứng khoán và thị trường crypto
+- Game mô phỏng kinh tế nhiều người chơi
+- Game quản lý doanh nghiệp và đầu tư
+- Hệ thống ngân hàng và tài sản số trong game
+
+Tất cả phải trở thành một hệ thống thống nhất.
+
+**Lưu ý:** Toàn bộ tài sản, crypto, tiền tệ và chứng khoán trong TRADING EMPIRE chỉ là tài sản mô phỏng. Không giao dịch tài sản thật, không nạp/rút tiền thật, không cho phép chuyển đổi thành tài sản có giá trị ngoài đời.
+
+## NGUYÊN TẮC BẮT BUỘC
+
+1. Không xây dựng giao diện giả rồi coi như đã hoàn thành chức năng.
+2. Không tạo biểu đồ giá ngẫu nhiên độc lập với giao dịch.
+3. Không dùng bộ đếm giả để tạo cảm giác có người chơi online.
+4. Không cho trình duyệt tự quyết định tiền, tài sản hoặc kết quả giao dịch.
+5. Mọi người chơi trong cùng một World phải quan sát cùng một trạng thái thị trường.
+6. Lệnh mua và bán tương thích phải có khả năng tự động khớp với nhau.
+7. Tất cả giao dịch phải được ghi nhận bằng các sự kiện có thể kiểm tra.
+8. Không được tạo ra tiền hoặc cổ phiếu vô hạn ngoài các quy tắc phát hành.
+9. Không được sử dụng dữ liệu thị trường thật nếu chưa tích hợp nguồn được phép sử dụng.
+10. Không được tuyên bố một chức năng hoạt động thực tế nếu nó mới chỉ được mô phỏng trong một trình duyệt.
+
+# 2. PHẠM VI TRIỂN KHAI TRONG GOOGLE AI STUDIO
+
+Hãy triển khai ứng dụng full-stack bằng:
+
+FRONTEND:
+- React
+- TypeScript
+- Vite hoặc hệ thống build React tương thích AI Studio
+- Tailwind CSS
+- Zustand cho trạng thái giao diện
+- TanStack Query cho dữ liệu từ máy chủ
+- Lightweight Charts cho biểu đồ nến tài chính
+- Lucide React cho icon
+- Framer Motion cho hiệu ứng có kiểm soát
+
+BACKEND THỬ NGHIỆM:
+- Node.js runtime do AI Studio cung cấp
+- TypeScript
+- Express hoặc một HTTP framework phù hợp
+- Socket.IO cho các sự kiện realtime nếu runtime hỗ trợ
+- Zod để kiểm tra dữ liệu đầu vào
+- Matching engine do dự án tự triển khai
+- In-memory shared state cho tất cả phiên thử nghiệm kết nối đến cùng máy chủ
+
+Chỉ chọn thư viện được hỗ trợ trong môi trường hiện tại. Nếu một thư viện không hoạt động, thay thế bằng thư viện tương đương và giải thích.
+
+## KHÔNG TÍCH HỢP Ở GIAI ĐOẠN NÀY
+
+- Supabase
+- Firebase / Firestore
+- PostgreSQL
+- MongoDB
+- Redis
+- API Binance hoặc các sàn crypto thật
+- API giá chứng khoán bên ngoài
+- API thanh toán
+- Ví blockchain
+- Dịch vụ xác thực bên thứ ba
+
+Không tự động yêu cầu bật Firebase chỉ vì ứng dụng có multiplayer.
+
+Các phần này sẽ được GPT triển khai sau. Tuy nhiên, phải thiết kế interface, data contract, service adapter và tài liệu bàn giao để thay thế hạ tầng thử nghiệm.
+
+## REALTIME PROTOTYPE
+
+Trong giai đoạn hiện tại:
+
+- Tạo một máy chủ Node.js giữ trạng thái chung của World-01.
+- Người chơi kết nối tới cùng máy chủ phải tương tác với cùng order book, tài sản và thị trường.
+- Không dùng localStorage làm nguồn dữ liệu tài chính chung.
+- localStorage chỉ được lưu cài đặt UI không nhạy cảm.
+- Cho phép tạo Guest Account dùng để thử nghiệm.
+- Guest Account không được coi là hệ thống xác thực bảo mật.
+- Cung cấp chức năng kết nối lại và tải snapshot khi mất kết nối.
+- Khi máy chủ khởi động lại, dữ liệu in-memory có thể bị mất. Phải hiển thị rõ trạng thái DEMO — TEMPORARY SERVER.
+- Nếu môi trường preview không hỗ trợ WebSocket, hãy sử dụng phương án đồng bộ thông qua HTTP polling hoặc SSE và API server, không được giả lập multiplayer bằng JavaScript client.
+
+Ưu tiên hệ thống thực sự hoạt động hơn số lượng tính năng trình diễn.
+
+# 3. GAME WORLD VÀ TIỀN TỆ
+
+Tên thế giới mặc định:
+
+WORLD-01: GLOBAL ECONOMY
+
+Tất cả người chơi trong WORLD-01 chia sẻ một nền kinh tế duy nhất.
+
+Đơn vị tiền trong game:
+
+CR — Empire Credits
+
+Mỗi tài khoản mới nhận:
+
+100.000 CR
+
+Đây là vốn khởi nghiệp mô phỏng, không có giá trị quy đổi.
+
+Thông số khởi tạo đề xuất:
+
+- Initial Balance: 100,000 CR
+- Maximum Starting Debt: 0 CR
+- Starting Properties: 0
+- Starting Companies: 0
+- Starting Share Holdings: 0
+- Starting Crypto Holdings: 0
+- Player Level: 1
+
+Người chơi phải đầu tư để phát triển tài sản.
+
+Mọi hình thức phát hành tiền đều được ghi nhận là nguồn cung từ hệ thống. Không phát hành tiền tùy tiện để làm đẹp trò chơi.
+
+## HỒ SƠ NGƯỜI CHƠI
+
+Mỗi người chơi có:
+
+- ID duy nhất
+- Username và avatar
+- Ngày tham gia
+- Số dư khả dụng
+- Số tiền đang bị khóa bởi lệnh mua
+- Giá trị danh mục crypto
+- Giá trị danh mục cổ phiếu
+- Giá trị bất động sản
+- Giá trị cổ phần doanh nghiệp
+- Tổng nợ
+- Tổng giá trị tài sản ròng
+- Lãi/lỗ đã thực hiện
+- Lãi/lỗ chưa thực hiện
+- Lịch sử giao dịch
+- Danh hiệu và thành tựu
+
+Tài sản ròng được tính:
+
+NET WORTH =
+CASH + STOCK VALUE + CRYPTO VALUE + PROPERTY VALUE + BUSINESS EQUITY - LIABILITIES
+
+Không được tính trùng tài sản đang bị khóa trong các lệnh.
+
+Các loại tài sản phải có chính sách định giá rõ ràng. Không được coi giá niêm yết không có thanh khoản là giá có thể bán được ngay lập tức.
+
+# 4. CORE SYSTEM — REALISTIC MARKET ENGINE
+
+Đây là phần QUAN TRỌNG NHẤT của toàn bộ trò chơi.
+
+Hãy xây dựng một hệ thống khớp lệnh trung tâm có khả năng xử lý giao dịch giữa nhiều người chơi.
+
+## 4.1. SHARED ORDER BOOK
+
+Mỗi tài sản giao dịch phải có một Order Book duy nhất trong mỗi World.
+
+Order Book bao gồm:
+
+BID:
+Những người đang đặt mua.
+
+ASK:
+Những người đang đặt bán.
+
+Ví dụ:
+
+Người A đặt mua 10 cổ phiếu NOVA ở giá 50 CR.
+
+Người B đặt bán 6 cổ phiếu NOVA ở giá 49 CR.
+
+Hai lệnh tương thích và phải tự động khớp.
+
+Nếu lệnh mua của A đã nằm trong sổ lệnh trước, giá thực hiện là 50 CR.
+
+Kết quả:
+
+- Người A mua được 6 cổ phiếu.
+- Người B bán được 6 cổ phiếu.
+- Lệnh của A còn 4 cổ phiếu đang chờ.
+- Tiền và cổ phiếu được chuyển giữa hai tài khoản.
+- Phí giao dịch được trừ theo cấu hình.
+- Order Book cập nhật.
+- Giao dịch xuất hiện trong Recent Trades.
+- Last Traded Price cập nhật thành 50 CR.
+- Biểu đồ giá ghi nhận giao dịch.
+- Những người đang xem NOVA nhận được cập nhật realtime.
+
+Không tạo giao dịch giữa hai người chơi nếu chưa thật sự có hai lệnh tương thích.
+
+## 4.2. MATCHING ENGINE
+
+Sử dụng cơ chế:
+
+PRICE-TIME PRIORITY
+
+Ưu tiên 1: Giá tốt nhất.
+
+Ưu tiên 2: Thứ tự thời gian khi các lệnh có cùng giá.
+
+Hỗ trợ:
+
+- Market Buy
+- Market Sell
+- Limit Buy
+- Limit Sell
+- Good Till Cancelled
+- Immediate Or Cancel
+- Partial Fill
+- Full Fill
+- Order Cancellation
+- Open Orders
+- Order History
+- Trade History
+
+Stop Loss và Stop Limit có thể được thêm sau khi các loại lệnh cơ bản hoạt động ổn định.
+
+Nguyên tắc xử lý:
+
+1. Máy chủ kiểm tra danh tính phiên thử nghiệm.
+2. Kiểm tra mã tài sản.
+3. Kiểm tra thị trường đang mở.
+4. Kiểm tra số lượng hợp lệ.
+5. Kiểm tra bước giá và bước khối lượng.
+6. Kiểm tra số dư khả dụng.
+7. Kiểm tra số tài sản có thể bán.
+8. Phong tỏa đủ tiền hoặc tài sản theo loại lệnh.
+9. Đưa lệnh vào matching engine.
+10. Xử lý khớp lệnh theo thứ tự ưu tiên.
+11. Thực hiện thanh toán và chuyển quyền sở hữu.
+12. Cập nhật trạng thái lệnh.
+13. Ghi transaction ledger.
+14. Phát sự kiện realtime.
+15. Trả kết quả chính xác cho người đặt lệnh.
+
+Phải ngăn chặn hai lệnh đồng thời tiêu cùng một số dư.
+
+Một lệnh chỉ được xử lý một lần.
+
+Lệnh trùng do retry mạng phải được phát hiện bằng idempotency key.
+
+## 4.3. MARKET ORDERS
+
+Market Order phải khớp vào những lệnh có sẵn trong Order Book.
+
+Không được tự sinh ra người bán hoặc người mua vô hạn.
+
+Nếu không có thanh khoản:
+
+Hiển thị:
+"Không đủ thanh khoản để thực hiện giao dịch."
+
+Nếu chỉ đủ thanh khoản một phần:
+
+- Thực hiện phần có thể khớp.
+- Hủy phần còn lại nếu loại lệnh yêu cầu.
+- Hoàn trả tiền hoặc tài sản chưa sử dụng.
+
+Cung cấp bảo vệ trượt giá có thể cấu hình.
+
+Nếu giá khớp vượt giới hạn trượt giá, không thực hiện phần vượt giới hạn đó.
+
+## 4.4. LIMIT ORDERS
+
+Người chơi nhập:
+
+- Giá mong muốn
+- Số lượng
+- Thời hạn hiệu lực
+
+Tính và hiển thị:
+
+- Tổng giá trị
+- Phí dự kiến
+- Tiền bị khóa
+- Giá trị nhận dự kiến
+
+Lệnh nằm trong Order Book cho đến khi:
+
+- Khớp toàn bộ
+- Người chơi hủy
+- Hết hạn
+- Hệ thống hủy hợp lệ theo quy tắc
+
+Lệnh chưa khớp không được tính thành giao dịch.
+
+## 4.5. PHÍ GIAO DỊCH
+
+Phí tham khảo có thể cấu hình:
+
+Maker: 0.10%
+Taker: 0.15%
+
+Định nghĩa rõ maker/taker khi một lệnh khớp ngay lúc được đưa vào.
+
+Sử dụng đơn vị tiền nguyên nhỏ nhất hoặc số thập phân chính xác.
+
+Không tính toán tiền bằng floating-point JavaScript thông thường theo cách gây sai số tài chính.
+
+Mọi số tiền, phí và khối lượng phải có quy tắc làm tròn nhất quán.
+
+## 4.6. TRADE SETTLEMENT
+
+Xây dựng Double-Entry Ledger về mặt logic.
+
+Mỗi giao dịch có:
+
+- Transaction ID
+- Buyer ID
+- Seller ID
+- Asset ID
+- Execution Price
+- Execution Quantity
+- Gross Amount
+- Buyer Fee
+- Seller Fee
+- Timestamp
+- Order References
+- Ledger Entries
+
+Tổng tiền ghi nợ và ghi có phải khớp nhau, bao gồm tài khoản hệ thống nhận phí.
+
+Không tạo ra tiền vô lý do sai số làm tròn.
+
+Trong prototype in-memory, thao tác settlement phải được xử lý trong cùng một vùng cập nhật trạng thái có thứ tự.
+
+Thiết kế sẵn interface để GPT có thể chuyển sang transaction của cơ sở dữ liệu.
+
+## 4.7. BẢO VỆ THỊ TRƯỜNG
+
+Phải hỗ trợ:
+
+- Chặn số dư âm
+- Chặn số cổ phiếu âm
+- Chặn lệnh không hợp lệ
+- Chặn tự giao dịch cùng tài khoản
+- Giới hạn tốc độ đặt lệnh
+- Giới hạn kích thước lệnh
+- Price Band có thể cấu hình
+- Market Halt khi đạt điều kiện
+- Phát hiện hành vi spam lệnh
+- Nhật ký hành vi đáng ngờ
+
+Không tự động thao túng giá để giúp người chơi thắng hoặc thua.
+
+Không cho client gửi giá khớp lệnh hoặc số dư mới.
+
+# 5. CRYPTO EXCHANGE
+
+Tạo hệ thống sàn crypto mô phỏng.
+
+Tên thị trường:
+
+EMPIRE CRYPTO EXCHANGE — ECX
+
+Tài sản khởi tạo:
+
+BTC-SIM
+ETH-SIM
+SOL-SIM
+XRP-SIM
+NEX-SIM
+ECO-SIM
+
+Tất cả là mã mô phỏng, không đại diện quyền sở hữu crypto thật.
+
+## CƠ CHẾ THỊ TRƯỜNG
+
+Thị trường crypto hoạt động liên tục 24/7 theo đồng hồ server.
+
+Không có giờ đóng cửa thông thường.
+
+Các tính năng:
+
+- Spot Trading
+- Market Orders
+- Limit Orders
+- Shared Order Book
+- Live Trades
+- Portfolio Holdings
+- Watchlist
+- Candlestick Charts
+- Volume
+- Price Change
+- Market Capitalization mô phỏng
+- Circulating Supply
+- Liquidity Indicator
+- Market Sentiment
+
+## CUNG CẦU THỰC TẾ
+
+Giá phải hình thành chủ yếu từ các lệnh được khớp.
+
+Không được sử dụng Math.random để trực tiếp thay đổi Last Traded Price.
+
+Có thể tạo các Market Maker Bots để thị trường không bị đứng yên khi ít người chơi.
+
+Market Maker phải:
+
+- Có tài khoản mô phỏng thực sự.
+- Có vốn CR giới hạn.
+- Có số lượng tài sản giới hạn.
+- Đặt các lệnh mua và bán thật vào Order Book.
+- Có thể hết vốn hoặc hết hàng.
+- Có chiến lược spread và inventory rõ ràng.
+- Bị ràng buộc bởi cùng matching engine.
+- Không tự tạo giao dịch không có đối tác.
+- Không được thực hiện giao dịch giả để thổi phồng volume.
+
+Có thể dùng random seed để quyết định chiến lược bot, nhưng giá giao dịch cuối cùng vẫn phải đến từ lệnh khớp.
+
+## MARKET DYNAMICS
+
+Giá và thanh khoản có thể bị tác động bởi:
+
+- Nhu cầu mua
+- Áp lực bán
+- Sự thay đổi kỳ vọng
+- Tin tức kinh tế trong game
+- Dòng tiền giữa crypto và chứng khoán
+- Quyết định của nhà đầu tư AI
+- Hành vi phòng ngừa rủi ro của market maker
+
+Tạo cơ chế volatility regime:
+
+LOW VOLATILITY
+NORMAL VOLATILITY
+HIGH VOLATILITY
+MARKET PANIC
+
+Các chế độ này điều chỉnh hành vi bot, spread, thanh khoản và mức độ nhạy cảm với tin tức, không được ghi đè giá giao dịch bằng số ngẫu nhiên.
+
+## BIỂU ĐỒ
+
+Hỗ trợ:
+
+1m
+5m
+15m
+1h
+4h
+1D
+
+Mỗi candle chứa:
+
+Open
+High
+Low
+Close
+Volume
+Timestamp
+
+Candle phải được xây dựng từ giao dịch đã thực hiện.
+
+Nếu không có giao dịch, volume phải bằng 0. Có thể hiển thị candle phẳng theo giá close gần nhất nếu quy ước biểu đồ yêu cầu.
+
+Dữ liệu lịch sử được seed để demo phải được đánh dấu là simulated historical data.
+
+Sau thời điểm máy chủ khởi động, dữ liệu candle mới phải đến từ trade events.
+
+Không tạo biểu đồ mới mỗi lần người dùng tải lại trang.
+
+# 6. STOCK EXCHANGE — SÀN CHỨNG KHOÁN
+
+Tên thị trường:
+
+EMPIRE STOCK EXCHANGE — ESE
+
+Tạo những doanh nghiệp giả tưởng:
+
+- NOVA — Nova Technologies
+- AERO — Aero Dynamics Group
+- TITAN — Titan Motors
+- NEXB — NexBank Corporation
+- ENRG — Empire Energy
+- LOGX — Global Logistics
+- MEDI — MediCore Industries
+- RETL — Retail Empire Holdings
+
+Mỗi công ty có:
+
+- Tên và mã cổ phiếu
+- Logo hoặc biểu tượng
+- Ngành kinh doanh
+- Số cổ phiếu lưu hành
+- Giá thị trường
+- Vốn hóa
+- Doanh thu
+- Chi phí
+- Lợi nhuận
+- Lợi nhuận trên mỗi cổ phiếu
+- Tài sản
+- Nợ
+- Tiền mặt doanh nghiệp
+- Tỷ lệ cổ tức
+- Lịch sử kết quả kinh doanh
+- Báo cáo tài chính mô phỏng
+
+## CƠ CHẾ CỔ PHIẾU
+
+Không tự ý phát hành cổ phiếu vô hạn khi người chơi mua.
+
+Số lượng cổ phiếu có hạn và được ghi trong cấu trúc quyền sở hữu.
+
+Người chơi mua từ:
+
+- Những người chơi khác
+- Các Market Maker đã được cấp cổ phần
+- Quỹ hoặc tài khoản hệ thống được khai báo rõ
+
+Tất cả phải đi qua cùng matching engine.
+
+## HOẠT ĐỘNG DOANH NGHIỆP
+
+Doanh nghiệp cần có mô hình cơ bản:
+
+REVENUE
+OPERATING COST
+OPERATING PROFIT
+DEBT INTEREST
+NET PROFIT
+CASH BALANCE
+
+Lợi nhuận ảnh hưởng đến:
+
+- Khả năng trả cổ tức
+- Giá trị nội tại tham chiếu
+- Mức độ kỳ vọng của investor bots
+- Rủi ro doanh nghiệp
+- Xếp hạng tín nhiệm
+
+Giá cổ phiếu trên sàn vẫn hình thành từ cung cầu và giao dịch được khớp.
+
+Không bắt buộc giá cổ phiếu luôn bằng giá trị nội tại.
+
+## CỔ TỨC
+
+Nếu doanh nghiệp quyết định trả cổ tức:
+
+- Kiểm tra khả năng thanh toán.
+- Xác định ngày chốt danh sách.
+- Xác định số cổ phiếu đủ điều kiện.
+- Chuyển tiền từ tài khoản doanh nghiệp.
+- Ghi ledger và lịch sử cổ tức.
+- Không chi trả vượt tiền mặt có sẵn.
+
+Không được tự tạo CR khi chi trả cổ tức.
+
+## LỊCH GIAO DỊCH
+
+Tạo đồng hồ kinh tế riêng của game.
+
+Thiết kế hỗ trợ hai chế độ:
+
+A. Simulated Accelerated Calendar
+
+B. Real-Time Calendar
+
+Mặc định cho bản game thử nghiệm là chế độ A.
+
+Đề xuất:
+
+Một ngày trong game = 2 giờ thực.
+
+Thị trường chứng khoán có phiên mở cửa và đóng cửa theo đồng hồ game.
+
+Phân biệt rõ giờ trong game với thời gian thật.
+
+Crypto vẫn hoạt động liên tục.
+
+Việc đóng/mở thị trường phải do server xác định.
+
+Khi thị trường đóng cửa:
+
+- Không cho thực hiện khớp lệnh thông thường.
+- Hiển thị thời gian mở cửa tiếp theo.
+- Có thể cho người chơi chuẩn bị lệnh chờ theo quy tắc đã định.
+- Không cập nhật giá giao dịch khi không có giao dịch.
+
+## IPO SYSTEM
+
+Chuẩn bị kiến trúc IPO cho doanh nghiệp người chơi.
+
+IPO phải có:
+
+- Hồ sơ doanh nghiệp
+- Tổng số cổ phiếu trước IPO
+- Số cổ phiếu phát hành mới
+- Giá phát hành
+- Số tiền huy động
+- Tỷ lệ pha loãng
+- Danh sách cổ đông
+- Ngày bắt đầu giao dịch
+
+Không cần hoàn thiện IPO doanh nghiệp người chơi trước matching engine cốt lõi.
+
+# 7. REAL ESTATE EXCHANGE — BẤT ĐỘNG SẢN
+
+Tạo thị trường bất động sản online.
+
+Tên hệ thống:
+
+EMPIRE PROPERTY MARKET
+
+Mỗi World có số lượng bất động sản giới hạn.
+
+Tạo bốn khu vực giả tưởng:
+
+- Central Financial District
+- Riverside District
+- Industrial Zone
+- Luxury Bay
+
+Mỗi bất động sản có ID duy nhất và chủ sở hữu được ghi nhận.
+
+Các loại tài sản:
+
+- Apartment
+- House
+- Commercial Building
+- Office Tower
+- Factory
+- Development Land
+
+## GIAO DỊCH GIỮA NGƯỜI CHƠI
+
+Người A sở hữu một căn hộ.
+
+Người A niêm yết giá 250.000 CR.
+
+Người B muốn mua.
+
+Máy chủ kiểm tra số dư và quyền sở hữu.
+
+Nếu hợp lệ:
+
+- Trừ tiền người B.
+- Chuyển tiền cho người A sau khi tính phí.
+- Chuyển ownership của bất động sản.
+- Ghi transaction ledger.
+- Gỡ listing đã bán.
+- Thông báo realtime.
+- Cập nhật tài sản ròng của hai người.
+
+Không cho phép một bất động sản được bán thành công cho hai người khác nhau.
+
+## ĐẤU GIÁ ĐẤT
+
+Hỗ trợ:
+
+- Auction Starting Price
+- Minimum Bid Increment
+- Highest Bid
+- Auction End Time
+- Reserve Price
+- Bid History
+- Winning Bidder
+
+Tất cả thời gian do server kiểm soát.
+
+Tiền đặt giá phải được kiểm tra và phong tỏa theo quy tắc.
+
+Khi bị vượt giá, hoàn trả phần phong tỏa phù hợp.
+
+Không cho phép tự ý chỉnh thời gian kết thúc đấu giá từ trình duyệt.
+
+## GIÁ BẤT ĐỘNG SẢN
+
+Giá phụ thuộc vào:
+
+- Giá giao dịch gần nhất
+- Vị trí
+- Loại bất động sản
+- Nhu cầu thuê mô phỏng
+- Doanh nghiệp trong khu vực
+- Chi phí bảo trì
+- Sự kiện kinh tế
+- Nhu cầu người chơi
+
+Phải phân biệt:
+
+Listing Price
+Last Sale Price
+Estimated Value
+
+Không tự coi giá người bán tự đặt là giá thị trường đã được xác minh.
+
+## CHO THUÊ
+
+Chủ sở hữu có thể niêm yết cho thuê.
+
+Giai đoạn prototype có thể dùng NPC Tenant Demand có quy tắc rõ ràng.
+
+Tiền thuê phải đến từ tài khoản NPC được cấp ngân sách theo mô hình kinh tế và được ghi vào ledger.
+
+Tính:
+
+Gross Rent
+Maintenance
+Property Tax
+Net Rental Income
+
+Tài sản không phải lúc nào cũng có người thuê.
+
+Phải mô phỏng Vacancy Rate.
+
+# 8. BUSINESS EMPIRE — DOANH NGHIỆP NGƯỜI CHƠI
+
+Người chơi có thể thành lập doanh nghiệp.
+
+Tên hệ thống:
+
+EMPIRE BUSINESS NETWORK
+
+Các lĩnh vực kinh doanh:
+
+Technology
+Manufacturing
+Logistics
+Real Estate Development
+Financial Services
+Retail
+Energy
+
+Mỗi doanh nghiệp có:
+
+- Company ID
+- Founder
+- CEO
+- Shareholders
+- Ownership Percentage
+- Company Cash
+- Revenue
+- Expenses
+- Assets
+- Debt
+- Employees hoặc NPC Workforce
+- Profit
+- Company Valuation
+- Business Reputation
+
+## CƠ CHẾ KINH DOANH
+
+Người chơi chọn ngành nghề và thành lập công ty bằng vốn CR.
+
+Công ty có tài khoản riêng, không trộn với tiền cá nhân.
+
+Doanh thu từ hoạt động NPC phải có mô hình cầu tiêu dùng, chi phí sản xuất và giới hạn năng lực.
+
+Không tự động tăng tài sản mỗi giây mà không có chi phí hoặc rủi ro.
+
+Doanh nghiệp có thể:
+
+- Mua tài sản
+- Thuê bất động sản
+- Đầu tư mở rộng
+- Vay ngân hàng
+- Tuyển nhân viên NPC
+- Hợp tác với doanh nghiệp khác
+- Chia cổ phần cho người chơi
+- Phân phối lợi nhuận hợp lệ
+
+## DOANH NGHIỆP PHÁ SẢN
+
+Khi doanh nghiệp không đủ khả năng chi trả:
+
+- Ghi nhận tình trạng khó khăn.
+- Tạm dừng một số giao dịch.
+- Xử lý nghĩa vụ nợ theo thứ tự ưu tiên.
+- Cho phép tái cơ cấu nếu đủ điều kiện.
+- Có thể thanh lý tài sản.
+
+Không xóa khoản nợ hoặc tạo tiền mới chỉ để tránh phá sản.
+
+Giai đoạn đầu có thể triển khai Business Lite với thành lập công ty, doanh thu/chi phí cơ bản và quản lý tiền mặt.
+
+Các tính năng IPO, M&A và phá sản phức tạp triển khai sau khi hệ thống sở hữu và ledger ổn định.
+
+# 9. EMPIRE BANK — NGÂN HÀNG TRONG GAME
+
+Tạo ngân hàng mô phỏng.
+
+Các chức năng:
+
+- Current Account
+- Savings Account
+- Term Deposit
+- Loan Application
+- Loan Repayment
+- Credit History
+- Interest Statement
+
+## GỬI TIẾT KIỆM
+
+Người chơi gửi một phần CR vào ngân hàng.
+
+Tiền gửi chuyển từ ví khả dụng sang nghĩa vụ tiền gửi của ngân hàng.
+
+Không đồng thời giữ toàn bộ số tiền trong ví khả dụng và tài khoản tiết kiệm.
+
+Tính lãi theo thời gian mô phỏng.
+
+Lãi suất do ngân hàng trung ương của World quy định hoặc do mô hình ngân hàng xác định.
+
+Phải có nguồn chi trả lãi rõ ràng.
+
+## VAY VỐN
+
+Người chơi có thể xin vay theo hạn mức.
+
+Điều kiện phụ thuộc vào:
+
+- Tổng tài sản
+- Thu nhập
+- Khoản nợ đang có
+- Lịch sử thanh toán
+- Giá trị tài sản thế chấp
+- Khả năng thanh toán
+
+Tính:
+
+Loan Principal
+Annual Interest Rate
+Repayment Schedule
+Outstanding Balance
+Collateral
+Default Status
+
+Phải hạn chế đòn bẩy quá mức.
+
+Không triển khai vay ký quỹ và thanh lý tự động cho cổ phiếu, crypto ở phiên bản đầu.
+
+## NGÂN HÀNG TRUNG ƯƠNG
+
+World có Central Bank mô phỏng.
+
+Các chỉ số:
+
+- Policy Interest Rate
+- Money Supply
+- Inflation Indicator
+- Employment Indicator
+- Economic Growth
+- Banking Liquidity
+
+Khi lãi suất thay đổi, tác động đến lãi vay, lãi tiết kiệm và quyết định của các AI Economic Agents.
+
+Không đặt quy tắc máy móc kiểu "giảm lãi suất thì mọi cổ phiếu chắc chắn tăng".
+
+# 10. GLOBAL ECONOMY SIMULATION
+
+Đây là bộ máy giúp thế giới có cảm giác sống động.
+
+Tạo một Economy Engine chạy trên server.
+
+Các biến trạng thái:
+
+- Money Supply
+- Household Spending
+- Business Investment
+- Consumer Demand
+- Credit Growth
+- Inflation
+- Employment
+- Interest Rate
+- Asset Market Volatility
+- Liquidity
+- Economic Confidence
+
+## ECONOMIC CYCLE
+
+Có các trạng thái:
+
+EXPANSION
+BOOM
+SLOWDOWN
+RECESSION
+RECOVERY
+
+Mỗi trạng thái thay đổi:
+
+- Nhu cầu tiêu dùng NPC
+- Tỷ lệ doanh nghiệp tăng trưởng
+- Khả năng trả nợ
+- Mức chi tiêu
+- Hành vi Market Maker
+- Kỳ vọng của Investor Bots
+
+Không bắt buộc mọi yếu tố cùng tăng hoặc cùng giảm.
+
+## ECONOMIC EVENTS
+
+Ví dụ sự kiện:
+
+"Central Bank Raises Interest Rate by 0.5%"
+
+"Technology Sector Reports Strong Earnings"
+
+"Energy Prices Surge"
+
+"Banking Sector Faces Liquidity Pressure"
+
+"Consumer Demand Weakens"
+
+"Manufacturing Sector Recovers"
+
+"New Infrastructure Project Announced"
+
+Mỗi sự kiện cần có:
+
+- Event ID
+- Event Type
+- Start Time
+- End Time
+- Economic Variables Affected
+- Magnitude
+- Affected Sectors
+- Public News Content
+- System Audit Record
+
+Tin tức có thể ảnh hưởng đến quyết định của NPC investors.
+
+Không tự tạo lịch sử giao dịch để thể hiện tác động của sự kiện.
+
+## AI NEWS SYSTEM
+
+Tạo một bản tin tài chính nội bộ trong game.
+
+Ví dụ:
+
+"Nova Technologies công bố lợi nhuận quý tăng 14%, giới đầu tư mô phỏng nâng kỳ vọng tăng trưởng."
+
+Tin phải xuất phát từ kết quả mô phỏng thực sự.
+
+Không được viết tin rằng một doanh nghiệp có lợi nhuận cao khi số liệu hệ thống cho thấy doanh nghiệp thua lỗ.
+
+Nếu chưa dùng Gemini API thì tạo hệ thống tin tức bằng template và dữ liệu economy events.
+
+Chuẩn bị NewsProvider interface để tích hợp AI về sau.
+
+# 11. MULTIPLAYER ONLINE WORLD
+
+Đây là hệ thống tối quan trọng thứ hai sau matching engine.
+
+Mọi người chơi phải cùng tương tác với một thế giới chung.
+
+## CHẾ ĐỘ KẾT NỐI
+
+CLIENT → AUTHORITATIVE SERVER → SHARED WORLD STATE
+
+Khi một người đặt lệnh:
+
+- Client gửi yêu cầu.
+- Server kiểm tra.
+- Server xử lý.
+- Server phát trade event.
+- Tất cả client liên quan cập nhật.
+
+Không sử dụng cách client tự sửa số tiền rồi gửi giá trị mới lên server.
+
+## REALTIME EVENTS
+
+Thiết kế các event:
+
+world.snapshot
+world.status
+player.joined
+player.left
+market.quote.updated
+market.orderbook.updated
+market.trade.executed
+market.candle.updated
+order.created
+order.partially_filled
+order.filled
+order.cancelled
+portfolio.updated
+balance.updated
+property.listed
+property.sold
+auction.bid_placed
+auction.ended
+company.updated
+economy.event
+news.published
+chat.message
+leaderboard.updated
+
+Mỗi event có:
+
+eventId
+eventType
+worldId
+sequenceNumber
+serverTimestamp
+payload
+
+Sử dụng sequence number để phát hiện thiếu sự kiện.
+
+Client cần tải lại snapshot sau khi reconnect nếu không thể đồng bộ đầy đủ từ các sự kiện đã bỏ lỡ.
+
+## ONLINE PLAYERS
+
+Hiển thị số kết nối đang hoạt động do server đếm.
+
+Không được random online count.
+
+Nếu có 3 người thì hiển thị 3 người, không giả thành 3.000.
+
+Có thể hiển thị riêng:
+
+"Online Players"
+"Simulated Economic Agents"
+
+## CHAT
+
+Xây dựng chat chung:
+
+- World Chat
+- Market Chat
+- Private Message có thể để giai đoạn sau
+
+Yêu cầu:
+
+- Giới hạn tần suất chat.
+- Chặn nội dung spam.
+- Báo cáo người dùng.
+- Không cho chèn HTML/script.
+- Không hiển thị dữ liệu tài khoản nhạy cảm.
+
+Chat phải hoạt động giữa các client cùng kết nối máy chủ.
+
+## LEADERBOARD
+
+Có bảng xếp hạng:
+
+- Net Worth
+- Weekly Portfolio Return
+- Business Revenue
+- Property Portfolio Value
+- Trading Volume
+- Long-Term Investment Performance
+
+Không chỉ xếp hạng người có lợi nhuận cao trong vài phút.
+
+Đối với danh mục lợi nhuận, cần phân biệt lợi nhuận từ đầu tư và tiền mới nhận từ hệ thống.
+
+# 12. ENTERTAINMENT ZONE
+
+Chuẩn bị một khu mini-game giải trí mang phong cách casino, nhưng chỉ sử dụng Entertainment Chips riêng.
+
+Không dùng CR để đánh cược.
+
+Entertainment Chips:
+
+- Được cấp miễn phí theo quy tắc.
+- Không mua bằng tiền thật.
+- Không chuyển cho người chơi khác.
+- Không đổi sang CR.
+- Không đổi thành bất động sản, cổ phiếu hay tài sản có giá trị.
+- Không rút hoặc quy đổi ra ngoài game.
+
+Có thể phát triển các trò chơi xác suất mô phỏng để giải trí và học về xác suất, với luật và tỷ lệ thắng công khai.
+
+Không tích hợp casino vào vòng lặp kiếm tiền chính.
+
+Khu này không được ưu tiên hơn exchange, economy engine và multiplayer.
+
+# 13. GAME PROGRESSION & BALANCING
+
+Tạo hệ thống cấp độ dựa trên hoạt động hợp lệ.
+
+Ví dụ:
+
+- First Trade
+- First 100,000 CR Net Worth
+- First Property
+- First Company
+- First Dividend
+- Diversified Investor
+- Successful Entrepreneur
+- Long-Term Investor
+
+Không thưởng EXP chỉ dựa trên số lượng lệnh spam.
+
+Không khuyến khích người chơi giao dịch liên tục chỉ để tăng level.
+
+Các thành tựu không được tạo lợi thế tài chính quá lớn.
+
+Không Pay To Win.
+
+Không lootbox trả phí.
+
+Không có gói đầu tư cam kết lợi nhuận.
+
+# 14. UI/UX — PREMIUM FINANCIAL TERMINAL
+
+Thiết kế giao diện theo phong cách:
+
+MODERN INSTITUTIONAL FINANCIAL TERMINAL
+
+Cảm hứng tổng thể:
+
+- Professional Trading Terminal
+- Premium Fintech Banking Dashboard
+- Modern Investment Platform
+- High-End SaaS Application
+
+Không sao chép nguyên bản thương hiệu hoặc giao diện của bất kỳ sàn nào.
+
+## QUAN ĐIỂM THIẾT KẾ
+
+Website phải trông như một sản phẩm thương mại được thiết kế bởi đội UI/UX chuyên nghiệp.
+
+Không tạo cảm giác website được AI dựng từ các component mặc định.
+
+Không dùng quá nhiều gradient, glow, neon, glassmorphism hoặc animation vô nghĩa.
+
+Tránh:
+
+- Quá nhiều nút trên một màn hình.
+- Card lồng card.
+- Khoảng trắng thiếu kiểm soát.
+- Text quá nhỏ.
+- Icon không đồng nhất.
+- Viền sáng xung quanh mọi thành phần.
+- Dashboard chứa toàn số giả.
+- Hiệu ứng chuyển động gây mất tập trung.
+
+Ưu tiên:
+
+- Phân cấp thông tin rõ ràng.
+- Nút quan trọng dễ nhận biết.
+- Typography chuyên nghiệp.
+- Data density cao nhưng dễ đọc.
+- Khoảng cách cân đối.
+- Thiết kế tối giản.
+- Tương tác có phản hồi rõ ràng.
+
+## DESIGN TOKENS
+
+Dark Theme mặc định:
+
+App Background: #0B0F17
+
+Sidebar Background: #101722
+
+Panel Background: #151E2B
+
+Secondary Surface: #1C2735
+
+Border: #283446
+
+Primary Text: #EDF3F8
+
+Secondary Text: #92A0B2
+
+Accent: #39B8AD
+
+Positive: #22C55E
+
+Negative: #EF5555
+
+Warning: #F5B942
+
+Font:
+
+Inter hoặc Geist cho giao diện.
+
+Dùng font mono cho mã giao dịch, Order ID và các trường số kỹ thuật khi thích hợp.
+
+Các số tiền phải được canh phải và dùng tabular numerals.
+
+Thiết kế hỗ trợ cả Dark Mode và Light Mode, nhưng ưu tiên hoàn thiện Dark Mode.
+
+# 15. APP NAVIGATION
+
+Dùng một sidebar có thể thu gọn.
+
+Các mục chính:
+
+OVERVIEW
+
+MARKETS
+- Crypto
+- Stocks
+
+PORTFOLIO
+
+PROPERTY
+
+BUSINESS
+
+BANKING
+
+SOCIAL
+
+LEADERBOARD
+
+ECONOMY NEWS
+
+SETTINGS
+
+Không bắt người dùng mở nhiều trang chỉ để thực hiện một giao dịch.
+
+Các chức năng ít dùng có thể nằm trong menu phụ hoặc tab.
+
+Top Bar hiển thị:
+
+- Trading Empire Logo
+- World-01
+- Server Connection Status
+- Online Players
+- Game Clock
+- Notifications
+- Player Avatar
+
+Không chiếm quá nhiều chiều cao màn hình.
+
+# 16. DASHBOARD — HOME SCREEN
+
+Sau khi đăng nhập Guest, người chơi nhìn thấy:
+
+## TOP SUMMARY
+
+Total Net Worth
+
+Available CR
+
+24h Profit/Loss
+
+Portfolio Return
+
+Total Assets
+
+Total Debt
+
+## MAIN CHART
+
+Biểu đồ tổng tài sản theo thời gian.
+
+Có mốc:
+
+24H
+7D
+30D
+ALL
+
+Biểu đồ phải thể hiện dữ liệu người chơi thực tế hoặc dữ liệu lịch sử demo có nhãn.
+
+## MARKET OVERVIEW
+
+Crypto Movers
+
+Stock Movers
+
+Most Traded Assets
+
+Market Status
+
+## QUICK ACTIONS
+
+Trade Crypto
+Trade Stocks
+View Portfolio
+Explore Properties
+
+Chỉ hiển thị các hành động quan trọng.
+
+## LIVE ECONOMY
+
+Economic Phase
+
+Central Bank Interest Rate
+
+Inflation Indicator
+
+World News
+
+## ACTIVITY FEED
+
+Liệt kê:
+
+- Recent Personal Transactions
+- Corporate Dividends
+- Property Income
+- Pending Orders
+- Economic Notifications
+
+Tất cả phải có nguồn dữ liệu thật từ game state.
+
+# 17. EXCHANGE TRADING SCREEN
+
+Đây phải là màn hình chất lượng cao nhất.
+
+Thiết kế cho màn hình desktop khoảng 1440px trở lên.
+
+## KHU VỰC TRÊN CÙNG
+
+Hiển thị:
+
+Symbol
+Company/Crypto Name
+Last Price
+24h Price Change
+24h High
+24h Low
+24h Volume
+Market Status
+
+## KHU VỰC CHÍNH
+
+LEFT/CENTER:
+
+Candlestick Chart
+
+RIGHT:
+
+Order Book
+
+BOTTOM / SIDE:
+
+Order Placement Panel
+
+LOWER SECTION:
+
+Open Orders
+Order History
+Trade History
+Holdings
+
+Tạo một bố cục linh hoạt, ưu tiên chart và order book.
+
+Không tạo một dashboard gồm 20 card nhỏ.
+
+## CHART FEATURES
+
+- Zoom
+- Pan
+- Crosshair
+- Price Axis
+- Time Axis
+- Volume Histogram
+- Timeframe Selection
+- Asset Switching
+- Current Price Marker
+- Proper Loading State
+- Empty State
+- Live Update
+
+Không cần phát triển hàng chục indicators ngay từ đầu.
+
+Có thể bổ sung:
+
+SMA
+EMA
+Volume
+
+Nếu chỉ báo không đúng về mặt toán học, không triển khai.
+
+## ORDER BOOK UI
+
+Hiển thị:
+
+Price
+Quantity
+Total
+
+Phân tách Bid và Ask.
+
+Tô nền chiều sâu thị trường bằng màu rất nhẹ.
+
+Không lạm dụng màu neon.
+
+Giữa hai phía hiển thị Spread và Last Price.
+
+Khi có giao dịch:
+
+- Dữ liệu thay đổi đúng.
+- Animation nhẹ.
+- Không re-render toàn bộ trang không cần thiết.
+
+## BUY/SELL PANEL
+
+Hai tab:
+
+BUY
+SELL
+
+Các loại lệnh:
+
+MARKET
+LIMIT
+
+Input:
+
+Price
+Quantity
+Total
+
+Hiển thị:
+
+Available Balance
+Estimated Fee
+Estimated Execution
+Expected Slippage
+Order Value
+
+Nút:
+
+PLACE BUY ORDER
+PLACE SELL ORDER
+
+Sau khi đặt:
+
+- Hiển thị pending.
+- Chờ phản hồi máy chủ.
+- Hiển thị lệnh thành công hoặc thất bại.
+- Không tự cộng tài sản trước khi nhận xác nhận.
+- Không tạo toast thành công nếu server trả lỗi.
+
+# 18. PORTFOLIO SCREEN
+
+Một trang quản lý tài sản chuyên nghiệp.
+
+## SUMMARY
+
+Net Worth
+
+Available Cash
+
+Invested Capital
+
+Unrealized P&L
+
+Realized P&L
+
+Total Return
+
+## PORTFOLIO ALLOCATION
+
+Biểu đồ phân bổ:
+
+Cash
+Crypto
+Stocks
+Properties
+Business Equity
+
+## HOLDINGS TABLE
+
+Asset
+Quantity
+Average Cost
+Current Price
+Market Value
+Unrealized P&L
+Percentage Change
+
+Cho phép mở nhanh giao dịch từ từng tài sản.
+
+## HISTORY
+
+Transaction History
+
+Deposit/Withdrawal between internal accounts
+
+Dividends
+
+Property Purchases
+
+Bank Interest
+
+Fees
+
+Lịch sử phải khớp với ledger.
+
+# 19. PROPERTY MARKET UI
+
+Thiết kế giao diện như một sàn bất động sản cao cấp.
+
+Bộ lọc:
+
+District
+Property Type
+Price Range
+Rental Yield
+Listing Status
+
+Mỗi tài sản có:
+
+- Hình minh họa hoặc đồ họa được chuẩn bị hợp pháp
+- Property ID
+- Name
+- District
+- Price
+- Estimated Value
+- Owner
+- Listing Status
+- Estimated Rental Yield
+
+Có trang chi tiết.
+
+Actions:
+
+BUY
+SELL
+LIST FOR SALE
+BID
+RENT OUT
+
+Chỉ hiển thị hành động hợp lệ theo ownership.
+
+Nếu người dùng chưa có đủ CR, giải thích cụ thể.
+
+Nếu listing đã được mua bởi người khác, thông báo rõ và cập nhật ngay.
+
+# 20. BUSINESS MANAGEMENT UI
+
+Giao diện quản lý doanh nghiệp gồm:
+
+Company Overview
+
+Financial Performance
+
+Cash Flow
+
+Operations
+
+Ownership
+
+Expansion
+
+Banking
+
+Cho người chơi:
+
+- Thành lập doanh nghiệp.
+- Xem doanh thu và chi phí.
+- Điều chỉnh mức đầu tư theo quy tắc.
+- Xem lợi nhuận.
+- Phân tích hiệu quả hoạt động.
+
+Không sử dụng số liệu doanh thu tự tăng ngẫu nhiên.
+
+Các quyết định kinh doanh phải đi vào economy engine.
+
+# 21. BANKING UI
+
+Thiết kế giống ứng dụng ngân hàng hiện đại.
+
+Các phần:
+
+Cash Account
+
+Savings
+
+Loans
+
+Payment History
+
+Interest Schedule
+
+Cho phép:
+
+Deposit CR
+Withdraw CR
+Apply for Loan
+Repay Loan
+
+Không tạo giao diện chuyển tiền thực.
+
+Tất cả đều là giao dịch nội bộ game.
+
+# 22. RESPONSIVE DESIGN
+
+DESKTOP:
+
+Giao diện trading terminal đầy đủ.
+
+TABLET:
+
+Sidebar thu gọn, các khu vực sắp xếp lại.
+
+MOBILE:
+
+Ưu tiên:
+
+- Giá và biểu đồ
+- Nút Buy/Sell
+- Order Panel
+- Holdings
+- Order History
+
+Order Book có thể chuyển vào tab riêng.
+
+Các bảng dài phải có horizontal scrolling hợp lý.
+
+Không ép người dùng mobile phải nhìn toàn bộ desktop UI thu nhỏ.
+
+Mọi chức năng quan trọng phải dùng được bằng cảm ứng.
+
+# 23. SOFTWARE ARCHITECTURE
+
+Bắt buộc tách thành các lớp rõ ràng.
+
+## PRESENTATION LAYER
+
+React components
+Pages
+Layouts
+UI Hooks
+State Management
+
+## APPLICATION LAYER
+
+TradingService
+PortfolioService
+PropertyService
+BusinessService
+BankingService
+EconomyService
+LeaderboardService
+NotificationService
+
+## DOMAIN LAYER
+
+Order
+Trade
+OrderBook
+Wallet
+LedgerEntry
+Asset
+Market
+Property
+Company
+Loan
+EconomyEvent
+
+## INFRASTRUCTURE LAYER
+
+HTTP Client
+Realtime Transport
+InMemory Repositories
+External API Adapters
+Persistence Adapters
+
+Không đặt toàn bộ logic trong App.tsx.
+
+Không sử dụng một file hàng nghìn dòng chứa toàn bộ ứng dụng.
+
+## REPOSITORY STRUCTURE
+
+Đề xuất:
+
+src/
+  app/
+  components/
+  features/
+    dashboard/
+    exchange/
+    portfolio/
+    property/
+    business/
+    banking/
+    social/
+    leaderboard/
+  hooks/
+  services/
+  domain/
+  repositories/
+  adapters/
+  lib/
+  styles/
+  types/
+
+server/
+  api/
+  realtime/
+  engine/
+    matching/
+    economy/
+    market-makers/
+    settlement/
+  domain/
+  services/
+  repositories/
+    memory/
+  security/
+  seed/
+  tests/
+
+shared/
+  contracts/
+  schemas/
+  events/
+
+docs/
+  ARCHITECTURE.md
+  ECONOMY_RULES.md
+  API_CONTRACTS.md
+  DATABASE_HANDOFF.md
+  BACKEND_HANDOFF.md
+  TEST_REPORT.md
+
+Điều chỉnh cấu trúc nếu cần nhưng phải giữ ranh giới trách nhiệm.
+
+# 24. SERVICE INTERFACES CHO GPT TÍCH HỢP SAU
+
+Thiết kế các interface hoặc abstract contracts tương đương:
+
+IAuthProvider
+
+IWorldRepository
+
+IPlayerRepository
+
+IWalletRepository
+
+ILedgerRepository
+
+IOrderRepository
+
+ITradeRepository
+
+IAssetRepository
+
+IMarketDataProvider
+
+IPropertyRepository
+
+ICompanyRepository
+
+ILoanRepository
+
+IEventBus
+
+IRealtimeTransport
+
+INewsProvider
+
+Prototype sử dụng InMemory adapters.
+
+Sau này GPT có thể thay bằng database và backend adapters.
+
+Không cho component React phụ thuộc trực tiếp vào cấu trúc lưu trữ.
+
+Ví dụ:
+
+Exchange UI gọi TradingService.
+
+TradingService gửi OrderCommand lên server.
+
+Server gọi MatchingEngine.
+
+MatchingEngine sử dụng WalletRepository và OrderRepository.
+
+SettlementService ghi nhận kết quả giao dịch.
+
+RealtimeTransport phát sự kiện.
+
+Exchange UI nhận dữ liệu cập nhật.
+
+Không cho Exchange UI tự tính toán việc khớp lệnh hoặc tự sửa số dư.
+
+# 25. API CONTRACTS
+
+Ngay trong giai đoạn prototype, thiết kế các route nội bộ để GPT tiếp tục sử dụng.
+
+Ví dụ:
+
+GET /api/world
+
+GET /api/world/snapshot
+
+GET /api/markets
+
+GET /api/markets/:symbol
+
+GET /api/markets/:symbol/orderbook
+
+GET /api/markets/:symbol/trades
+
+GET /api/markets/:symbol/candles
+
+POST /api/orders
+
+GET /api/orders
+
+DELETE /api/orders/:id
+
+GET /api/portfolio
+
+GET /api/wallet
+
+GET /api/ledger
+
+GET /api/properties
+
+GET /api/properties/:id
+
+POST /api/properties/:id/listings
+
+POST /api/properties/:id/buy
+
+POST /api/auctions/:id/bids
+
+GET /api/companies
+
+POST /api/companies
+
+GET /api/economy
+
+GET /api/news
+
+GET /api/leaderboard
+
+GET /api/health
+
+Có thể điều chỉnh URL theo REST conventions.
+
+Yêu cầu:
+
+- Dữ liệu JSON nhất quán.
+- Request validation bằng schema.
+- Response có error code rõ ràng.
+- Pagination cho lịch sử dài.
+- Không trả thông tin nhạy cảm.
+- Server không tin playerId do client tùy ý gửi.
+- Gắn idempotency key cho giao dịch thay đổi tài sản.
+- Timestamp do server sinh.
+- Có version cho API contracts.
+
+## ERROR HANDLING
+
+Ví dụ lỗi:
+
+INSUFFICIENT_FUNDS
+
+INSUFFICIENT_ASSET_BALANCE
+
+MARKET_CLOSED
+
+INVALID_ORDER
+
+INVALID_PRICE
+
+ORDER_NOT_FOUND
+
+ORDER_ALREADY_FILLED
+
+PROPERTY_ALREADY_SOLD
+
+AUCTION_ENDED
+
+RATE_LIMITED
+
+WORLD_UNAVAILABLE
+
+SERVER_ERROR
+
+UI phải hiển thị thông báo tiếng Việt dễ hiểu tương ứng từng lỗi.
+
+# 26. SECURITY & ANTI-CHEAT
+
+Đây là trò chơi có nền kinh tế dùng chung, nên gian lận có thể làm hỏng cả World.
+
+## BẮT BUỘC
+
+Không tin dữ liệu tài chính từ client.
+
+Không để client chỉnh:
+
+- Wallet Balance
+- Asset Holdings
+- Net Worth
+- Order Status
+- Filled Quantity
+- Execution Price
+- Property Ownership
+- Company Cash
+- Loan Principal
+
+Client chỉ gửi yêu cầu.
+
+Server kiểm tra và quyết định kết quả.
+
+## DEMO SECURITY
+
+Trong giai đoạn chưa có Auth thật, tạo Demo Session Provider có giới hạn.
+
+Không gọi đây là bảo mật production.
+
+Không cho demo session truy cập tài khoản khác chỉ bằng cách thay playerId trong request.
+
+Chuẩn bị interface để bổ sung xác thực mạnh về sau.
+
+## PHÁT HIỆN GIAN LẬN
+
+Theo dõi:
+
+- Spam Orders
+- Suspicious Trading Patterns
+- Self Trading
+- Excessive Requests
+- Invalid Ownership Claims
+- Duplicate Transactions
+- Extreme Order Sizes
+
+Không kết luận hành vi gian lận chỉ từ một tín hiệu đơn lẻ.
+
+Ghi audit log để phục vụ kiểm tra.
+
+# 27. GAME ECONOMY MATHEMATICAL INTEGRITY
+
+Xây dựng các invariant bắt buộc.
+
+INVARIANT 1:
+
+Không có số dư tiền khả dụng âm.
+
+INVARIANT 2:
+
+Không có lượng tài sản khả dụng âm.
+
+INVARIANT 3:
+
+Một giao dịch hợp lệ không được tạo ra tiền từ hư không, ngoại trừ những tài khoản phát hành hệ thống được khai báo rõ.
+
+INVARIANT 4:
+
+Tổng lượng cổ phiếu sau giao dịch giữa hai bên không thay đổi.
+
+INVARIANT 5:
+
+Mỗi bất động sản có đúng một chủ sở hữu có hiệu lực tại một thời điểm.
+
+INVARIANT 6:
+
+Một Order ID không được settle trùng.
+
+INVARIANT 7:
+
+Lệnh bị hủy phải giải phóng phần tiền hoặc tài sản còn phong tỏa.
+
+INVARIANT 8:
+
+Tổng lượng bán đã khớp không thể vượt tổng lượng đặt bán hợp lệ.
+
+INVARIANT 9:
+
+Tổng lượng mua đã khớp không thể vượt tổng lượng đặt mua hợp lệ.
+
+INVARIANT 10:
+
+Giá khớp lệnh phải tuân theo matching rules.
+
+INVARIANT 11:
+
+Tài sản của người chơi và tài sản của doanh nghiệp là hai bảng cân đối riêng biệt.
+
+INVARIANT 12:
+
+Mọi nguồn phát hành và tiêu hủy CR phải có transaction record.
+
+# 28. PERFORMANCE
+
+Mục tiêu bản thử nghiệm:
+
+- Chạy ổn định với 2 đến 50 kết nối đồng thời trên một server thử nghiệm đủ tài nguyên.
+- Giao dịch giữa hai client cập nhật gần realtime.
+- Không block UI khi order book cập nhật.
+- Không tạo memory leak vì listener không được cleanup.
+- Không tải lại toàn bộ dữ liệu lịch sử sau mỗi trade.
+- Không phát lại mọi candle sau mỗi tick.
+- Chỉ subscribe vào market đang được xem.
+- Có cơ chế throttle hoặc batching cho UI updates.
+
+Mục tiêu độ trễ hiển thị dưới 1 giây trong môi trường thử nghiệm thuận lợi, không coi đây là SLA đã được bảo đảm.
+
+Đối với production hàng nghìn người, chuẩn bị kiến trúc sharding theo World hoặc Market nhưng chưa cần triển khai hạ tầng phân tán.
+
+# 29. DEMO SEED DATA
+
+Tạo bộ dữ liệu đủ để thử mọi tính năng.
+
+Bao gồm:
+
+- 8 công ty niêm yết giả tưởng.
+- 6 đồng crypto mô phỏng.
+- Tối thiểu 20 bất động sản.
+- 4 khu vực.
+- Các NPC Market Maker được cấp vốn rõ ràng.
+- Một số doanh nghiệp NPC.
+- Economic Calendar.
+- Historical Simulated Candles.
+- Một số Economic Events.
+- News Feed từ các event.
+
+## DEMO PLAYERS
+
+Tạo cách dễ dàng mở hai tài khoản Guest độc lập.
+
+Ví dụ:
+
+Trader Alice
+
+Trader Bob
+
+Có thể dùng hai cửa sổ trình duyệt hoặc chế độ riêng tư.
+
+Hai người phải quan sát cùng trạng thái server.
+
+Đừng tạo nhiều người chơi giả chỉ để làm đẹp leaderboard.
+
+NPC và người chơi thật phải được phân loại rõ.
+
+# 30. INTERACTIVE FUNCTIONAL REQUIREMENTS
+
+Mỗi nút phải có hành động rõ ràng.
+
+Không tạo nút chỉ để trang trí.
+
+Những hành động bắt buộc hoạt động:
+
+- Chuyển trang
+- Chọn tài sản
+- Thay đổi timeframe
+- Xem chart
+- Xem order book
+- Đặt Market Order
+- Đặt Limit Order
+- Hủy lệnh
+- Xem số dư
+- Xem danh mục
+- Xem lịch sử giao dịch
+- Xem bảng xếp hạng
+- Xem tin tức
+- Xem bất động sản
+- Niêm yết bất động sản
+- Mua bất động sản
+- Đấu giá
+- Tạo công ty nếu module đã được đánh dấu hoàn thiện
+- Gửi tiết kiệm nếu module ngân hàng đã được đánh dấu hoàn thiện
+- Chat giữa hai người chơi
+- Đổi theme
+- Responsive navigation
+
+Nếu chức năng nâng cao chưa được triển khai:
+
+Hiển thị trạng thái "Coming Soon" hoặc "Under Development" rõ ràng.
+
+Không giả vờ chức năng đã hoạt động.
+
+# 31. AUTOMATED TESTING
+
+Bắt buộc triển khai test cho domain logic.
+
+Ưu tiên Vitest hoặc framework phù hợp.
+
+## MATCHING ENGINE TESTS
+
+TEST 01:
+Limit Buy không khớp khi không có lệnh bán tương thích.
+
+TEST 02:
+Limit Sell không khớp khi không có lệnh mua tương thích.
+
+TEST 03:
+Hai lệnh tương thích khớp đúng.
+
+TEST 04:
+Lệnh khớp một phần.
+
+TEST 05:
+Lệnh ưu tiên giá tốt hơn.
+
+TEST 06:
+Hai lệnh cùng giá ưu tiên thời gian.
+
+TEST 07:
+Market Order dùng thanh khoản có sẵn.
+
+TEST 08:
+Market Order không có thanh khoản không sinh trade giả.
+
+TEST 09:
+Hủy Limit Order hoàn lại tài sản bị khóa.
+
+TEST 10:
+Không thể mua khi thiếu tiền.
+
+TEST 11:
+Không thể bán khi thiếu cổ phiếu.
+
+TEST 12:
+Không thể settle cùng một trade hai lần.
+
+TEST 13:
+Hai lệnh đồng thời không làm âm số dư.
+
+TEST 14:
+Phí giao dịch tính đúng.
+
+TEST 15:
+Chặn tự khớp lệnh cùng tài khoản.
+
+TEST 16:
+Order Book giữ thứ tự Price-Time Priority.
+
+TEST 17:
+Tất cả client thấy cùng Last Price.
+
+TEST 18:
+Candle mới phản ánh trade đã thực hiện.
+
+TEST 19:
+Client reconnect có thể tải lại snapshot.
+
+TEST 20:
+Malformed request không làm sập server.
+
+## PROPERTY TESTS
+
+TEST 21:
+Hai người không thể mua thành công cùng một bất động sản đã bán.
+
+TEST 22:
+Bất động sản chuyển quyền sở hữu đúng.
+
+TEST 23:
+Người bán nhận đúng số tiền sau phí.
+
+TEST 24:
+Người không sở hữu tài sản không thể niêm yết bán.
+
+TEST 25:
+Đấu giá quá hạn bị từ chối.
+
+## ECONOMY TESTS
+
+TEST 26:
+Cổ tức không vượt khả năng thanh toán.
+
+TEST 27:
+Tiền gửi ngân hàng không được tính trùng.
+
+TEST 28:
+Net Worth tính đúng từ các thành phần tài sản.
+
+TEST 29:
+Không có CR bị sinh ra trong giao dịch ngang hàng.
+
+TEST 30:
+Bot phải tuân thủ giới hạn tài sản.
+
+# 32. MANUAL MULTIPLAYER ACCEPTANCE TEST
+
+Tạo hướng dẫn kiểm tra có thể chạy bằng hai trình duyệt.
+
+Bước 1:
+
+Mở TRADING EMPIRE ở hai cửa sổ độc lập.
+
+Bước 2:
+
+Tạo Trader Alice và Trader Bob.
+
+Bước 3:
+
+Alice mở NOVA.
+
+Bước 4:
+
+Bob cũng mở NOVA.
+
+Bước 5:
+
+Alice đặt Limit Buy 10 cổ phiếu ở giá 50 CR.
+
+Bước 6:
+
+Order Book của Bob phải nhìn thấy lệnh mua này.
+
+Bước 7:
+
+Bob, với số cổ phiếu demo đã được cấp để kiểm thử, đặt Limit Sell 6 cổ phiếu ở giá 49 CR.
+
+Bước 8:
+
+Hai lệnh phải khớp.
+
+Bước 9:
+
+Alice nhận 6 cổ phiếu.
+
+Bước 10:
+
+Bob nhận tiền bán sau phí.
+
+Bước 11:
+
+Lệnh Alice còn 4 cổ phiếu chưa khớp.
+
+Bước 12:
+
+Cả hai cửa sổ cùng thấy Trade Event.
+
+Bước 13:
+
+Last Price cập nhật thành 50 CR theo resting-order pricing.
+
+Bước 14:
+
+Candle phản ánh giao dịch.
+
+Bước 15:
+
+Alice hủy phần lệnh còn lại.
+
+Bước 16:
+
+Hệ thống giải phóng số tiền còn phong tỏa.
+
+Bước 17:
+
+Tải lại trang và kiểm tra snapshot còn nhất quán trong vòng đời server.
+
+Bước 18:
+
+Ngắt kết nối mạng của một client.
+
+Bước 19:
+
+Kết nối lại.
+
+Bước 20:
+
+Client đồng bộ dữ liệu mới mà không tạo thêm giao dịch.
+
+Chỉ đánh dấu REALTIME MULTIPLAYER VERIFIED khi bài kiểm tra thực sự thành công.
+
+Nếu không thể thực hiện kiểm thử hai client trong môi trường hiện tại, phải ghi trạng thái NOT VERIFIED.
+
+# 33. DIAGNOSTICS & DEVELOPER TOOLS
+
+Tạo Developer Diagnostics ở chế độ phát triển.
+
+Hiển thị:
+
+- Server Status
+- WebSocket Status
+- Active Connections
+- World ID
+- Current Game Time
+- Event Sequence
+- Matching Engine Health
+- Total Orders
+- Total Trades
+- In-Memory State Version
+- Current Economy Cycle
+
+Có thể tạo nút Reset Demo World nhưng chỉ trong development, không cho Guest bình thường sử dụng trên server công khai.
+
+Có thể cung cấp Demo Trade Simulator cho QA bằng những tài khoản bot được kiểm soát.
+
+Không cho các lệnh debug có quyền cấp tiền hoặc chuyển tài sản xuất hiện trong UI production.
+
+# 34. BACKEND HANDOFF FOR GPT
+
+Tạo tài liệu BACKEND_HANDOFF.md.
+
+Tài liệu phải giải thích toàn bộ hệ thống đang chạy như thế nào.
+
+Bao gồm:
+
+1. Project Overview
+2. Full Source Structure
+3. Current Architecture
+4. Current In-Memory Data Models
+5. Order Matching Algorithm
+6. Wallet and Ledger Rules
+7. Realtime Event Contracts
+8. REST API Contracts
+9. Authentication Requirements
+10. Database Persistence Requirements
+11. External Market Data Integration Points
+12. Security Limitations
+13. Known Bugs
+14. Incomplete Features
+15. Production Migration Checklist
+
+## DATABASE_HANDOFF
+
+Mô tả schema đề xuất cho:
+
+users
+worlds
+players
+wallets
+wallet_balances
+assets
+asset_holdings
+orders
+trades
+ledger_accounts
+ledger_entries
+market_candles
+properties
+property_listings
+property_auctions
+companies
+company_shareholders
+loans
+bank_accounts
+economy_events
+news
+notifications
+sessions
+audit_logs
+
+Không cần kết nối database ở bước này.
+
+Nhưng cần định nghĩa quan hệ, khóa chính, khóa ngoại, trạng thái và yêu cầu nhất quán.
+
+## EXTERNAL API HANDOFF
+
+Tạo interface cho:
+
+ExternalCryptoPriceProvider
+
+ExternalStockMarketDataProvider
+
+ExternalNewsProvider
+
+ExternalAIAnalysisProvider
+
+ExternalAuthenticationProvider
+
+Các provider bên ngoài mặc định Disabled.
+
+Không được tự động gọi API thật.
+
+Thiết kế rõ cách phân biệt:
+
+LIVE EXTERNAL REFERENCE DATA
+
+và
+
+SIMULATED IN-GAME MARKET DATA
+
+Giá tham chiếu bên ngoài sau này không được ghi đè các giao dịch đã thực hiện trong thế giới game.
+
+# 35. DEPLOYMENT READINESS
+
+Ứng dụng cần có khả năng:
+
+- Build thành công.
+- Chạy local development.
+- Preview trong Google AI Studio.
+- Xuất mã nguồn sang GitHub.
+- Cấu hình environment variables.
+- Tách frontend khỏi backend nếu cần.
+- Chuyển backend sang kiến trúc production sau này.
+
+Không khóa các phần quan trọng vào API riêng của AI Studio.
+
+Không yêu cầu database hoặc API ngoài để frontend có thể khởi động.
+
+## SERVER SCALING LIMITATION
+
+Bản in-memory prototype chỉ an toàn cho một authoritative server instance.
+
+Không tuyên bố hỗ trợ nhiều server độc lập đồng bộ dữ liệu nếu chưa có shared durable backend.
+
+Sau này GPT sẽ chịu trách nhiệm:
+
+- Persistent Database
+- Authentication
+- Distributed Realtime
+- Authoritative Matching Coordination
+- Event Recovery
+- Durable Ledger
+- Production Observability
+- Rate Limiting
+- Backups
+- Cloud Deployment
+
+# 36. IMPLEMENTATION PRIORITY
+
+Không được triển khai 15 màn hình đẹp nhưng không có logic.
+
+Hãy làm theo thứ tự:
+
+## PHASE 1 — APP FOUNDATION
+
+- React Application
+- Theme
+- Layout
+- Navigation
+- Guest Session
+- Shared Domain Types
+- Server Runtime
+- World State
+- Client/Server Communication
+
+## PHASE 2 — FINANCIAL CORE
+
+- Wallet
+- Ledger
+- Assets
+- Order Book
+- Matching Engine
+- Limit Orders
+- Market Orders
+- Trade Settlement
+- Real-Time Events
+- Core Unit Tests
+
+Đây là giai đoạn bắt buộc phải hoàn thiện nhất.
+
+## PHASE 3 — EXCHANGE TERMINAL
+
+- Crypto Market
+- Stock Market
+- Candlestick Chart
+- Market Depth
+- Order Placement
+- Open Orders
+- Portfolio
+- Trading History
+
+## PHASE 4 — ECONOMY SIMULATION
+
+- Economic Calendar
+- Market Makers
+- Market Sentiment
+- Company Fundamentals
+- Economic Events
+- News Feed
+
+## PHASE 5 — MULTIPLAYER WORLD
+
+- Multi-Client Verification
+- Online Players
+- Shared Leaderboard
+- World Chat
+- Reconnection
+- Snapshot Synchronization
+
+## PHASE 6 — ADDITIONAL ECONOMY
+
+- Property Listings
+- Property Transactions
+- Auctions
+- Business Lite
+- Banking Lite
+
+## PHASE 7 — QA & REFINEMENT
+
+- Automated Tests
+- Edge Cases
+- UI Responsiveness
+- Performance
+- Accessibility
+- Documentation
+- Backend Handoff
+
+Không đánh dấu phase hoàn thành nếu các acceptance criteria chưa đạt.
+
+Nếu bị giới hạn thời gian hoặc môi trường, hãy hoàn thiện một phase có thể chạy và kiểm thử thay vì tạo placeholder cho tất cả phase.
+
+# 37. EXPECTED FINAL OUTPUT
+
+Tôi yêu cầu bạn tạo mã nguồn thực tế, không chỉ viết kế hoạch.
+
+Khi kết thúc phiên làm việc, hãy cung cấp:
+
+A. WORKING APPLICATION
+
+Ứng dụng chạy được trong preview.
+
+B. FUNCTIONAL MODULES
+
+Liệt kê chức năng nào thực sự đã hoạt động.
+
+C. REALTIME STATUS
+
+Thông báo liệu multiplayer đã kiểm chứng với hai client hay chưa.
+
+D. TEST REPORT
+
+Hiển thị test nào pass, fail hoặc chưa chạy.
+
+E. ARCHITECTURE SUMMARY
+
+Giải thích frontend, server, matching engine và state management.
+
+F. BACKEND HANDOFF
+
+Chuẩn bị tài liệu để GPT tiếp tục phát triển.
+
+G. KNOWN LIMITATIONS
+
+Trung thực về mọi giới hạn.
+
+Không báo "Production Ready" nếu vẫn dùng Guest Auth và In-Memory Storage.
+
+# 38. FINAL QUALITY STANDARD
+
+TRADING EMPIRE phải tạo cảm giác một thế giới tài chính sống động.
+
+Khi có người chơi mua cổ phiếu, các lệnh đang chờ và dữ liệu thị trường phải có thể thay đổi.
+
+Khi người chơi bán tài sản, quyền sở hữu phải thay đổi chính xác.
+
+Khi doanh nghiệp có lợi nhuận, báo cáo tài chính phải cập nhật.
+
+Khi nền kinh tế suy thoái, các economic agents phải phản ứng theo cơ chế đã định.
+
+Khi một người chơi trở nên giàu hơn, bảng xếp hạng phải dựa trên số liệu tài sản thực của họ.
+
+Khi nhiều người mở cùng thị trường, họ phải nhìn thấy cùng thông tin do server công bố.
+
+Tất cả dữ liệu phải có nguồn gốc và quy tắc rõ ràng.
+
+Không sử dụng random numbers như giải pháp thay thế cho game mechanics.
+
+Hãy xây dựng theo tiêu chuẩn của một financial simulation game có kiến trúc bền vững, minh bạch, có khả năng kiểm thử và mở rộng.
+
+**Ưu tiên tuyệt đối: REAL FUNCTIONALITY > VISUAL DECORATION.**
+
+BẮT ĐẦU TRIỂN KHAI MÃ NGUỒN.
+
+Không chỉ trả lời bằng một bản kế hoạch.
+
+Hãy tạo ứng dụng, kiểm tra kết quả và báo cáo chính xác những gì đã hoàn thành.

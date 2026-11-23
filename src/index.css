@@ -1,0 +1,83 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --bg-app: #f4f7fa;
+  --bg-sidebar: #ffffff;
+  --bg-panel: #ffffff;
+  --bg-surface: #eef2f7;
+  --bg-hover: #e5ecf4;
+  --border-subtle: #d6dfe9;
+  --text-primary: #0f172a;
+  --text-secondary: #526175;
+  --text-muted: #6e7f96;
+  --accent: #0f9488;
+  --accent-hover: #0d7f75;
+  --positive: #16a34a;
+  --positive-soft: rgba(22, 163, 74, 0.12);
+  --negative: #dc2626;
+  --negative-soft: rgba(220, 38, 38, 0.12);
+  --warning: #d97706;
+  --warning-soft: rgba(217, 119, 6, 0.14);
+}
+
+.dark {
+  --bg-app: #0b0f17;
+  --bg-sidebar: #101722;
+  --bg-panel: #151e2b;
+  --bg-surface: #1c2735;
+  --bg-hover: #223041;
+  --border-subtle: #283446;
+  --text-primary: #edf3f8;
+  --text-secondary: #92a0b2;
+  --text-muted: #6c7c91;
+  --accent: #39b8ad;
+  --accent-hover: #2fa197;
+  --positive: #22c55e;
+  --positive-soft: rgba(34, 197, 94, 0.13);
+  --negative: #ef5555;
+  --negative-soft: rgba(239, 85, 85, 0.13);
+  --warning: #f5b942;
+  --warning-soft: rgba(245, 185, 66, 0.14);
+}
+
+@layer base {
+  html {
+    font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  body {
+    background-color: var(--bg-app);
+    color: var(--text-primary);
+    overflow-x: hidden;
+  }
+
+  .font-mono,
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .font-mono {
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+}
+
+/* Custom restrained scrollbars for financial terminal grids */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-subtle);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
