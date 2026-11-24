@@ -68,7 +68,8 @@ function TradingEmpireWorkspace() {
           pageParam === 'forex' ||
           pageParam === 'exchange' ||
           pageParam === 'futures' ||
-          pageParam === 'portfolio'
+          pageParam === 'portfolio' ||
+          pageParam === 'property'
         ) {
           useAppStore.getState().setActivePage(pageParam);
         }

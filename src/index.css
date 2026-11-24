@@ -81,3 +81,18 @@
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-muted);
 }
+
+/* Dark theme styling for OpenStreetMap raster tiles (markers & overlays stay true-color) */
+.vn-map-dark .leaflet-tile-pane {
+  filter: invert(100%) hue-rotate(180deg) brightness(90%) contrast(92%) saturate(80%);
+}
+
+.vn-map-dark .leaflet-control-attribution {
+  background: rgba(15, 23, 42, 0.85) !important;
+  color: #94a3b8 !important;
+}
+
+.vn-map-dark .leaflet-control-attribution a {
+  color: #cbd5e1 !important;
+}
+

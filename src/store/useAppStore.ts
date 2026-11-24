@@ -63,20 +63,34 @@ interface UiPrefs {
   theme: 'dark' | 'light';
   sidebarCollapsed: boolean;
   watchlist: string[];
+  propertyWatchlist: string[];
 }
 
 function loadUiPrefs(): UiPrefs {
   try {
     const raw = window.localStorage.getItem(UI_PREFS_KEY);
-    if (!raw) return { theme: 'dark', sidebarCollapsed: false, watchlist: ['NOVA', 'BTC-SIM', 'ETH-SIM', 'NEXB'] };
+    if (!raw) {
+      return {
+        theme: 'dark',
+        sidebarCollapsed: false,
+        watchlist: ['NOVA', 'BTC-SIM', 'ETH-SIM', 'NEXB'],
+        propertyWatchlist: [],
+      };
+    }
     const parsed = JSON.parse(raw) as Partial<UiPrefs>;
     return {
       theme: parsed.theme === 'light' ? 'light' : 'dark',
       sidebarCollapsed: Boolean(parsed.sidebarCollapsed),
       watchlist: Array.isArray(parsed.watchlist) ? parsed.watchlist : ['NOVA', 'BTC-SIM', 'ETH-SIM', 'NEXB'],
+      propertyWatchlist: Array.isArray(parsed.propertyWatchlist) ? parsed.propertyWatchlist : [],
     };
   } catch {
-    return { theme: 'dark', sidebarCollapsed: false, watchlist: ['NOVA', 'BTC-SIM', 'ETH-SIM', 'NEXB'] };
+    return {
+      theme: 'dark',
+      sidebarCollapsed: false,
+      watchlist: ['NOVA', 'BTC-SIM', 'ETH-SIM', 'NEXB'],
+      propertyWatchlist: [],
+    };
   }
 }
 
@@ -99,6 +113,7 @@ interface AppState {
   theme: 'dark' | 'light';
   sidebarCollapsed: boolean;
   watchlist: string[];
+  propertyWatchlist: string[];
 
   // Session & Connection (in-memory only)
   token: string | null;
@@ -129,6 +144,7 @@ interface AppState {
   notifications: NotificationItem[];
   toasts: ToastItem[];
   lastRealtimeTradeSeq: number;
+  propertySyncSeq: number;
 
   // Actions
   setActivePage: (page: NavPage) => void;
@@ -147,6 +163,7 @@ interface AppState {
   toggleTheme: () => void;
   toggleSidebar: () => void;
   toggleWatchlist: (symbol: string) => void;
+  togglePropertyWatchlist: (propertyId: string) => void;
   setSession: (token: string | null, player: PlayerProfile | null) => void;
   setPlayer: (player: PlayerProfile | null) => void;
   setConnectionState: (state: ConnectionState) => void;
@@ -160,7 +177,15 @@ interface AppState {
   markNotificationsRead: () => void;
 }
 
-const initialPrefs = typeof window !== 'undefined' ? loadUiPrefs() : { theme: 'dark' as const, sidebarCollapsed: false, watchlist: ['NOVA', 'BTC-SIM', 'ETH-SIM', 'NEXB'] };
+const initialPrefs =
+  typeof window !== 'undefined'
+    ? loadUiPrefs()
+    : {
+        theme: 'dark' as const,
+        sidebarCollapsed: false,
+        watchlist: ['NOVA', 'BTC-SIM', 'ETH-SIM', 'NEXB'],
+        propertyWatchlist: [],
+      };
 
 export const useAppStore = create<AppState>((set, get) => ({
   activePage: 'overview',
@@ -172,6 +197,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   theme: initialPrefs.theme,
   sidebarCollapsed: initialPrefs.sidebarCollapsed,
   watchlist: initialPrefs.watchlist,
+  propertyWatchlist: initialPrefs.propertyWatchlist,
 
   token: null,
   player: null,
@@ -200,6 +226,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   notifications: [],
   toasts: [],
   lastRealtimeTradeSeq: 0,
+  propertySyncSeq: 0,
 
   setActivePage: (page) => set({ activePage: page }),
 
@@ -241,14 +268,24 @@ export const useAppStore = create<AppState>((set, get) => ({
   toggleTheme: () =>
     set((state) => {
       const next = state.theme === 'dark' ? 'light' : 'dark';
-      saveUiPrefs({ theme: next, sidebarCollapsed: state.sidebarCollapsed, watchlist: state.watchlist });
+      saveUiPrefs({
+        theme: next,
+        sidebarCollapsed: state.sidebarCollapsed,
+        watchlist: state.watchlist,
+        propertyWatchlist: state.propertyWatchlist,
+      });
       return { theme: next };
     }),
 
   toggleSidebar: () =>
     set((state) => {
       const next = !state.sidebarCollapsed;
-      saveUiPrefs({ theme: state.theme, sidebarCollapsed: next, watchlist: state.watchlist });
+      saveUiPrefs({
+        theme: state.theme,
+        sidebarCollapsed: next,
+        watchlist: state.watchlist,
+        propertyWatchlist: state.propertyWatchlist,
+      });
       return { sidebarCollapsed: next };
     }),
 
@@ -256,8 +293,28 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => {
       const exists = state.watchlist.includes(symbol);
       const next = exists ? state.watchlist.filter((s) => s !== symbol) : [...state.watchlist, symbol];
-      saveUiPrefs({ theme: state.theme, sidebarCollapsed: state.sidebarCollapsed, watchlist: next });
+      saveUiPrefs({
+        theme: state.theme,
+        sidebarCollapsed: state.sidebarCollapsed,
+        watchlist: next,
+        propertyWatchlist: state.propertyWatchlist,
+      });
       return { watchlist: next };
+    }),
+
+  togglePropertyWatchlist: (propertyId) =>
+    set((state) => {
+      const exists = state.propertyWatchlist.includes(propertyId);
+      const next = exists
+        ? state.propertyWatchlist.filter((id) => id !== propertyId)
+        : [...state.propertyWatchlist, propertyId];
+      saveUiPrefs({
+        theme: state.theme,
+        sidebarCollapsed: state.sidebarCollapsed,
+        watchlist: state.watchlist,
+        propertyWatchlist: next,
+      });
+      return { propertyWatchlist: next };
     }),
 
   setSession: (token, player) => set({ token, player }),
@@ -552,6 +609,18 @@ export const useAppStore = create<AppState>((set, get) => ({
             description: `Tỷ lệ ký quỹ đạt ${pos.marginRatioPct.toFixed(1)}%. Hãy bổ sung ký quỹ hoặc giảm vị thế trước khi chạm 100%.`,
           });
         }
+        break;
+      }
+
+      case 'property.sold':
+      case 'property.listed':
+      case 'property.updated':
+      case 'auction.bid_placed':
+      case 'auction.ended': {
+        set((s) => ({
+          lastSequenceNumber: nextSeq,
+          propertySyncSeq: s.propertySyncSeq + 1,
+        }));
         break;
       }
 

@@ -454,6 +454,15 @@ export class WorldEngine {
           this.eventBus.publish('company.updated', cmp);
         }
 
+        const propCycle = this.properties.applyEconomicCycle(this.economy.state);
+        this.economy.news.unshift(propCycle.newsItem);
+        if (this.economy.news.length > 60) this.economy.news.pop();
+        this.eventBus.publish('news.published', propCycle.newsItem);
+        this.eventBus.publish('property.updated', {
+          reason: 'ECONOMY_CYCLE',
+          event: propCycle.event,
+        });
+
         const rentPayouts = this.properties.collectRentalCycle(this.economy.state);
         for (const payout of rentPayouts) {
           this.emitPlayerFinancialSync(payout.playerId);
@@ -972,6 +981,66 @@ export class WorldEngine {
     const prop = this.properties.listForSale(propertyId, playerId, listingPriceCR);
     this.eventBus.publish('property.listed', prop);
     return prop;
+  }
+
+  public upgradeProperty(playerId: string, propertyId: string) {
+    const player = this.players.get(playerId);
+    if (!player) throw new DomainError('UNAUTHORIZED');
+    const result = this.properties.upgradeProperty(propertyId, playerId);
+    this.eventBus.publish('property.updated', result.property);
+    this.emitPlayerFinancialSync(playerId);
+    return result;
+  }
+
+  public applyPropertyCollateralLoan(
+    playerId: string,
+    propertyId: string,
+    principalCR: number,
+    termGameDays = 15,
+  ) {
+    const player = this.players.get(playerId);
+    if (!player) throw new DomainError('UNAUTHORIZED');
+    const eligibility = this.properties.getLoanEligibility(propertyId, playerId, this.economy.state, termGameDays);
+    if (!eligibility.eligible) {
+      throw new DomainError('PROPERTY_COLLATERAL_LOCKED', eligibility.reason);
+    }
+    const prop = this.properties.getProperty(propertyId)!;
+    const loan = this.banking.applyForPropertyCollateralLoan({
+      playerId,
+      propertyId: prop.id,
+      propertyName: prop.name,
+      collateralValueMinor: eligibility.collateralValueMinor,
+      ltvLimitPct: eligibility.ltvLimitPct,
+      principalCR,
+      termGameDays,
+      currentGameDay: this.economy.getGameClock().gameDay,
+      economy: this.economy.state,
+    });
+    const updatedProperty = this.properties.bindCollateralLoan(prop.id, playerId, loan.id);
+    this.eventBus.publish('property.updated', updatedProperty);
+    this.emitPlayerFinancialSync(playerId);
+    return { loan, property: updatedProperty };
+  }
+
+  public repayLoan(playerId: string, loanId: string, amountCR: number) {
+    const loan = this.banking.repayLoan(loanId, playerId, amountCR);
+    if (loan.status === 'REPAID') {
+      const released = this.properties.releaseCollateralLoan(loan.id);
+      if (released) {
+        this.eventBus.publish('property.updated', released);
+      }
+    }
+    this.emitPlayerFinancialSync(playerId);
+    return loan;
+  }
+
+  public simulatePropertyEconomyCycle() {
+    const res = this.properties.applyEconomicCycle(this.economy.state);
+    this.economy.news.unshift(res.newsItem);
+    if (this.economy.news.length > 60) this.economy.news.pop();
+    this.eventBus.publish('news.published', res.newsItem);
+    this.eventBus.publish('property.updated', { reason: 'ECONOMY_CYCLE', event: res.event });
+    return res;
   }
 
   public placeAuctionBid(playerId: string, auctionId: string, bidAmountCR: number) {

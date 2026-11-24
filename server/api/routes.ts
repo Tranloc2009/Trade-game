@@ -23,6 +23,7 @@ import {
   PlaceAuctionBidSchema,
   PlaceFuturesOrderSchema,
   PlaceOrderSchema,
+  PropertyCollateralLoanSchema,
 } from '../../shared/schemas/validation';
 import { z } from 'zod';
 import { ALL_CURRENCIES } from '../../shared/contracts/money';
@@ -465,11 +466,13 @@ export function createApiRouter(world: WorldEngine): Router {
     }
   });
 
-  // Empire Property Market & Land Auctions
+  // Empire Property Market — Vietnam Real Estate Expansion V2 & Land Auctions
   router.get('/properties', (_req, res) => {
+    const vietnamMarket = world.properties.getVietnamMarketSnapshot(world.economy.state);
     ok(res, {
       properties: world.properties.listProperties(),
       auctions: world.properties.listAuctions(),
+      ...vietnamMarket,
     });
   });
 
@@ -477,7 +480,9 @@ export function createApiRouter(world: WorldEngine): Router {
     try {
       const prop = world.properties.getProperty(req.params.id);
       if (!prop) throw new DomainError('PROPERTY_NOT_FOUND', undefined, 404);
-      ok(res, prop);
+      const playerId = resolvePlayerId(req);
+      const loanEligibility = world.properties.getLoanEligibility(prop.id, playerId, world.economy.state);
+      ok(res, { ...prop, loanEligibility });
     } catch (err) {
       next(err);
     }
@@ -522,7 +527,64 @@ export function createApiRouter(world: WorldEngine): Router {
     try {
       const playerId = requirePlayerId(req);
       const prop = world.properties.toggleRent(req.params.id, playerId);
+      world.eventBus.publish('property.updated', prop);
       ok(res, { property: prop });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/properties/:id/upgrade', (req, res, next) => {
+    try {
+      const playerId = requirePlayerId(req);
+      const result = world.upgradeProperty(playerId, req.params.id);
+      ok(res, { ...result, profile: world.getPlayerProfile(playerId) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get('/properties/:id/loan-eligibility', (req, res, next) => {
+    try {
+      const playerId = resolvePlayerId(req);
+      const termDays = Math.min(30, Math.max(5, Number(req.query.termDays) || 15));
+      const eligibility = world.properties.getLoanEligibility(
+        req.params.id,
+        playerId,
+        world.economy.state,
+        termDays,
+      );
+      ok(res, eligibility);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/properties/:id/collateral-loan', (req, res, next) => {
+    try {
+      const playerId = requirePlayerId(req);
+      const parsed = PropertyCollateralLoanSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return fail(res, 'VALIDATION_ERROR', parsed.error.issues[0]?.message, 400);
+      }
+      const result = world.applyPropertyCollateralLoan(
+        playerId,
+        req.params.id,
+        parsed.data.principalCR,
+        parsed.data.termGameDays,
+      );
+      ok(res, { ...result, profile: world.getPlayerProfile(playerId) }, 201);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/properties/dev/simulate-cycle', (_req, res, next) => {
+    try {
+      if (!world.devToolsEnabled) throw new DomainError('FORBIDDEN_IN_PRODUCTION', undefined, 403);
+      const resCycle = world.simulatePropertyEconomyCycle();
+      const rentPayouts = world.properties.collectRentalCycle(world.economy.state);
+      ok(res, { ...resCycle, rentPayouts });
     } catch (err) {
       next(err);
     }
@@ -676,7 +738,7 @@ export function createApiRouter(world: WorldEngine): Router {
       const playerId = requirePlayerId(req);
       const parsed = LoanRepaySchema.safeParse(req.body);
       if (!parsed.success) return fail(res, 'VALIDATION_ERROR', parsed.error.issues[0]?.message, 400);
-      const loan = world.banking.repayLoan(req.params.id, playerId, parsed.data.amountCR);
+      const loan = world.repayLoan(playerId, req.params.id, parsed.data.amountCR);
       ok(res, { loan, profile: world.getPlayerProfile(playerId) });
     } catch (err) {
       next(err);
