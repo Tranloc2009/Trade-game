@@ -719,6 +719,7 @@ export class MatchingEngine {
         order.lockedAssetQty = 0;
       }
     } else if (order.type === 'MARKET' || order.timeInForce === 'IOC') {
+      order.remainingQuantity = 0;
       order.status = 'CANCELLED';
       if (order.side === 'BUY' && order.lockedFundsMinor > 0) {
         unlockOrderFunds(order.lockedFundsMinor);

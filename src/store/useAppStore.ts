@@ -66,6 +66,13 @@ export type NavPage =
   | 'portfolio'
   | 'property'
   | 'business'
+  | 'empire_hub'
+  | 'capital_hub'
+  | 'company_hq'
+  | 'corporate'
+  | 'funds'
+  | 'luxury'
+  | 'career'
   | 'banking'
   | 'social'
   | 'leaderboard'
@@ -206,9 +213,18 @@ interface AppState {
   toasts: ToastItem[];
   lastRealtimeTradeSeq: number;
   orderSyncSeq: number;
+  v4SyncSeq: number;
+  connectSyncSeq: number;
+  cofounderSyncSeq: number;
+  selectedHqCompanyId: string | null;
+  connectUnreadNotifications: number;
+  connectUnreadMessages: number;
 
   // Actions
   setActivePage: (page: NavPage) => void;
+  openCompanyHq: (companyId: string) => void;
+  setSelectedHqCompanyId: (companyId: string | null) => void;
+  setConnectUnreadCounts: (notifications: number, messages: number) => void;
   openAssetInExchange: (symbol: string, marketClass?: 'CRYPTO' | 'STOCK') => void;
   openForexPair: (symbol: string) => void;
   openFuturesContract: (symbol: string) => void;
@@ -238,6 +254,7 @@ interface AppState {
   applyWorldSnapshot: (snapshot: WorldSnapshot) => void;
   setOrderBook: (book: OrderBookSnapshot) => void;
   setRecentTrades: (symbol: string, trades: Trade[]) => void;
+  upsertSpotOrder: (order: Order) => void;
   setChatMessages: (messages: ChatMessage[]) => void;
   applyRealtimeEnvelope: (envelope: RealtimeEnvelope) => boolean; // returns true if sequence gap detected
   pushToast: (toast: Omit<ToastItem, 'id'>) => void;
@@ -306,8 +323,18 @@ export const useAppStore = create<AppState>((set, get) => ({
   toasts: [],
   lastRealtimeTradeSeq: 0,
   orderSyncSeq: 0,
+  v4SyncSeq: 0,
+  connectSyncSeq: 0,
+  cofounderSyncSeq: 0,
+  selectedHqCompanyId: null,
+  connectUnreadNotifications: 0,
+  connectUnreadMessages: 0,
 
   setActivePage: (page) => set({ activePage: page }),
+  openCompanyHq: (companyId) => set({ selectedHqCompanyId: companyId, activePage: 'company_hq' }),
+  setSelectedHqCompanyId: (selectedHqCompanyId) => set({ selectedHqCompanyId }),
+  setConnectUnreadCounts: (connectUnreadNotifications, connectUnreadMessages) =>
+    set({ connectUnreadNotifications, connectUnreadMessages }),
 
   openAssetInExchange: (symbol, marketClass) =>
     set({
@@ -440,6 +467,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => ({
       recentTradesBySymbol: { ...state.recentTradesBySymbol, [symbol]: trades },
     })),
+
+  upsertSpotOrder: (order) => {
+    const player = get().player;
+    if (player && order.playerId === player.id) {
+      applySpotOrderToQueryCache(player.id, order);
+    }
+    set((state) => ({ orderSyncSeq: state.orderSyncSeq + 1 }));
+  },
 
   setChatMessages: (messages) => set({ chatMessages: messages }),
 
@@ -774,6 +809,67 @@ export const useAppStore = create<AppState>((set, get) => ({
             description: `Tỷ lệ ký quỹ đạt ${pos.marginRatioPct.toFixed(1)}%. Hãy bổ sung ký quỹ hoặc giảm vị thế trước khi chạm 100%.`,
           });
         }
+        break;
+      }
+
+      case 'cofounder.project.updated':
+      case 'cofounder.invite.received':
+      case 'cofounder.commitment.updated':
+      case 'cofounder.company.activated':
+      case 'board.proposal.created':
+      case 'board.proposal.voted':
+      case 'board.proposal.executed':
+      case 'capital.round.updated':
+      case 'jv.updated': {
+        set((s) => ({
+          lastSequenceNumber: nextSeq,
+          cofounderSyncSeq: s.cofounderSyncSeq + 1,
+          v4SyncSeq: s.v4SyncSeq + 1,
+        }));
+        break;
+      }
+
+      case 'business.created':
+      case 'business.upgraded':
+      case 'business.branch.opened':
+      case 'business.revenue.updated':
+      case 'company.shares.transferred':
+      case 'company.dividend.paid':
+      case 'company.acquisition.completed':
+      case 'fund.created':
+      case 'fund.subscription.completed':
+      case 'fund.redemption.completed':
+      case 'luxury.asset.purchased':
+      case 'luxury.asset.sold':
+      case 'career.mission.completed':
+      case 'player.rank.changed': {
+        set((s) => ({
+          lastSequenceNumber: nextSeq,
+          v4SyncSeq: s.v4SyncSeq + 1,
+        }));
+        break;
+      }
+
+      case 'friend.requested':
+      case 'friend.accepted':
+      case 'friend.removed':
+      case 'message.created':
+      case 'message.read':
+      case 'club.created':
+      case 'club.member.joined':
+      case 'club.member.removed':
+      case 'club.announcement.created':
+      case 'post.created':
+      case 'post.updated':
+      case 'post.deleted':
+      case 'comment.created':
+      case 'notification.created':
+      case 'achievement.unlocked':
+      case 'achievement.shared': {
+        set((s) => ({
+          lastSequenceNumber: nextSeq,
+          connectSyncSeq: s.connectSyncSeq + 1,
+        }));
         break;
       }
 

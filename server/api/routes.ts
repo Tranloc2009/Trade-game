@@ -32,6 +32,7 @@ import { DomainError } from '../domain/DomainError';
 import { WorldEngine } from '../engine/WorldEngine';
 import { createV4Router } from './v4Routes';
 import { createCoFounderRouter } from './cofounderRoutes';
+import { createConnectRouter } from './connectRoutes';
 
 const TriggerCentralBankSchema = z.object({
   currency: z.enum(ALL_CURRENCIES as unknown as [string, ...string[]]).optional(),
@@ -130,6 +131,15 @@ export function createApiRouter(world: WorldEngine): Router {
       }
       const { session, profile } = world.loginGuest(parsed.data.username, parsed.data.preset);
       ok(res, { token: session.token, isDemoGuest: true, profile }, 201);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get('/auth/me', (req, res, next) => {
+    try {
+      const playerId = requirePlayerId(req);
+      ok(res, world.getPlayerProfile(playerId));
     } catch (err) {
       next(err);
     }
@@ -961,6 +971,9 @@ export function createApiRouter(world: WorldEngine): Router {
 
   // Trading Empire — Project Co-Founder routes
   router.use('/cofounder', createCoFounderRouter(world));
+
+  // Trading Empire — Empire Connect routes
+  router.use('/connect', createConnectRouter(world));
 
   // Malformed JSON / Domain Error handler
   router.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {

@@ -6,7 +6,6 @@ import { TutorialOverlay } from './components/beginner/TutorialOverlay';
 import { AppShell } from './components/layout/AppShell';
 import { GuestLoginModal } from './features/auth/GuestLoginModal';
 import { BankingPage } from './features/banking/BankingPage';
-import { BusinessPage } from './features/business/BusinessPage';
 import { OverviewPage } from './features/dashboard/OverviewPage';
 import { AssetDiscoveryPage } from './features/discover/AssetDiscoveryPage';
 import { EntertainmentPage } from './features/entertainment/EntertainmentPage';
@@ -19,6 +18,14 @@ import { PortfolioPage } from './features/portfolio/PortfolioPage';
 import { PropertyPage } from './features/property/PropertyPage';
 import { SettingsPage } from './features/settings/SettingsPage';
 import { SocialPage } from './features/social/SocialPage';
+import { CapitalHubPage } from './features/cofounder/CapitalHubPage';
+import { CompanyHeadquartersPage } from './features/cofounder/CompanyHeadquartersPage';
+import { EmpireHubPage } from './features/v4/EmpireHubPage';
+import { BusinessEmpirePage } from './features/v4/BusinessEmpirePage';
+import { CorporateEmpirePage } from './features/v4/CorporateEmpirePage';
+import { InvestmentFundsPage } from './features/v4/InvestmentFundsPage';
+import { LuxuryClubPage } from './features/v4/LuxuryClubPage';
+import { CareerProfilePage } from './features/v4/CareerProfilePage';
 import { queryClient } from './lib/queryClient';
 import {
   PracticeService,
@@ -72,11 +79,27 @@ function TradingEmpireWorkspace() {
         const autostart = params.get('autostart') === '1';
         const pageParam = params.get('page');
         if (
+          pageParam === 'overview' ||
           pageParam === 'discover' ||
           pageParam === 'forex' ||
           pageParam === 'exchange' ||
           pageParam === 'futures' ||
-          pageParam === 'portfolio'
+          pageParam === 'portfolio' ||
+          pageParam === 'property' ||
+          pageParam === 'business' ||
+          pageParam === 'empire_hub' ||
+          pageParam === 'capital_hub' ||
+          pageParam === 'company_hq' ||
+          pageParam === 'corporate' ||
+          pageParam === 'funds' ||
+          pageParam === 'luxury' ||
+          pageParam === 'career' ||
+          pageParam === 'banking' ||
+          pageParam === 'social' ||
+          pageParam === 'leaderboard' ||
+          pageParam === 'news' ||
+          pageParam === 'entertainment' ||
+          pageParam === 'settings'
         ) {
           useAppStore.getState().setActivePage(pageParam);
         }
@@ -283,7 +306,21 @@ function TradingEmpireWorkspace() {
       case 'property':
         return <PropertyPage />;
       case 'business':
-        return <BusinessPage />;
+        return <BusinessEmpirePage />;
+      case 'empire_hub':
+        return <EmpireHubPage />;
+      case 'capital_hub':
+        return <CapitalHubPage />;
+      case 'company_hq':
+        return <CompanyHeadquartersPage />;
+      case 'corporate':
+        return <CorporateEmpirePage />;
+      case 'funds':
+        return <InvestmentFundsPage />;
+      case 'luxury':
+        return <LuxuryClubPage />;
+      case 'career':
+        return <CareerProfilePage />;
       case 'banking':
         return <BankingPage />;
       case 'social':

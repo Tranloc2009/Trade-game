@@ -61,6 +61,7 @@ import { LuxuryClubEngine } from './v4/LuxuryClubEngine';
 import { WorldMacroV4Engine } from './v4/WorldMacroV4Engine';
 import { BUSINESS_CATALOG } from './v4/V4Catalog';
 import { CoFounderEngine } from './cofounder/CoFounderEngine';
+import { ConnectEngine } from './connect/ConnectEngine';
 import type {
   BoardProposalType,
   CapitalProjectPolicy,
@@ -109,12 +110,13 @@ export class WorldEventBus implements IEventBus {
     this.worldId = worldId;
   }
 
-  publish<T>(eventType: RealtimeEventType, payload: T, room?: string): RealtimeEnvelope<T> {
+  publish<T>(eventType: RealtimeEventType, payload: T, room?: string, marketId?: string): RealtimeEnvelope<T> {
     this.sequenceNumber += 1;
     const envelope: RealtimeEnvelope<T> = {
       eventId: `evt_${this.sequenceNumber}_${crypto.randomBytes(4).toString('hex')}`,
       eventType,
       worldId: this.worldId,
+      ...(marketId ? { marketId } : {}),
       sequenceNumber: this.sequenceNumber,
       serverTimestamp: new Date().toISOString(),
       payload,
@@ -185,6 +187,7 @@ export class WorldEngine {
   public readonly luxury: LuxuryClubEngine;
   public readonly career: CareerRankEngine;
   public readonly cofounder: CoFounderEngine;
+  public readonly connect: ConnectEngine;
 
   private players = new Map<string, PlayerRecord>();
   private chatMessages: ChatMessage[] = [];
@@ -234,6 +237,61 @@ export class WorldEngine {
     this.luxury = new LuxuryClubEngine(this.ledger);
     this.career = new CareerRankEngine();
     this.cofounder = new CoFounderEngine(this.worldId, this.ledger, this.businessEmpire, this.funds);
+    this.connect = new ConnectEngine({
+      worldId: this.worldId,
+      getOnlineHumanPlayerIds: () => Array.from(this.onlineHumanPlayerIds),
+      listHumanPlayers: () =>
+        Array.from(this.players.values())
+          .filter((p) => p.role === 'PLAYER')
+          .map((p) => ({
+            id: p.id,
+            username: p.username,
+            avatarInitials: p.avatarInitials,
+            joinedAt: p.joinedAt,
+            level: p.level,
+            title: p.title,
+            achievements: [...p.achievements],
+          })),
+      getPlayerPublicSnapshot: (playerId: string) => {
+        const p = this.players.get(playerId);
+        if (!p || p.role !== 'PLAYER') return null;
+        const ownedCompanies = this.business
+          .listCompanies()
+          .filter((c) => c.founderId === playerId || c.shareholders.some((s) => s.playerId === playerId));
+        const ownedProps = this.properties.listProperties().filter((prop) => prop.ownerId === playerId);
+        const profile = this.getPlayerProfile(playerId);
+        return {
+          id: p.id,
+          username: p.username,
+          avatarInitials: p.avatarInitials,
+          joinedAt: p.joinedAt,
+          level: p.level,
+          title: p.title,
+          achievements: [...p.achievements],
+          companies: ownedCompanies.map((c) => ({
+            id: c.id,
+            name: c.name,
+            ticker: c.ticker,
+            sector: c.sector,
+            level: c.capacityLevel,
+            modeContext: 'ONLINE' as const,
+          })),
+          propertyCount: ownedProps.length,
+          propertyPortfolioValueMinor: profile?.propertyValueMinor ?? 0,
+          businessValuationMinor: profile?.businessEquityMinor ?? 0,
+          onlineEmpireScoreMinor: profile?.netWorthMinor ?? 0,
+        };
+      },
+      checkRateLimit: (bucket: string, maxRequests: number, windowMs: number, actorId?: string) => {
+        this.security.checkRateLimit(bucket, maxRequests, windowMs, actorId);
+      },
+      recordSecurityAudit: (actorId: string, action: string, severity: 'INFO' | 'WARN' | 'CRITICAL', detail: string) => {
+        this.security.recordAudit(actorId, action, severity === 'CRITICAL' ? 'ALERT' : severity, detail);
+      },
+      publishEvent: <T,>(eventType: RealtimeEventType, payload: T, room?: string, marketId?: string) => {
+        this.eventBus.publish(eventType, payload, room, marketId);
+      },
+    });
 
     this.bindMatchingHooks();
     this.bindFuturesHooks();
@@ -357,6 +415,7 @@ export class WorldEngine {
     this.luxury.reset();
     this.career.reset();
     this.cofounder.reset();
+    this.connect.reset();
     this.v4MacroTickSeq = 0;
 
     // 1. Seed 6 ECX Crypto + 8 ESE Stocks + 6 EFX Forex Pairs

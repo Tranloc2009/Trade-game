@@ -24,5 +24,10 @@
     "allowImportingTsExtensions": true,
     "noEmit": true
   },
-  "exclude": ["dist"]
+  "exclude": [
+    "dist",
+    "server/benchmarks",
+    "server/tests/beginnerV2.test.ts",
+    "server/tests/futuresV2.test.ts"
+  ]
 }

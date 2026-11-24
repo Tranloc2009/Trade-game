@@ -437,17 +437,17 @@ export function PropertyDetailView({
                             {property.isRented ? 'Dừng cho thuê NPC' : 'Bật cho thuê NPC'}
                           </button>
 
-                          {property.upgradeLevel < property.maxUpgradeLevel && (
+                          {(property.upgradeLevel ?? 0) < (property.maxUpgradeLevel ?? 0) && (
                             <button
                               type="button"
                               disabled={
                                 busyAction !== null ||
-                                availableBalanceMinor < property.upgradeCostMinor
+                                availableBalanceMinor < (property.upgradeCostMinor ?? 0)
                               }
                               onClick={() => onUpgrade(property.id)}
                               className="whitespace-nowrap rounded-lg border border-[#D4A843]/60 bg-[#D4A843]/15 px-3 py-1.5 text-xs font-semibold text-[#D4A843] transition hover:bg-[#D4A843]/25 disabled:opacity-50"
                             >
-                              Nâng cấp Cấp {property.upgradeLevel + 1} ({formatCR(property.upgradeCostMinor)})
+                              Nâng cấp Cấp {(property.upgradeLevel ?? 0) + 1} ({formatCR(property.upgradeCostMinor ?? 0)})
                             </button>
                           )}
                         </div>
@@ -604,11 +604,11 @@ export function PropertyDetailView({
                   </div>
                 </dl>
 
-                {isOwned && property.upgradeLevel < property.maxUpgradeLevel && (
+                {isOwned && (property.upgradeLevel ?? 0) < (property.maxUpgradeLevel ?? 0) && (
                   <div className="flex items-center justify-between gap-3 rounded-lg border border-[#D4A843]/40 bg-[#D4A843]/10 p-3 text-xs">
                     <div>
                       <div className="font-semibold text-[var(--text-primary)]">
-                        Nâng cấp nội thất & tiện ích (Cấp {property.upgradeLevel + 1})
+                        Nâng cấp nội thất & tiện ích (Cấp {(property.upgradeLevel ?? 0) + 1})
                       </div>
                       <div className="text-[11px] text-[var(--text-secondary)]">
                         Tăng giá thuê ước tính +12% và định giá mô phỏng +8%. Chi phí ghi nhận vào ngân quỹ hệ thống.
@@ -616,11 +616,11 @@ export function PropertyDetailView({
                     </div>
                     <button
                       type="button"
-                      disabled={busyAction !== null || availableBalanceMinor < property.upgradeCostMinor}
+                      disabled={busyAction !== null || availableBalanceMinor < (property.upgradeCostMinor ?? 0)}
                       onClick={() => onUpgrade(property.id)}
                       className="shrink-0 whitespace-nowrap rounded-lg bg-[#D4A843] px-3 py-1.5 font-bold text-slate-950 transition hover:bg-[#c39633] disabled:opacity-50"
                     >
-                      {formatCR(property.upgradeCostMinor)}
+                      {formatCR(property.upgradeCostMinor ?? 0)}
                     </button>
                   </div>
                 )}
@@ -914,9 +914,9 @@ export function PropertyDetailView({
 
               <div className="space-y-2">
                 <h3 className="text-sm font-bold text-[var(--text-primary)]">
-                  Nhật ký chu kỳ thu tiền thuê ({property.rentalHistory.length})
+                  Nhật ký chu kỳ thu tiền thuê ({(property.rentalHistory ?? []).length})
                 </h3>
-                {property.rentalHistory.length === 0 ? (
+                {(property.rentalHistory ?? []).length === 0 ? (
                   <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)]/30 p-4 text-xs text-[var(--text-muted)]">
                     Chưa có chu kỳ thanh toán thuê nào được ghi nhận cho tài sản này.
                   </div>
@@ -933,7 +933,7 @@ export function PropertyDetailView({
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[var(--border-subtle)]/60">
-                        {property.rentalHistory.slice(0, 12).map((row) => (
+                        {(property.rentalHistory ?? []).slice(0, 12).map((row) => (
                           <tr key={row.id}>
                             <td className="px-3 py-2 font-mono text-[11px] text-[var(--text-secondary)]">
                               {formatDateTimeShort(row.cycleTimestamp)}
@@ -978,11 +978,11 @@ export function PropertyDetailView({
                   </span>
                 </div>
                 <span className="font-mono text-[var(--text-secondary)]">
-                  Tổng số lần chuyển nhượng: {property.transactions.length}
+                  Tổng số lần chuyển nhượng: {(property.transactions ?? []).length}
                 </span>
               </div>
 
-              {property.transactions.length === 0 ? (
+              {(property.transactions ?? []).length === 0 ? (
                 <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)]/30 p-4 text-xs text-[var(--text-muted)]">
                   Tài sản vẫn thuộc sở hữu quỹ phát hành ban đầu, chưa có giao dịch chuyển nhượng giữa người chơi.
                 </div>
@@ -1001,7 +1001,7 @@ export function PropertyDetailView({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[var(--border-subtle)]/60">
-                      {property.transactions.map((tx) => (
+                      {(property.transactions ?? []).map((tx) => (
                         <tr key={tx.id}>
                           <td className="px-3 py-2 font-mono text-[11px] text-[var(--text-secondary)]">
                             {formatDateTimeShort(tx.createdAt)}

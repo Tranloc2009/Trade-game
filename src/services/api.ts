@@ -21,6 +21,41 @@ import type {
 } from '../../shared/contracts/futures';
 import type { CurrencyCode } from '../../shared/contracts/money';
 import type {
+  BlockedUser,
+  Club,
+  ClubAnnouncement,
+  ClubEvent,
+  ClubHqThemeId,
+  ClubRole,
+  ClubVisibility,
+  CommunityChallenge,
+  CommunityLeaderboardBoard,
+  CommunityLeaderboardEntry,
+  CommunityPost,
+  CommunityTopic,
+  ConnectBootstrapPayload,
+  ConnectMessage,
+  Conversation,
+  FeedFilter,
+  FriendInvitation,
+  FriendRequest,
+  FriendSummary,
+  ModerationAuditLog,
+  ModerationReport,
+  NotificationPreferences,
+  PlayerSocialProfile,
+  PostComment,
+  PresenceStatus,
+  PrivacySettings,
+  RecentPlayerEntry,
+  SharedAchievementCard,
+  SocialNotification,
+} from '../../shared/contracts/connect';
+import type {
+  PropertyLoanEligibility,
+  VietnamPropertyMarketSnapshot,
+} from '../../shared/contracts/property';
+import type {
   ApiResponse,
   Asset,
   BusinessSector,
@@ -136,6 +171,7 @@ async function request<T>(path: string, init: RequestInit = {}, modeOverride?: W
 
 export const WorldService = {
   getSnapshot: () => request<WorldSnapshot>('/api/world/snapshot'),
+  getMe: () => request<PlayerProfile>('/api/auth/me'),
   loginGuest: (username: string, preset?: 'ALICE' | 'BOB' | 'CUSTOM') =>
     request<{ token: string; isDemoGuest: boolean; profile: PlayerProfile }>('/api/auth/guest', {
       method: 'POST',
@@ -241,7 +277,16 @@ export const PortfolioService = {
 };
 
 export const PropertyService = {
-  getAll: () => request<{ properties: Property[]; auctions: PropertyAuction[] }>('/api/properties'),
+  getAll: () =>
+    request<{
+      properties: Property[];
+      auctions: PropertyAuction[];
+      vietnamMarket?: VietnamPropertyMarketSnapshot;
+    }>('/api/properties'),
+  getLoanEligibility: (propertyId: string, termDays = 10) =>
+    request<PropertyLoanEligibility>(
+      `/api/properties/${encodeURIComponent(propertyId)}/loan-eligibility?termDays=${encodeURIComponent(String(termDays))}`,
+    ),
   buy: (propertyId: string) =>
     request<{ property: Property; feeMinor: number; profile: PlayerProfile }>(
       `/api/properties/${encodeURIComponent(propertyId)}/buy`,
@@ -494,4 +539,302 @@ export const FuturesService = {
         body: JSON.stringify(symbol ? { symbol } : {}),
       },
     ),
+};
+
+export const ConnectService = {
+  getBootstrap: () => request<ConnectBootstrapPayload>('/api/connect/bootstrap'),
+  searchDirectory: (q?: string) =>
+    request<PlayerSocialProfile[]>(
+      q && q.trim() ? `/api/connect/directory?q=${encodeURIComponent(q.trim())}` : '/api/connect/directory',
+    ),
+  getProfile: (playerId: string) =>
+    request<PlayerSocialProfile>(`/api/connect/profiles/${encodeURIComponent(playerId)}`),
+  updateProfile: (patch: {
+    bio?: string;
+    activeTitle?: string;
+    avatarColor?: string;
+    avatarUrl?: string | null;
+    coverTheme?: string;
+    favoriteIndustries?: string[];
+    featuredBadgeIds?: string[];
+    featuredItemIds?: string[];
+    modeContext?: 'ONLINE' | 'CAREER';
+    preferredPresence?: PresenceStatus;
+  }) =>
+    request<PlayerSocialProfile>('/api/connect/profile', {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  updatePrivacy: (patch: Partial<PrivacySettings>) =>
+    request<PrivacySettings>('/api/connect/privacy', {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+
+  // Friends, Blocks, Mutes
+  getFriends: () =>
+    request<{
+      friends: FriendSummary[];
+      incomingRequests: FriendRequest[];
+      outgoingRequests: FriendRequest[];
+      recentPlayers: RecentPlayerEntry[];
+      blockedUsers: BlockedUser[];
+    }>('/api/connect/friends'),
+  sendFriendRequest: (target: string, note = '') =>
+    request<FriendRequest>('/api/connect/friends/requests', {
+      method: 'POST',
+      body: JSON.stringify({ target, note }),
+    }),
+  acceptFriendRequest: (requestId: string) =>
+    request<{ accepted: boolean }>(`/api/connect/friends/requests/${encodeURIComponent(requestId)}/accept`, {
+      method: 'POST',
+    }),
+  declineFriendRequest: (requestId: string) =>
+    request<{ declined: boolean }>(`/api/connect/friends/requests/${encodeURIComponent(requestId)}/decline`, {
+      method: 'POST',
+    }),
+  removeFriend: (friendId: string) =>
+    request<{ removed: boolean }>(`/api/connect/friends/${encodeURIComponent(friendId)}`, {
+      method: 'DELETE',
+    }),
+  blockUser: (targetPlayerId: string, reason?: string) =>
+    request<BlockedUser>('/api/connect/blocks', {
+      method: 'POST',
+      body: JSON.stringify({ targetPlayerId, reason }),
+    }),
+  unblockUser: (targetId: string) =>
+    request<{ unblocked: boolean }>(`/api/connect/blocks/${encodeURIComponent(targetId)}`, {
+      method: 'DELETE',
+    }),
+  toggleMutePlayer: (targetId: string) =>
+    request<{ muted: boolean }>(`/api/connect/mutes/${encodeURIComponent(targetId)}`, {
+      method: 'POST',
+    }),
+
+  // Messenger
+  listConversations: () => request<Conversation[]>('/api/connect/conversations'),
+  openDm: (targetPlayerId: string) =>
+    request<Conversation>('/api/connect/conversations/dm', {
+      method: 'POST',
+      body: JSON.stringify({ targetPlayerId }),
+    }),
+  createGroup: (title: string, memberIds: string[]) =>
+    request<Conversation>('/api/connect/conversations/group', {
+      method: 'POST',
+      body: JSON.stringify({ title, memberIds }),
+    }),
+  getMessages: (conversationId: string, q?: string) =>
+    request<ConnectMessage[]>(
+      q && q.trim()
+        ? `/api/connect/conversations/${encodeURIComponent(conversationId)}/messages?q=${encodeURIComponent(q.trim())}`
+        : `/api/connect/conversations/${encodeURIComponent(conversationId)}/messages`,
+    ),
+  sendMessage: (conversationId: string, content: string, replyToId?: string | null) =>
+    request<ConnectMessage>(`/api/connect/conversations/${encodeURIComponent(conversationId)}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ content, replyToId }),
+    }),
+  reactToMessage: (conversationId: string, messageId: string, emoji: string) =>
+    request<ConnectMessage>(
+      `/api/connect/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/react`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ emoji }),
+      },
+    ),
+  markConversationRead: (conversationId: string) =>
+    request<{ markedRead: boolean }>(`/api/connect/conversations/${encodeURIComponent(conversationId)}/read`, {
+      method: 'POST',
+    }),
+  toggleConversationMute: (conversationId: string) =>
+    request<{ muted: boolean }>(`/api/connect/conversations/${encodeURIComponent(conversationId)}/mute`, {
+      method: 'POST',
+    }),
+
+  // Clubs
+  listClubs: (q?: string) =>
+    request<Club[]>(q && q.trim() ? `/api/connect/clubs?q=${encodeURIComponent(q.trim())}` : '/api/connect/clubs'),
+  getClub: (clubId: string) => request<Club>(`/api/connect/clubs/${encodeURIComponent(clubId)}`),
+  createClub: (params: {
+    name: string;
+    tag: string;
+    slogan?: string;
+    description?: string;
+    visibility?: ClubVisibility;
+    accentColor?: string;
+    hqTheme?: ClubHqThemeId;
+    rules?: string[];
+  }) =>
+    request<Club>('/api/connect/clubs', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }),
+  updateClubSettings: (
+    clubId: string,
+    patch: {
+      slogan?: string;
+      description?: string;
+      visibility?: ClubVisibility;
+      accentColor?: string;
+      hqTheme?: ClubHqThemeId;
+      rules?: string[];
+    },
+  ) =>
+    request<Club>(`/api/connect/clubs/${encodeURIComponent(clubId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  joinOrRequestClub: (clubId: string, note = '') =>
+    request<{ joined: boolean; club: Club }>(`/api/connect/clubs/${encodeURIComponent(clubId)}/join`, {
+      method: 'POST',
+      body: JSON.stringify({ note }),
+    }),
+  inviteToClub: (clubId: string, target: string) =>
+    request<{ invited: boolean }>(`/api/connect/clubs/${encodeURIComponent(clubId)}/invite`, {
+      method: 'POST',
+      body: JSON.stringify({ target }),
+    }),
+  reviewClubRequest: (clubId: string, requestId: string, approve: boolean) =>
+    request<Club>(
+      `/api/connect/clubs/${encodeURIComponent(clubId)}/requests/${encodeURIComponent(requestId)}`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ approve }),
+      },
+    ),
+  updateClubMemberRole: (clubId: string, targetPlayerId: string, role: ClubRole) =>
+    request<Club>(
+      `/api/connect/clubs/${encodeURIComponent(clubId)}/members/${encodeURIComponent(targetPlayerId)}/role`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ role }),
+      },
+    ),
+  transferClubOwnership: (clubId: string, newFounderId: string, confirmTransfer: boolean) =>
+    request<Club>(`/api/connect/clubs/${encodeURIComponent(clubId)}/transfer-ownership`, {
+      method: 'POST',
+      body: JSON.stringify({ newFounderId, confirmTransfer }),
+    }),
+  removeOrLeaveClub: (clubId: string, targetPlayerId: string) =>
+    request<{ dissolved?: boolean; left?: boolean; club?: Club | null }>(
+      `/api/connect/clubs/${encodeURIComponent(clubId)}/members/${encodeURIComponent(targetPlayerId)}`,
+      { method: 'DELETE' },
+    ),
+  createClubAnnouncement: (clubId: string, title: string, content: string, pinned = false) =>
+    request<ClubAnnouncement>(`/api/connect/clubs/${encodeURIComponent(clubId)}/announcements`, {
+      method: 'POST',
+      body: JSON.stringify({ title, content, pinned }),
+    }),
+  createClubEvent: (
+    clubId: string,
+    params: {
+      title: string;
+      description: string;
+      scheduledAt: string;
+      category?: ClubEvent['category'];
+    },
+  ) =>
+    request<ClubEvent>(`/api/connect/clubs/${encodeURIComponent(clubId)}/events`, {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }),
+  toggleClubEventRsvp: (clubId: string, eventId: string) =>
+    request<ClubEvent>(
+      `/api/connect/clubs/${encodeURIComponent(clubId)}/events/${encodeURIComponent(eventId)}/rsvp`,
+      { method: 'POST' },
+    ),
+
+  // Community Feed & Achievements
+  listFeed: (params: { filter?: FeedFilter; topic?: CommunityTopic | 'ALL'; clubId?: string; authorId?: string } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.filter) qs.set('filter', params.filter);
+    if (params.topic) qs.set('topic', params.topic);
+    if (params.clubId) qs.set('clubId', params.clubId);
+    if (params.authorId) qs.set('authorId', params.authorId);
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return request<CommunityPost[]>(`/api/connect/feed${suffix}`);
+  },
+  createPost: (params: {
+    topic: CommunityTopic;
+    title: string;
+    content: string;
+    imageUrl?: string | null;
+    clubId?: string | null;
+    achievementId?: string | null;
+    modeContext?: 'ONLINE' | 'CAREER';
+  }) =>
+    request<CommunityPost>('/api/connect/posts', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }),
+  updatePost: (postId: string, patch: { topic?: CommunityTopic; title?: string; content?: string; imageUrl?: string | null }) =>
+    request<CommunityPost>(`/api/connect/posts/${encodeURIComponent(postId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  deletePost: (postId: string) =>
+    request<{ deleted: boolean }>(`/api/connect/posts/${encodeURIComponent(postId)}`, {
+      method: 'DELETE',
+    }),
+  togglePostLike: (postId: string) =>
+    request<CommunityPost>(`/api/connect/posts/${encodeURIComponent(postId)}/like`, { method: 'POST' }),
+  togglePostSave: (postId: string) =>
+    request<CommunityPost>(`/api/connect/posts/${encodeURIComponent(postId)}/save`, { method: 'POST' }),
+  sharePost: (postId: string) =>
+    request<CommunityPost>(`/api/connect/posts/${encodeURIComponent(postId)}/share`, { method: 'POST' }),
+  addComment: (postId: string, content: string) =>
+    request<PostComment>(`/api/connect/posts/${encodeURIComponent(postId)}/comments`, {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    }),
+  createVerifiedAchievementCard: (achievementId: string) =>
+    request<SharedAchievementCard>('/api/connect/achievements/share', {
+      method: 'POST',
+      body: JSON.stringify({ achievementId }),
+    }),
+
+  // Challenges, Invitations, Leaderboards, Notifications, Moderation
+  listChallenges: () => request<CommunityChallenge[]>('/api/connect/challenges'),
+  joinChallenge: (challengeId: string) =>
+    request<CommunityChallenge>(`/api/connect/challenges/${encodeURIComponent(challengeId)}/join`, {
+      method: 'POST',
+    }),
+  getMyInvitation: () => request<FriendInvitation>('/api/connect/invitations/me'),
+  redeemInvitation: (code: string, sendFriendRequest = true) =>
+    request<{ inviterUsername: string; cosmeticNotice: string; invitation: FriendInvitation }>(
+      '/api/connect/invitations/redeem',
+      {
+        method: 'POST',
+        body: JSON.stringify({ code, sendFriendRequest }),
+      },
+    ),
+  getLeaderboard: (board: CommunityLeaderboardBoard) =>
+    request<{ board: CommunityLeaderboardBoard; entries: CommunityLeaderboardEntry[] }>(
+      `/api/connect/leaderboards?board=${encodeURIComponent(board)}`,
+    ),
+  getNotifications: () =>
+    request<{ notifications: SocialNotification[]; preferences: NotificationPreferences }>('/api/connect/notifications'),
+  markNotificationRead: (notificationId: string) =>
+    request<{ read: boolean }>(`/api/connect/notifications/${encodeURIComponent(notificationId)}/read`, {
+      method: 'POST',
+    }),
+  markAllNotificationsRead: () =>
+    request<{ markedAll: boolean }>('/api/connect/notifications/read-all', { method: 'POST' }),
+  updateNotificationPrefs: (patch: Partial<NotificationPreferences>) =>
+    request<NotificationPreferences>('/api/connect/notifications/preferences', {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  submitReport: (params: {
+    targetType: ModerationReport['targetType'];
+    targetId: string;
+    reason: ModerationReport['reason'];
+    details?: string;
+  }) =>
+    request<ModerationReport>('/api/connect/reports', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }),
+  listMyReports: () => request<ModerationReport[]>('/api/connect/reports/me'),
+  listModerationAudit: () => request<ModerationAuditLog[]>('/api/connect/moderation/audit'),
 };

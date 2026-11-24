@@ -59,6 +59,7 @@ import { CandleAggregator } from '../matching/CandleAggregator';
 import { MatchingEngine } from '../matching/MatchingEngine';
 import { CrossMarginExtensionStub } from './CrossMarginDesign';
 import { MarkPriceEngine } from './MarkPriceEngine';
+import { MarketRegimeEngine } from './MarketRegimeEngine';
 import { buildSeedFuturesContracts } from './futuresSeed';
 
 export interface PlaceFuturesOrderCommand {
@@ -135,6 +136,7 @@ export class FuturesEngine {
   public readonly spotMatching: MatchingEngine;
   public readonly candles: CandleAggregator;
   public readonly markEngine: MarkPriceEngine;
+  public readonly regimes: MarketRegimeEngine;
   public readonly crossMargin: CrossMarginExtensionStub;
 
   private hooks: FuturesHooks = {};
@@ -174,6 +176,7 @@ export class FuturesEngine {
     this.spotMatching = spotMatching;
     this.candles = new CandleAggregator();
     this.markEngine = new MarkPriceEngine(spotMatching);
+    this.regimes = new MarketRegimeEngine();
     this.crossMargin = new CrossMarginExtensionStub();
   }
 
@@ -205,10 +208,11 @@ export class FuturesEngine {
     this.tradeSeq = 0;
     this.candles.clear();
     this.markEngine.reset();
+    this.regimes.reset();
   }
 
   bootstrapContracts(nowMs = Date.now()): FuturesContract[] {
-    const seeded = buildSeedFuturesContracts(this.spotMatching, nowMs);
+    const seeded = buildSeedFuturesContracts((symbol) => this.spotMatching.getAsset(symbol), nowMs);
     for (const c of seeded) {
       this.contracts.set(c.symbol, c);
       this.bids.set(c.symbol, []);
@@ -216,6 +220,7 @@ export class FuturesEngine {
       this.conditionalOrders.set(c.symbol, []);
       this.tradesBySymbol.set(c.symbol, []);
       this.markEngine.seedContract(c, nowMs);
+      this.regimes.registerSymbol(c.symbol, c.markPriceInt);
       const vol = c.underlyingMarketClass === 'CRYPTO' ? 0.016 : c.underlyingMarketClass === 'FOREX' ? 0.0025 : 0.009;
       this.candles.seedSymbol(c.symbol, c.lastPriceInt, vol, nowMs, c.priceScale, c.priceDecimals);
     }
@@ -2716,12 +2721,14 @@ export class FuturesEngine {
     // 2. Release any open isolated positions cleanly back to the practice player wallet
     for (const pos of this.listPlayerPositions(playerId)) {
       if (pos.marginMinor > 0) {
-        this.ledger.releaseFuturesMargin(
-          playerId,
-          pos.marginMinor,
-          pos.id,
-          `Giải phóng ký quỹ Futures khi đặt lại Phòng Luyện Tập (${pos.symbol})`,
-        );
+        this.ledger.transferAvailable({
+          fromAccount: SYSTEM_ACCOUNTS.FUTURES_MARGIN_POOL,
+          toAccount: playerId,
+          amountMinor: pos.marginMinor,
+          category: 'FUTURES_MARGIN_RELEASE',
+          referenceId: pos.id,
+          description: `Giải phóng ký quỹ Futures khi đặt lại Phòng Luyện Tập (${pos.symbol})`,
+        });
       }
       pos.quantity = 0;
       pos.qtyInt = 0;

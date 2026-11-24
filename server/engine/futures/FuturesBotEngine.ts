@@ -501,11 +501,12 @@ export class FuturesBotEngine {
       const sizeMult =
         actor.archetype === 'LIQUIDITY_SENSITIVE' && regimeState.regime !== 'NORMAL' ? 0.5 : 1;
       const qty = this.baseOrderQty(contract, sizeMult);
+      const effectiveCap = contract.effectiveMaxLeverage ?? contract.maxLeverage;
       const targetLev =
         actor.archetype === 'HIGH_BETA_SPECULATOR'
           ? contract.underlyingClass === 'MEME'
-            ? Math.min(20, contract.effectiveMaxLeverage)
-            : Math.min(25, contract.effectiveMaxLeverage)
+            ? Math.min(20, effectiveCap)
+            : Math.min(25, effectiveCap)
           : actor.defaultLeverage;
       const lev = this.pickAllowedLeverage(contract, Math.min(targetLev, actor.leverageLimit));
 
@@ -646,7 +647,10 @@ export class FuturesBotEngine {
     // 1. News Trader enters in news direction
     if (!this.isSuspended(newsDesk.id)) {
       const qty = this.baseOrderQty(contract, Math.max(1, Math.round(news.intensity * 2)));
-      const lev = this.pickAllowedLeverage(contract, Math.min(newsDesk.defaultLeverage, contract.effectiveMaxLeverage));
+      const lev = this.pickAllowedLeverage(
+        contract,
+        Math.min(newsDesk.defaultLeverage, contract.effectiveMaxLeverage ?? contract.maxLeverage),
+      );
       try {
         const res = this.futures.placeOrder({
           playerId: newsDesk.id,
@@ -678,7 +682,10 @@ export class FuturesBotEngine {
     // 2. High-Beta Speculator chases high-intensity hype/panic
     if (news.intensity >= 0.5 && !this.isSuspended(spec.id)) {
       const qty = this.baseOrderQty(contract, 1);
-      const lev = this.pickAllowedLeverage(contract, Math.min(20, contract.effectiveMaxLeverage));
+      const lev = this.pickAllowedLeverage(
+        contract,
+        Math.min(20, contract.effectiveMaxLeverage ?? contract.maxLeverage),
+      );
       try {
         const res = this.futures.placeOrder({
           playerId: spec.id,
@@ -707,7 +714,10 @@ export class FuturesBotEngine {
     // 3. Mean Reversion Desk FADES low-credibility hype/rumors (divergent counterparty reaction!)
     if (news.credibility < 0.7 && !this.isSuspended(meanRev.id)) {
       const qty = this.baseOrderQty(contract, 1);
-      const lev = this.pickAllowedLeverage(contract, Math.min(meanRev.defaultLeverage, contract.effectiveMaxLeverage));
+      const lev = this.pickAllowedLeverage(
+        contract,
+        Math.min(meanRev.defaultLeverage, contract.effectiveMaxLeverage ?? contract.maxLeverage),
+      );
       try {
         const res = this.futures.placeOrder({
           playerId: meanRev.id,

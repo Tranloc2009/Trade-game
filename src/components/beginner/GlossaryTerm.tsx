@@ -4,19 +4,21 @@ import { FINANCIAL_GLOSSARY, GLOSSARY_LIST, type GlossaryEntry } from '../../../
 import { useAppStore } from '../../store/useAppStore';
 
 interface GlossaryTermProps {
-  termKey: keyof typeof FINANCIAL_GLOSSARY | string;
+  termKey?: keyof typeof FINANCIAL_GLOSSARY | string;
+  termId?: keyof typeof FINANCIAL_GLOSSARY | string;
   label?: string;
   className?: string;
 }
 
-export const GlossaryTerm: React.FC<GlossaryTermProps> = ({ termKey, label, className = '' }) => {
+export const GlossaryTerm: React.FC<GlossaryTermProps> = ({ termKey, termId, label, className = '' }) => {
   const [open, setOpen] = useState(false);
   const glossaryLang = useAppStore((s) => s.glossaryLang);
   const setGlossaryLang = useAppStore((s) => s.setGlossaryLang);
   const setGlossaryDrawerOpen = useAppStore((s) => s.setGlossaryDrawerOpen);
   const wrapRef = useRef<HTMLSpanElement | null>(null);
 
-  const entry: GlossaryEntry | undefined = FINANCIAL_GLOSSARY[termKey];
+  const resolvedKey = termKey ?? termId ?? '';
+  const entry: GlossaryEntry | undefined = FINANCIAL_GLOSSARY[resolvedKey];
 
   useEffect(() => {
     if (!open) return;

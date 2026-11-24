@@ -564,7 +564,14 @@ export function ExchangePage() {
                     </button>
                   </div>
                   <div className="rounded-lg border border-slate-800 bg-slate-950/60 overflow-hidden">
-                    <OrderBookPanel orderBook={activeOrderBook} loading={bookLoading} />
+                    <OrderBookPanel
+                      orderBook={activeOrderBook}
+                      loading={bookLoading}
+                      onSelectPrice={(price) => {
+                        setPrefilledPrice(price);
+                        setTradingMode('PRO');
+                      }}
+                    />
                   </div>
                 </div>
               )}

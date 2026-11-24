@@ -178,6 +178,7 @@ export default function VietnamPropertyMap({
   const mapPoints = useMemo<MapMarkerPoint[]>(() => {
     const byLoc = new Map<string, Property[]>();
     for (const p of properties) {
+      if (!p.realWorldLocationId) continue;
       const list = byLoc.get(p.realWorldLocationId) ?? [];
       list.push(p);
       byLoc.set(p.realWorldLocationId, list);

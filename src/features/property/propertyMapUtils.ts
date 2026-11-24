@@ -264,7 +264,7 @@ export function filterVietnamProperties(
     if (filters.minYieldPct !== null && prop.rentalYieldAnnualPct < filters.minYieldPct) return false;
 
     if (normQuery) {
-      const loc = locationsById.get(prop.realWorldLocationId);
+      const loc = prop.realWorldLocationId ? locationsById.get(prop.realWorldLocationId) : undefined;
       const haystack = normalizeVietnameseText(
         [
           prop.id,

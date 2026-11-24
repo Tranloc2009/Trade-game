@@ -62,6 +62,12 @@ export const DISTRICT_IMAGES: Record<Property['imageKey'], string> = {
   riverside: '/src/assets/images/district_riverside_1795443839033.jpg',
   industrial: '/src/assets/images/district_industrial_zone_1795443839037.jpg',
   luxury: '/src/assets/images/district_luxury_bay_1795443840537.jpg',
+  landmark81: '/src/assets/images/district_central_financial_1795443839869.jpg',
+  sala: '/src/assets/images/district_riverside_1795443839033.jpg',
+  empire_city: '/src/assets/images/district_luxury_bay_1795443840537.jpg',
+  lotte_hanoi: '/src/assets/images/district_central_financial_1795443839869.jpg',
+  keangnam72: '/src/assets/images/district_industrial_zone_1795443839037.jpg',
+  sun_cosmo: '/src/assets/images/district_riverside_1795443839033.jpg',
 };
 
 export function formatTimeShort(iso: string): string {

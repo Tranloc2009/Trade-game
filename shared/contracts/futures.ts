@@ -15,10 +15,22 @@ export const FUTURES_TAKER_FEE_BPS = 6; // 0.06%
 export const FUTURES_LIQUIDATION_FEE_BPS = 50; // 0.50%
 export const FUTURES_MAX_FUNDING_RATE_BPS = 75; // +/- 0.75% per funding interval
 export const FUTURES_INTEREST_RATE_BPS = 1; // 0.01% base interest component per interval
-export const FUTURES_ALLOWED_LEVERAGES = [1, 2, 3, 5, 10] as const;
-export const FUTURES_FUTURE_MAX_LEVERAGE = 20; // Reserved risk tier (disabled until stress-test sign-off)
+export const FUTURES_ALLOWED_LEVERAGES = [1, 2, 3, 5, 10, 20, 25, 50, 75, 100, 125] as const;
+export const FUTURES_FUTURE_MAX_LEVERAGE = 125;
 
 export type FuturesLeverage = (typeof FUTURES_ALLOWED_LEVERAGES)[number];
+export type FuturesAssetRiskProfile =
+  | 'MAJOR_CRYPTO'
+  | 'ALT_CRYPTO'
+  | 'EQUITY_FX'
+  | 'LIQUID_MEME'
+  | 'EMERGING_MEME';
+export type FuturesMarketRegime =
+  | 'NORMAL'
+  | 'HIGH_VOLATILITY'
+  | 'EXTREME_VOLATILITY'
+  | 'LIQUIDITY_CRISIS'
+  | 'RECOVERY';
 export type FuturesPositionSide = 'LONG' | 'SHORT';
 export type FuturesOrderSide = 'BUY' | 'SELL';
 export type FuturesMarginMode = 'ISOLATED' | 'CROSS';
@@ -29,7 +41,8 @@ export type FuturesOrderType =
   | 'STOP_MARKET'
   | 'STOP_LIMIT'
   | 'TAKE_PROFIT_MARKET'
-  | 'TAKE_PROFIT_LIMIT';
+  | 'TAKE_PROFIT_LIMIT'
+  | 'TRAILING_STOP_MARKET';
 export type FuturesTriggerSource = 'MARK_PRICE' | 'LAST_PRICE';
 export type FuturesTimeInForce = 'GTC' | 'IOC';
 export type FuturesOrderStatus =
@@ -98,12 +111,31 @@ export const FUTURES_RISK_TIERS: FuturesRiskTier[] = [
   },
 ];
 
+export interface FuturesRegimeState {
+  symbol: string;
+  regime: FuturesMarketRegime;
+  realizedVolatilityPct: number;
+  spreadBps: number;
+  bookDepthMinor: number;
+  recentLiquidationCount: number;
+  leverageCapMultiplier: number;
+  maxLeverageHardCap: number;
+  spreadMultiplier: number;
+  depthMultiplier: number;
+  warningMessage: string | null;
+  isManualOverride: boolean;
+  lastTransitionAt: string;
+}
+
 export interface FuturesContract {
   symbol: string; // e.g. BTC-SIM/CR-PERP
   name: string;
   underlyingSpotSymbol: string; // e.g. BTC-SIM, EUR-SIM/CR
   underlyingMarketClass: 'CRYPTO' | 'STOCK' | 'FOREX';
+  underlyingClass?: 'CRYPTO' | 'STOCK' | 'FOREX' | 'MEME';
+  riskProfile?: FuturesAssetRiskProfile;
   exchange: 'EMPIRE_FUTURES';
+  contractType?: 'PERPETUAL';
   settlementCurrency: 'CR';
   contractMultiplier: number; // Integer multiplier (1 for linear 1:1 contracts)
   priceScale: number; // 100 for 2-dec CR, 10_000 for 4-dec FX-PERP
@@ -118,7 +150,9 @@ export interface FuturesContract {
   makerFeeBps: number;
   takerFeeBps: number;
   liquidationFeeBps: number;
-  maxLeverage: FuturesLeverage;
+  maxLeverage: number;
+  effectiveMaxLeverage?: number;
+  regime?: FuturesMarketRegime;
   // Dynamic live market pricing & stats
   lastPriceInt: number;
   indexPriceInt: number;
@@ -130,13 +164,17 @@ export interface FuturesContract {
   priceChange24hInt: number;
   priceChange24hPct: number;
   volume24hQty: number;
+  volume24h?: number;
   turnover24hMinor: number;
   openInterestQty: number; // Total LONG contracts (= Total SHORT contracts)
   openInterestNotionalMinor: number;
   currentFundingRateBps: number; // Signed bps (e.g. +12 = +0.12%, -5 = -0.05%)
+  lastFundingRateBps?: number;
   estimatedFundingRateBps: number;
+  fundingRateCapBps?: number;
   nextFundingAt: string;
   fundingIntervalSeconds: number;
+  fundingIntervalMs?: number;
   status: FuturesContractStatus;
   degradedReason: string | null;
   lastIndexUpdatedAt: string;
@@ -204,6 +242,7 @@ export interface FuturesOrder {
   realizedPnlMinor: number;
   attachedStopLossInt: number | null;
   attachedTakeProfitInt: number | null;
+  callbackRateBps?: number | null;
   parentOrderId: string | null;
   status: FuturesOrderStatus;
   rejectReason: string | null;
@@ -258,6 +297,22 @@ export interface FuturesOrderBookSnapshot {
   markPriceInt: number;
   indexPriceInt: number;
   sequenceNumber: number;
+  timestamp: string;
+}
+
+export interface FuturesOrderBookDelta {
+  symbol: string;
+  prevSequenceNumber: number;
+  sequenceNumber: number;
+  bids: FuturesOrderBookLevel[];
+  asks: FuturesOrderBookLevel[];
+  bestBidInt: number | null;
+  bestAskInt: number | null;
+  spreadInt: number | null;
+  spreadPct: number | null;
+  lastPriceInt: number;
+  markPriceInt: number;
+  indexPriceInt: number;
   timestamp: string;
 }
 
@@ -343,10 +398,24 @@ export interface FuturesInsuranceFundState {
   adlNote: string;
 }
 
+export type FuturesBotArchetype =
+  | 'PERP_MARKET_MAKER'
+  | 'BASIS_ARBITRAGE'
+  | 'TREND_MOMENTUM'
+  | 'MACRO_HEDGER'
+  | 'HIGH_BETA_SPECULATOR'
+  | 'CONSERVATIVE_MM'
+  | 'AGGRESSIVE_MM'
+  | 'MOMENTUM_TRADER'
+  | 'MEAN_REVERSION'
+  | 'NEWS_TRADER'
+  | 'LIQUIDITY_SENSITIVE'
+  | 'INSTITUTIONAL_RISK_MANAGER';
+
 export interface FuturesBotSummary {
   id: string;
   name: string;
-  archetype: 'PERP_MARKET_MAKER' | 'BASIS_ARBITRAGE' | 'TREND_MOMENTUM' | 'MACRO_HEDGER' | 'HIGH_BETA_SPECULATOR';
+  archetype: FuturesBotArchetype;
   strategyLabel: string;
   availableCRMinor: number;
   openPositionsCount: number;
@@ -490,6 +559,81 @@ export function resolveRiskTier(notionalMinor: number): FuturesRiskTier {
     if (notionalMinor <= tier.maxNotionalMinor) return tier;
   }
   return activeTiers[activeTiers.length - 1];
+}
+
+export function getAllowedLeveragesForContract(
+  contractMaxLeverage: number,
+  effectiveMaxLeverage?: number,
+): FuturesLeverage[] {
+  const cap = Math.max(1, Math.min(contractMaxLeverage, effectiveMaxLeverage ?? contractMaxLeverage));
+  const list = FUTURES_ALLOWED_LEVERAGES.filter((lev) => lev <= cap);
+  return list.length > 0 ? [...list] : [1];
+}
+
+export interface EffectiveMarginParams {
+  tier: FuturesRiskTier;
+  maxAllowedLeverage: number;
+  maintenanceMarginBps: number;
+  initialMarginMinBps: number;
+  liquidationFeeBps: number;
+}
+
+export function resolveEffectiveMarginParams(
+  notionalMinor: number,
+  riskProfile: FuturesAssetRiskProfile,
+  contractMaxLeverage: number,
+  requestedLeverage: number,
+  effectiveMaxLeverage?: number,
+): EffectiveMarginParams {
+  const hardCap = Math.max(1, Math.min(contractMaxLeverage, effectiveMaxLeverage ?? contractMaxLeverage));
+  // Notional-tiered step-down (larger positions must carry lower max leverage & higher MMR)
+  const brackets: Array<{ maxNotionalMinor: number; maxLev: number; baseMmrBps: number }> = [
+    { maxNotionalMinor: 25_000_00, maxLev: 125, baseMmrBps: 50 },
+    { maxNotionalMinor: 100_000_00, maxLev: 75, baseMmrBps: 100 },
+    { maxNotionalMinor: 250_000_00, maxLev: 50, baseMmrBps: 200 },
+    { maxNotionalMinor: 1_000_000_00, maxLev: 25, baseMmrBps: 400 },
+    { maxNotionalMinor: Number.MAX_SAFE_INTEGER, maxLev: 10, baseMmrBps: 800 },
+  ];
+
+  const profileMmrAddonBps: Record<FuturesAssetRiskProfile, number> = {
+    MAJOR_CRYPTO: 0,
+    ALT_CRYPTO: 50,
+    EQUITY_FX: 150,
+    LIQUID_MEME: 150,
+    EMERGING_MEME: 350,
+  };
+
+  let idx = brackets.findIndex((b) => notionalMinor <= b.maxNotionalMinor);
+  if (idx < 0) idx = brackets.length - 1;
+  const bracket = brackets[idx];
+
+  const maxAllowedLeverage = Math.max(1, Math.min(hardCap, bracket.maxLev));
+  const maintenanceMarginBps = bracket.baseMmrBps + (profileMmrAddonBps[riskProfile] ?? 100);
+  const effectiveLev = Math.max(1, Math.min(requestedLeverage, maxAllowedLeverage));
+  const initialMarginMinBps = Math.ceil(BPS_DENOMINATOR / effectiveLev);
+  const liquidationFeeBps =
+    effectiveLev >= 50
+      ? 75
+      : effectiveLev >= 20
+        ? 60
+        : FUTURES_LIQUIDATION_FEE_BPS;
+
+  const tierObj: FuturesRiskTier = {
+    tier: idx + 1,
+    maxNotionalMinor: bracket.maxNotionalMinor,
+    maxLeverage: maxAllowedLeverage,
+    initialMarginMinBps,
+    maintenanceMarginBps,
+    enabled: true,
+  };
+
+  return {
+    tier: tierObj,
+    maxAllowedLeverage,
+    maintenanceMarginBps,
+    initialMarginMinBps,
+    liquidationFeeBps,
+  };
 }
 
 /**
