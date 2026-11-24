@@ -2,6 +2,7 @@ import { fromMinor, toMinor } from '../../../shared/contracts/money';
 import type { Asset, EconomyState, Order, Trade, VolatilityRegime } from '../../../shared/contracts/types';
 import { LedgerService } from '../ledger/LedgerService';
 import { MatchingEngine } from '../matching/MatchingEngine';
+import { MEME_SYMBOL_SET } from '../meme/memeSeed';
 
 export interface MarketMakerAgent {
   id: string;
@@ -123,7 +124,9 @@ export class MarketMakerEngine {
    * executes cleanly at Alice's resting 50.00 CR!
    */
   seedInitialOrderBooks(volatility: VolatilityRegime): void {
-    const assets = this.matching.listAssets().filter((a) => a.marketClass !== 'FOREX');
+    const assets = this.matching
+      .listAssets()
+      .filter((a) => a.marketClass !== 'FOREX' && !MEME_SYMBOL_SET.has(a.symbol));
     for (const asset of assets) {
       if (asset.status !== 'OPEN') continue;
       this.refreshMakerQuotesForAsset(asset, volatility, true);
@@ -217,7 +220,9 @@ export class MarketMakerEngine {
    * - Refreshes passive market maker quotes if liquidity thinned out.
    */
   runSimulationTick(economy: EconomyState, targetSymbol?: string): { trades: Trade[]; affectedSymbols: string[] } {
-    const openAssets = this.matching.listAssets().filter((a) => a.status === 'OPEN' && a.marketClass !== 'FOREX');
+    const openAssets = this.matching
+      .listAssets()
+      .filter((a) => a.status === 'OPEN' && a.marketClass !== 'FOREX' && !MEME_SYMBOL_SET.has(a.symbol));
     if (openAssets.length === 0) return { trades: [], affectedSymbols: [] };
 
     const selectedAsset =

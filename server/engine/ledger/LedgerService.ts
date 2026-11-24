@@ -3,6 +3,7 @@ import type { ILedgerRepository, IWalletRepository } from '../../../shared/contr
 import type { CurrencyBalance, Holding, LedgerEntry, MarketClass, Wallet } from '../../../shared/contracts/types';
 import { ALL_CURRENCIES, type CurrencyCode, formatCurrencyAmount, roundQty } from '../../../shared/contracts/money';
 import { DomainError } from '../../domain/DomainError';
+import { fastId } from '../matching/fastId';
 
 export const SYSTEM_ACCOUNTS = {
   TREASURY_ISSUANCE: 'SYS_TREASURY_ISSUANCE',
@@ -131,12 +132,37 @@ export class LedgerService {
   public readonly ledger: InMemoryLedgerRepository;
   private systemBalances = new Map<string, number>(); // CR system accounts
   private fxSystemBalances = new Map<string, number>(); // Keyed by `${currency}:${accountId}`
+  private activeAccountLocks = new Set<string>(); // Synchronous cross-market collateral lock guard
 
   constructor(worldId: string) {
     this.worldId = worldId;
     this.wallets = new InMemoryWalletRepository();
     this.ledger = new InMemoryLedgerRepository();
     this.initSystemAccounts();
+  }
+
+  /**
+   * Cross-market per-account collateral guard preventing re-entrant or overlapping
+   * CR balance reservations across Spot, Forex, and Futures engines.
+   */
+  withAccountLock<T>(playerId: string, fn: () => T): T {
+    if (this.activeAccountLocks.has(playerId)) {
+      throw new DomainError(
+        'RATE_LIMITED',
+        'Tài khoản đang xử lý giao dịch ký quỹ khác. Vui lòng thử lại ngay.',
+        409,
+      );
+    }
+    this.activeAccountLocks.add(playerId);
+    try {
+      return fn();
+    } finally {
+      this.activeAccountLocks.delete(playerId);
+    }
+  }
+
+  isAccountLocked(playerId: string): boolean {
+    return this.activeAccountLocks.has(playerId);
   }
 
   private initSystemAccounts(): void {
@@ -161,6 +187,7 @@ export class LedgerService {
   reset(): void {
     this.wallets.clear();
     this.ledger.clear();
+    this.activeAccountLocks.clear();
     this.initSystemAccounts();
   }
 
@@ -267,7 +294,7 @@ export class LedgerService {
       throw new DomainError('SERVER_ERROR', 'Số tiền ghi sổ cái phải là số nguyên không âm.');
     }
     const entry: LedgerEntry = {
-      id: `ldg_${crypto.randomBytes(6).toString('hex')}`,
+      id: fastId('ldg'),
       worldId: this.worldId,
       transactionId: params.transactionId,
       currency: params.currency ?? 'CR',
@@ -468,7 +495,7 @@ export class LedgerService {
     if (!Number.isInteger(params.amountMinor) || params.amountMinor <= 0) {
       throw new DomainError('INVALID_ORDER', 'Số tiền chuyển phải lớn hơn 0.');
     }
-    const txId = params.transactionId ?? `tx_${crypto.randomBytes(6).toString('hex')}`;
+    const txId = params.transactionId ?? fastId('tx');
 
     const fromWallet = this.wallets.getWallet(params.fromAccount);
     if (fromWallet) {

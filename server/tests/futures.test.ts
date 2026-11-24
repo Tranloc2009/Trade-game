@@ -104,15 +104,21 @@ describe('Empire Futures Exchange — Professional Perpetual Derivatives Engine'
     assert.equal(fxPnl, 2_000); // 0.02 * 1000 = 20.00 CR exact
   });
 
-  it('2. Seeds all 6 perpetual contracts and never grants spot asset ownership', () => {
+  it('2. Seeds all 12 perpetual contracts (6 core + 6 meme) and never grants spot asset ownership', () => {
     const world = createTestWorld();
     const overview = world.getFuturesOverview();
     const symbols = overview.contracts.map((c) => c.symbol).sort();
     assert.deepEqual(symbols, [
       'BTC-SIM/CR-PERP',
+      'CATX-SIM/CR-PERP',
+      'DEGEN-SIM/CR-PERP',
+      'DOGX-SIM/CR-PERP',
       'ETH-SIM/CR-PERP',
       'EUR-SIM/CR-PERP',
+      'FROG-SIM/CR-PERP',
+      'MOON-SIM/CR-PERP',
       'NOVA/CR-PERP',
+      'PEPEX-SIM/CR-PERP',
       'SOL-SIM/CR-PERP',
       'TITAN/CR-PERP',
     ]);

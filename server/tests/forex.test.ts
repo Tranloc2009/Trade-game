@@ -271,7 +271,8 @@ test('FX 04: Market Order rejects on empty book & partially fills only valid res
 
   assert.equal(mktRes.trades.length, 1);
   assert.equal(mktRes.order.filledQuantity, 80);
-  assert.equal(mktRes.order.remainingQuantity, 120);
+  assert.equal(mktRes.order.quantity - mktRes.order.filledQuantity, 120);
+  assert.equal(mktRes.order.remainingQuantity, 0);
   assert.equal(mktRes.order.status, 'CANCELLED');
   assert.equal(mktRes.orderBook.bids.length, 0);
   assert.equal(ledger.getCurrencyBalance('alice', 'EUR-SIM').availableMinor, toCurrencyMinor(80, 'EUR-SIM'));

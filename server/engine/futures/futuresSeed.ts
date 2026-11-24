@@ -1,133 +1,246 @@
-import {
-  FUTURES_LIQUIDATION_FEE_BPS,
-  FUTURES_MAKER_FEE_BPS,
-  FUTURES_TAKER_FEE_BPS,
-  toPriceInt,
-  toQtyInt,
-  type FuturesContract,
-} from '../../../shared/contracts/futures';
-import { MatchingEngine } from '../matching/MatchingEngine';
+import { toQtyInt, type FuturesAssetRiskProfile, type FuturesContract } from '../../../shared/contracts/futures';
+import type { Asset } from '../../../shared/contracts/types';
 
-export const DEFAULT_FUNDING_INTERVAL_SECONDS = 120; // 2 minutes in accelerated WORLD-01 simulation
-
-interface ContractSeedSpec {
+export interface FuturesContractSeedSpec {
   symbol: string;
   name: string;
   underlyingSpotSymbol: string;
-  underlyingMarketClass: 'CRYPTO' | 'STOCK' | 'FOREX';
-  fallbackPrice: number;
+  underlyingClass: 'CRYPTO' | 'STOCK' | 'FOREX' | 'MEME';
+  riskProfile: FuturesAssetRiskProfile;
   priceScale: number;
   priceDecimals: number;
   priceTickInt: number;
   qtyStep: number;
   minQty: number;
   maxOrderQty: number;
+  contractMultiplier: number;
+  maxLeverage: number;
+  fallbackPriceInt: number;
 }
 
-const CONTRACT_SPECS: ContractSeedSpec[] = [
+/**
+ * 12 Perpetual Futures Contracts (6 Core + 6 Eligible Meme Coin Perpetuals).
+ * Max leverage is strictly tailored per asset liquidity & volatility profile — NOT 125x universally!
+ */
+export const FUTURES_CONTRACT_SPECS: FuturesContractSeedSpec[] = [
+  // === 6 CORE CONTRACTS ===
   {
     symbol: 'BTC-SIM/CR-PERP',
-    name: 'Bitcoin Simulated Perpetual',
+    name: 'BTC-SIM Perpetual',
     underlyingSpotSymbol: 'BTC-SIM',
-    underlyingMarketClass: 'CRYPTO',
-    fallbackPrice: 64_200,
+    underlyingClass: 'CRYPTO',
+    riskProfile: 'MAJOR_CRYPTO',
     priceScale: 100,
     priceDecimals: 2,
     priceTickInt: 100, // 1.00 CR
     qtyStep: 0.01,
     minQty: 0.01,
-    maxOrderQty: 250,
+    maxOrderQty: 200,
+    contractMultiplier: 1,
+    maxLeverage: 125,
+    fallbackPriceInt: 6_420_000,
   },
   {
     symbol: 'ETH-SIM/CR-PERP',
-    name: 'Ethereum Simulated Perpetual',
+    name: 'ETH-SIM Perpetual',
     underlyingSpotSymbol: 'ETH-SIM',
-    underlyingMarketClass: 'CRYPTO',
-    fallbackPrice: 3_420,
+    underlyingClass: 'CRYPTO',
+    riskProfile: 'MAJOR_CRYPTO',
     priceScale: 100,
     priceDecimals: 2,
     priceTickInt: 50, // 0.50 CR
     qtyStep: 0.05,
     minQty: 0.05,
-    maxOrderQty: 1_500,
+    maxOrderQty: 1_000,
+    contractMultiplier: 1,
+    maxLeverage: 125,
+    fallbackPriceInt: 342_000,
   },
   {
     symbol: 'SOL-SIM/CR-PERP',
-    name: 'Solana Simulated Perpetual',
+    name: 'SOL-SIM Perpetual',
     underlyingSpotSymbol: 'SOL-SIM',
-    underlyingMarketClass: 'CRYPTO',
-    fallbackPrice: 168.5,
+    underlyingClass: 'CRYPTO',
+    riskProfile: 'ALT_CRYPTO',
     priceScale: 100,
     priceDecimals: 2,
     priceTickInt: 10, // 0.10 CR
     qtyStep: 0.1,
     minQty: 0.1,
-    maxOrderQty: 10_000,
+    maxOrderQty: 5_000,
+    contractMultiplier: 1,
+    maxLeverage: 75,
+    fallbackPriceInt: 16_850,
   },
   {
     symbol: 'NOVA/CR-PERP',
-    name: 'Nova Technologies Perpetual',
+    name: 'NOVA Equity Perpetual',
     underlyingSpotSymbol: 'NOVA',
-    underlyingMarketClass: 'STOCK',
-    fallbackPrice: 50.0,
+    underlyingClass: 'STOCK',
+    riskProfile: 'EQUITY_FX',
     priceScale: 100,
     priceDecimals: 2,
     priceTickInt: 10, // 0.10 CR
     qtyStep: 1,
     minQty: 1,
     maxOrderQty: 25_000,
+    contractMultiplier: 1,
+    maxLeverage: 10,
+    fallbackPriceInt: 5_000,
   },
   {
     symbol: 'TITAN/CR-PERP',
-    name: 'Titan Motors Perpetual',
+    name: 'TITAN Equity Perpetual',
     underlyingSpotSymbol: 'TITAN',
-    underlyingMarketClass: 'STOCK',
-    fallbackPrice: 84.2,
+    underlyingClass: 'STOCK',
+    riskProfile: 'EQUITY_FX',
     priceScale: 100,
     priceDecimals: 2,
     priceTickInt: 10, // 0.10 CR
     qtyStep: 1,
     minQty: 1,
     maxOrderQty: 25_000,
+    contractMultiplier: 1,
+    maxLeverage: 10,
+    fallbackPriceInt: 8_420,
   },
   {
     symbol: 'EUR-SIM/CR-PERP',
-    name: 'Euro Simulated Perpetual',
+    name: 'EUR-SIM FX Perpetual',
     underlyingSpotSymbol: 'EUR-SIM/CR',
-    underlyingMarketClass: 'FOREX',
-    fallbackPrice: 1.084,
+    underlyingClass: 'FOREX',
+    riskProfile: 'EQUITY_FX',
     priceScale: 10_000,
     priceDecimals: 4,
-    priceTickInt: 1, // 0.0001 CR
-    qtyStep: 100,
-    minQty: 100,
-    maxOrderQty: 2_000_000,
+    priceTickInt: 5, // 0.0005 CR
+    qtyStep: 10,
+    minQty: 10,
+    maxOrderQty: 250_000,
+    contractMultiplier: 1,
+    maxLeverage: 10,
+    fallbackPriceInt: 10_850,
+  },
+
+  // === 6 MEME COIN PERPETUAL CONTRACTS (V2) ===
+  {
+    symbol: 'DOGX-SIM/CR-PERP',
+    name: 'Dog Empire Perpetual',
+    underlyingSpotSymbol: 'DOGX-SIM',
+    underlyingClass: 'MEME',
+    riskProfile: 'LIQUID_MEME',
+    priceScale: 100,
+    priceDecimals: 2,
+    priceTickInt: 1, // 0.01 CR
+    qtyStep: 10,
+    minQty: 10,
+    maxOrderQty: 200_000,
+    contractMultiplier: 1,
+    maxLeverage: 50,
+    fallbackPriceInt: 85,
+  },
+  {
+    symbol: 'PEPEX-SIM/CR-PERP',
+    name: 'Pepe Galaxy Perpetual',
+    underlyingSpotSymbol: 'PEPEX-SIM',
+    underlyingClass: 'MEME',
+    riskProfile: 'LIQUID_MEME',
+    priceScale: 100,
+    priceDecimals: 2,
+    priceTickInt: 1, // 0.01 CR
+    qtyStep: 50,
+    minQty: 50,
+    maxOrderQty: 400_000,
+    contractMultiplier: 1,
+    maxLeverage: 50,
+    fallbackPriceInt: 18,
+  },
+  {
+    symbol: 'MOON-SIM/CR-PERP',
+    name: 'Moon Rocket Perpetual',
+    underlyingSpotSymbol: 'MOON-SIM',
+    underlyingClass: 'MEME',
+    riskProfile: 'LIQUID_MEME',
+    priceScale: 100,
+    priceDecimals: 2,
+    priceTickInt: 2, // 0.02 CR
+    qtyStep: 1,
+    minQty: 1,
+    maxOrderQty: 80_000,
+    contractMultiplier: 1,
+    maxLeverage: 50,
+    fallbackPriceInt: 420,
+  },
+  {
+    symbol: 'FROG-SIM/CR-PERP',
+    name: 'Frog Nation Perpetual',
+    underlyingSpotSymbol: 'FROG-SIM',
+    underlyingClass: 'MEME',
+    riskProfile: 'EMERGING_MEME',
+    priceScale: 100,
+    priceDecimals: 2,
+    priceTickInt: 1, // 0.01 CR
+    qtyStep: 10,
+    minQty: 10,
+    maxOrderQty: 150_000,
+    contractMultiplier: 1,
+    maxLeverage: 20,
+    fallbackPriceInt: 55,
+  },
+  {
+    symbol: 'CATX-SIM/CR-PERP',
+    name: 'Cat Empire Perpetual',
+    underlyingSpotSymbol: 'CATX-SIM',
+    underlyingClass: 'MEME',
+    riskProfile: 'EMERGING_MEME',
+    priceScale: 100,
+    priceDecimals: 2,
+    priceTickInt: 1, // 0.01 CR
+    qtyStep: 5,
+    minQty: 5,
+    maxOrderQty: 100_000,
+    contractMultiplier: 1,
+    maxLeverage: 20,
+    fallbackPriceInt: 140,
+  },
+  {
+    symbol: 'DEGEN-SIM/CR-PERP',
+    name: 'Degen World Perpetual',
+    underlyingSpotSymbol: 'DEGEN-SIM',
+    underlyingClass: 'MEME',
+    riskProfile: 'EMERGING_MEME',
+    priceScale: 100,
+    priceDecimals: 2,
+    priceTickInt: 2, // 0.02 CR
+    qtyStep: 1,
+    minQty: 1,
+    maxOrderQty: 60_000,
+    contractMultiplier: 1,
+    maxLeverage: 10,
+    fallbackPriceInt: 260,
   },
 ];
 
-export function buildSeedFuturesContracts(spotMatching: MatchingEngine, nowMs = Date.now()): FuturesContract[] {
+export const FUTURES_FUNDING_INTERVAL_MS = 180_000; // 3 real minutes per funding epoch in accelerated simulation
+
+export function buildSeedFuturesContracts(
+  spotAssetLookup: (symbol: string) => Asset | undefined,
+  nowMs = Date.now(),
+): FuturesContract[] {
   const nowIso = new Date(nowMs).toISOString();
-  const nextFundingIso = new Date(nowMs + DEFAULT_FUNDING_INTERVAL_SECONDS * 1000).toISOString();
+  const nextFundingIso = new Date(nowMs + FUTURES_FUNDING_INTERVAL_MS).toISOString();
 
-  return CONTRACT_SPECS.map((spec) => {
-    const spotAsset = spotMatching.getAsset(spec.underlyingSpotSymbol);
-    let initPriceInt = toPriceInt(spec.fallbackPrice, spec.priceScale);
-
-    if (spotAsset && spotAsset.lastPriceMinor > 0) {
-      const spotScale = spotAsset.priceScale ?? 100;
-      const spotMajor = spotAsset.lastPriceMinor / spotScale;
-      initPriceInt = Math.max(spec.priceTickInt, toPriceInt(spotMajor, spec.priceScale));
-      initPriceInt = Math.round(initPriceInt / spec.priceTickInt) * spec.priceTickInt;
-    }
+  return FUTURES_CONTRACT_SPECS.map((spec) => {
+    const spot = spotAssetLookup(spec.underlyingSpotSymbol);
+    const initPrice = spot ? spot.lastPriceMinor : spec.fallbackPriceInt;
 
     return {
       symbol: spec.symbol,
       name: spec.name,
       underlyingSpotSymbol: spec.underlyingSpotSymbol,
-      underlyingMarketClass: spec.underlyingMarketClass,
-      exchange: 'EMPIRE_FUTURES',
+      underlyingClass: spec.underlyingClass,
+      riskProfile: spec.riskProfile,
       settlementCurrency: 'CR',
-      contractMultiplier: 1,
+      contractType: 'PERPETUAL',
       priceScale: spec.priceScale,
       priceDecimals: spec.priceDecimals,
       priceTickInt: spec.priceTickInt,
@@ -137,27 +250,30 @@ export function buildSeedFuturesContracts(spotMatching: MatchingEngine, nowMs = 
       minQtyInt: toQtyInt(spec.minQty),
       maxOrderQty: spec.maxOrderQty,
       maxOrderQtyInt: toQtyInt(spec.maxOrderQty),
-      makerFeeBps: FUTURES_MAKER_FEE_BPS,
-      takerFeeBps: FUTURES_TAKER_FEE_BPS,
-      liquidationFeeBps: FUTURES_LIQUIDATION_FEE_BPS,
-      maxLeverage: 10,
-      lastPriceInt: initPriceInt,
-      indexPriceInt: initPriceInt,
-      markPriceInt: initPriceInt,
-      referencePriceInt: initPriceInt,
-      open24hInt: initPriceInt,
-      high24hInt: initPriceInt,
-      low24hInt: initPriceInt,
+      contractMultiplier: spec.contractMultiplier,
+      makerFeeBps: spec.underlyingClass === 'MEME' ? 3 : 2, // 0.03% Meme / 0.02% Core
+      takerFeeBps: spec.underlyingClass === 'MEME' ? 6 : 5, // 0.06% Meme / 0.05% Core
+      liquidationFeeBps: 50, // Base 0.50% (scaled dynamically for >10x)
+      maxLeverage: spec.maxLeverage,
+      effectiveMaxLeverage: spec.maxLeverage,
+      regime: 'NORMAL',
+      fundingIntervalMs: FUTURES_FUNDING_INTERVAL_MS,
+      fundingRateCapBps: 75, // +/- 0.75% per interval
+      lastPriceInt: initPrice,
+      indexPriceInt: initPrice,
+      markPriceInt: initPrice,
+      open24hInt: initPrice,
+      high24hInt: initPrice,
+      low24hInt: initPrice,
       priceChange24hInt: 0,
       priceChange24hPct: 0,
-      volume24hQty: 0,
+      volume24h: 0,
       turnover24hMinor: 0,
       openInterestQty: 0,
       openInterestNotionalMinor: 0,
-      currentFundingRateBps: 0,
       estimatedFundingRateBps: 0,
+      lastFundingRateBps: 0,
       nextFundingAt: nextFundingIso,
-      fundingIntervalSeconds: DEFAULT_FUNDING_INTERVAL_SECONDS,
       status: 'OPEN',
       degradedReason: null,
       lastIndexUpdatedAt: nowIso,

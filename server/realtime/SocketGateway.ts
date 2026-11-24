@@ -49,20 +49,22 @@ export class SocketGateway implements IRealtimeTransport {
 
       socket.on('market:subscribe', (symbol: string) => {
         if (typeof symbol !== 'string' || symbol.length > 24) return;
+        const normalized = symbol.toUpperCase();
         // Leave previous market rooms so client only receives subscribed market book/candles
         for (const room of socket.rooms) {
           if (room.startsWith('market:')) {
             socket.leave(room);
           }
         }
-        socket.join(`market:${symbol}`);
+        socket.join(`market:${normalized}`);
         // Immediately send authoritative order book snapshot for subscribed symbol
         try {
-          const book = this.world.matching.getOrderBook(symbol);
+          const book = this.world.matching.getOrderBook(normalized);
           socket.emit('world:event', {
             eventId: `sync_book_${Date.now()}`,
             eventType: 'market.orderbook.updated',
             worldId: this.world.worldId,
+            marketId: normalized,
             sequenceNumber: this.world.eventBus.getSequenceNumber(),
             serverTimestamp: new Date().toISOString(),
             payload: book,
@@ -87,12 +89,63 @@ export class SocketGateway implements IRealtimeTransport {
             eventId: `sync_fbook_${Date.now()}`,
             eventType: 'futures.orderbook.updated',
             worldId: this.world.worldId,
+            marketId: normalized,
             sequenceNumber: this.world.eventBus.getSequenceNumber(),
             serverTimestamp: new Date().toISOString(),
             payload: book,
           } satisfies RealtimeEnvelope);
         } catch {
           // Invalid futures symbol ignored safely
+        }
+      });
+
+      socket.on('futures:resync', (symbol?: string) => {
+        const playerId = this.socketPlayerMap.get(socket.id) ?? null;
+        if (typeof symbol === 'string' && symbol.length <= 24) {
+          const normalized = symbol.toUpperCase();
+          try {
+            const book = this.world.futures.getOrderBook(normalized);
+            socket.emit('world:event', {
+              eventId: `resync_fbook_${Date.now()}`,
+              eventType: 'futures.orderbook.updated',
+              worldId: this.world.worldId,
+              marketId: normalized,
+              sequenceNumber: this.world.eventBus.getSequenceNumber(),
+              serverTimestamp: new Date().toISOString(),
+              payload: book,
+            } satisfies RealtimeEnvelope);
+          } catch {
+            // Invalid symbol ignored safely
+          }
+        }
+        if (playerId) {
+          this.emitPlayerOrdersSync(socket, playerId);
+          this.emitPlayerFuturesSync(socket, playerId);
+        }
+      });
+
+      socket.on('orders:resync', () => {
+        const playerId = this.socketPlayerMap.get(socket.id) ?? null;
+        if (playerId) {
+          this.emitPlayerOrdersSync(socket, playerId);
+        }
+      });
+
+      socket.on('connect:resync', () => {
+        const playerId = this.socketPlayerMap.get(socket.id) ?? null;
+        if (playerId) {
+          try {
+            socket.emit('world:event', {
+              eventId: `sync_conn_${Date.now()}`,
+              eventType: 'notification.created',
+              worldId: this.world.worldId,
+              sequenceNumber: this.world.eventBus.getSequenceNumber(),
+              serverTimestamp: new Date().toISOString(),
+              payload: { resync: true, playerId },
+            } satisfies RealtimeEnvelope);
+          } catch {
+            // Safe ignore if player not bootstrapped
+          }
         }
       });
 
@@ -106,6 +159,10 @@ export class SocketGateway implements IRealtimeTransport {
           serverTimestamp: new Date().toISOString(),
           payload: this.world.getWorldSnapshot(playerId),
         } satisfies RealtimeEnvelope);
+        if (playerId) {
+          this.emitPlayerOrdersSync(socket, playerId);
+          this.emitPlayerFuturesSync(socket, playerId);
+        }
       });
 
       socket.on('disconnect', () => {
@@ -122,6 +179,51 @@ export class SocketGateway implements IRealtimeTransport {
     });
   }
 
+  private emitPlayerOrdersSync(socket: Socket, playerId: string): void {
+    try {
+      const orders = this.world.matching.listPlayerOrders(playerId);
+      socket.emit('world:event', {
+        eventId: `sync_ord_${Date.now()}`,
+        eventType: 'orders.synced',
+        worldId: this.world.worldId,
+        sequenceNumber: this.world.eventBus.getSequenceNumber(),
+        serverTimestamp: new Date().toISOString(),
+        payload: { playerId, orders },
+      } satisfies RealtimeEnvelope);
+    } catch {
+      // Player not initialized yet
+    }
+  }
+
+  private emitPlayerFuturesSync(socket: Socket, playerId: string): void {
+    try {
+      const account = this.world.getFuturesAccount(playerId);
+      const seq = this.world.eventBus.getSequenceNumber();
+      const nowIso = new Date().toISOString();
+      socket.emit('world:event', {
+        eventId: `sync_facc_${Date.now()}`,
+        eventType: 'futures.account.synced',
+        worldId: this.world.worldId,
+        sequenceNumber: seq,
+        serverTimestamp: nowIso,
+        payload: { playerId, account },
+      } satisfies RealtimeEnvelope);
+      for (const pos of account.positions) {
+        socket.emit('world:event', {
+          eventId: `resync_fpos_${Date.now()}_${pos.symbol}`,
+          eventType: 'futures.position.updated',
+          worldId: this.world.worldId,
+          marketId: pos.symbol,
+          sequenceNumber: seq,
+          serverTimestamp: nowIso,
+          payload: { playerId, symbol: pos.symbol, position: pos },
+        } satisfies RealtimeEnvelope);
+      }
+    } catch {
+      // Player not initialized yet
+    }
+  }
+
   private attachSession(socket: Socket, token: string | undefined): void {
     const prevPlayer = this.socketPlayerMap.get(socket.id);
     if (prevPlayer) {
@@ -132,6 +234,8 @@ export class SocketGateway implements IRealtimeTransport {
     if (session) {
       this.socketPlayerMap.set(socket.id, session.playerId);
       socket.join(`player:${session.playerId}`);
+      this.emitPlayerOrdersSync(socket, session.playerId);
+      this.emitPlayerFuturesSync(socket, session.playerId);
     } else {
       this.socketPlayerMap.delete(socket.id);
     }

@@ -95,13 +95,16 @@ export const PlaceFuturesOrderSchema = z
       'STOP_LIMIT',
       'TAKE_PROFIT_MARKET',
       'TAKE_PROFIT_LIMIT',
+      'TRAILING_STOP_MARKET',
     ]),
     timeInForce: z.enum(['GTC', 'IOC']).optional().default('GTC'),
     marginMode: z.enum(['ISOLATED', 'CROSS']).optional().default('ISOLATED'),
-    leverage: z.number().int().min(1).max(20).optional().default(1),
+    leverage: z.number().int().min(1).max(125).optional().default(1),
     priceCR: z.number().positive('Giá đặt phải lớn hơn 0').max(10_000_000).optional(),
     triggerPriceCR: z.number().positive('Giá kích hoạt phải lớn hơn 0').max(10_000_000).optional(),
     triggerSource: z.enum(['MARK_PRICE', 'LAST_PRICE']).optional().default('MARK_PRICE'),
+    callbackRateBps: z.number().int().min(10).max(2000).optional(), // 0.10% .. 20.00%
+    activationPriceCR: z.number().positive('Giá kích hoạt Trailing phải lớn hơn 0').max(10_000_000).optional(),
     quantity: z.number().positive('Khối lượng phải lớn hơn 0').max(10_000_000),
     reduceOnly: z.boolean().optional().default(false),
     postOnly: z.boolean().optional().default(false),
@@ -117,6 +120,7 @@ export const PlaceFuturesOrderSchema = z
       d.type === 'MARKET' ||
       d.type === 'STOP_MARKET' ||
       d.type === 'TAKE_PROFIT_MARKET' ||
+      d.type === 'TRAILING_STOP_MARKET' ||
       (d.priceCR !== undefined && d.priceCR > 0),
     {
       message: 'Lệnh Limit bắt buộc phải nhập mức giá hợp lệ.',
@@ -127,10 +131,18 @@ export const PlaceFuturesOrderSchema = z
     (d) =>
       d.type === 'MARKET' ||
       d.type === 'LIMIT' ||
+      d.type === 'TRAILING_STOP_MARKET' ||
       (d.triggerPriceCR !== undefined && d.triggerPriceCR > 0),
     {
       message: 'Lệnh điều kiện (Stop Loss / Take Profit) bắt buộc phải nhập giá kích hoạt.',
       path: ['triggerPriceCR'],
+    },
+  )
+  .refine(
+    (d) => d.type !== 'TRAILING_STOP_MARKET' || (d.callbackRateBps !== undefined && d.callbackRateBps >= 10),
+    {
+      message: 'Lệnh Trailing Stop bắt buộc phải có tỷ lệ hồi giá (callbackRateBps từ 10 đến 2000).',
+      path: ['callbackRateBps'],
     },
   );
 

@@ -76,16 +76,17 @@ export function FuturesRiskModal({ onAccepted, onClose }: FuturesRiskModalProps)
 
           <ol className="space-y-2.5 list-decimal pl-4">
             <li>
-              <strong className="text-[var(--text-primary)]">Rủi ro đòn bẩy (1x – 10x):</strong> Đòn bẩy khuếch đại
-              cả lợi nhuận lẫn thua lỗ. Với đòn bẩy 10x (MMR bậc 1 là 4.00% + phí thanh lý 0.50%), giá di chuyển ngược
-              chiều ~5.5% đã có thể kích hoạt thanh lý. Mức đòn bẩy khởi đầu mặc định là{' '}
-              <strong className="font-mono text-[var(--accent)]">1x</strong>.
+              <strong className="text-[var(--text-primary)]">Rủi ro đòn bẩy (1x – 125x theo tài sản):</strong> Đòn bẩy
+              khuếch đại cả lợi nhuận lẫn thua lỗ và được giới hạn theo thanh khoản tài sản, bậc quy mô (Risk Tier) và
+              trạng thái thị trường (tối đa 125x cho BTC/ETH, 75x cho SOL, 10x–50x cho Meme, 10x cho Cổ phiếu/FX). Ở
+              mức 125x (IM 0.80%, MMR 0.35% + phí thanh lý 0.15%), giá đi ngược ~0.30% đã có thể kích hoạt thanh lý.
+              Mức đòn bẩy khởi đầu mặc định là <strong className="font-mono text-[var(--accent)]">1x</strong>.
             </li>
             <li>
               <strong className="text-[var(--text-primary)]">Cơ chế Thanh lý (Liquidation theo Mark Price):</strong>{' '}
               Khi Tỷ lệ ký quỹ (Margin Ratio) đạt <strong>80%</strong>, hệ thống phát cảnh báo Margin Call. Khi đạt{' '}
               <strong>100%</strong>, vị thế bị buộc đóng trên sổ lệnh thực và chịu phí thanh lý{' '}
-              <span className="font-mono">0.50%</span>.
+              <span className="font-mono">0.15% – 0.50%</span> theo bậc đòn bẩy.
             </li>
             <li>
               <strong className="text-[var(--text-primary)]">Ký quỹ Độc lập (Isolated Margin):</strong> Mỗi vị thế có
@@ -94,8 +95,9 @@ export function FuturesRiskModal({ onAccepted, onClose }: FuturesRiskModalProps)
             </li>
             <li>
               <strong className="text-[var(--text-primary)]">Phí giao dịch & Funding Rate ngang hàng:</strong> Phí{' '}
-              Maker <span className="font-mono">0.02%</span> / Taker <span className="font-mono">0.05%</span>. Funding
-              được thanh toán định kỳ giữa bên Long và bên Short theo cơ chế tổng bằng 0 (sàn không in thêm CR).
+              Maker <span className="font-mono">0.02%</span> / Taker <span className="font-mono">0.05%</span> (Meme:{' '}
+              <span className="font-mono">0.03% / 0.06%</span>). Funding được thanh toán định kỳ giữa bên Long và bên
+              Short theo cơ chế tổng bằng 0 (sàn không in thêm CR).
             </li>
             <li>
               <strong className="text-[var(--text-primary)]">Hợp đồng không đại diện sở hữu Spot:</strong> Mở vị thế

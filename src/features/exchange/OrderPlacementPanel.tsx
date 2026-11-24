@@ -26,7 +26,7 @@ export function OrderPlacementPanel({
   prefilledPrice,
   onOrderSubmitted,
 }: OrderPlacementPanelProps) {
-  const { player, setPlayer, setOrderBook, pushToast } = useAppStore();
+  const { player, setPlayer, setOrderBook, upsertSpotOrder, pushToast } = useAppStore();
 
   const [side, setSide] = useState<OrderSide>('BUY');
   const [orderType, setOrderType] = useState<OrderType>('LIMIT');
@@ -141,6 +141,7 @@ export function OrderPlacementPanel({
 
       setPlayer(res.profile);
       setOrderBook(res.orderBook);
+      upsertSpotOrder(res.order);
 
       const filledInfo =
         res.trades.length > 0

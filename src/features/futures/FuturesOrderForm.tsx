@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Lock, ShieldCheck } from 'lucide-react';
 import {
-  FUTURES_ALLOWED_LEVERAGES,
   calcFuturesFeeMinor,
   calcFuturesNotionalMinor,
   calcInitialMarginMinor,
   calcIsolatedLiquidationPrices,
   fromPriceInt,
-  resolveRiskTier,
+  getAllowedLeveragesForContract,
+  resolveEffectiveMarginParams,
   toPriceInt,
   toQtyInt,
   type FuturesAccountSummary,
@@ -64,6 +64,11 @@ export function FuturesOrderForm({
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  const allowedLeverages = useMemo(
+    () => getAllowedLeveragesForContract(contract.maxLeverage, contract.effectiveMaxLeverage),
+    [contract.maxLeverage, contract.effectiveMaxLeverage],
+  );
+
   // Reset form defaults cleanly when switching contract
   useEffect(() => {
     const defaultPrice = fromPriceInt(contract.markPriceInt, contract.priceScale);
@@ -73,7 +78,9 @@ export function FuturesOrderForm({
     setSlInput('');
     setTpInput('');
     setErrorMsg(null);
-  }, [contract.symbol]);
+    const maxCap = Math.min(contract.maxLeverage, contract.effectiveMaxLeverage ?? contract.maxLeverage);
+    setLeverage((prev) => (prev > maxCap ? (allowedLeverages[allowedLeverages.length - 1] ?? 1) : prev));
+  }, [contract.symbol, contract.effectiveMaxLeverage]);
 
   // Apply clicked orderbook price
   useEffect(() => {
@@ -133,6 +140,7 @@ export function FuturesOrderForm({
         estFeeMinor: 0,
         estLiqPriceInt: 0,
         mmrBps: 400,
+        liqFeeBps: 50,
         tierLabel: 'Tier 1',
         estFundingMinor: 0,
       };
@@ -144,7 +152,13 @@ export function FuturesOrderForm({
       contract.priceScale,
       contract.contractMultiplier,
     );
-    const tier = resolveRiskTier(notionalMinor);
+    const marginParams = resolveEffectiveMarginParams(
+      notionalMinor,
+      contract.riskProfile ?? 'EQUITY_FX',
+      contract.maxLeverage,
+      leverage,
+      contract.effectiveMaxLeverage,
+    );
     const initialMarginMinor = effectiveReduceOnly ? 0 : calcInitialMarginMinor(notionalMinor, leverage);
     const feeBps = postOnly && effectiveOrderType === 'LIMIT' ? contract.makerFeeBps : contract.takerFeeBps;
     const estFeeMinor = calcFuturesFeeMinor(notionalMinor, feeBps, true);
@@ -159,8 +173,8 @@ export function FuturesOrderForm({
           marginMinor: initialMarginMinor,
           priceScale: contract.priceScale,
           contractMultiplier: contract.contractMultiplier,
-          mmrBps: tier.maintenanceMarginBps,
-          liqFeeBps: contract.liquidationFeeBps,
+          mmrBps: marginParams.maintenanceMarginBps,
+          liqFeeBps: marginParams.liquidationFeeBps,
         });
 
     const absRate = Math.abs(contract.estimatedFundingRateBps);
@@ -175,8 +189,9 @@ export function FuturesOrderForm({
       initialMarginMinor,
       estFeeMinor,
       estLiqPriceInt: liquidationPriceInt,
-      mmrBps: tier.maintenanceMarginBps,
-      tierLabel: `Tier ${tier.tier}`,
+      mmrBps: marginParams.maintenanceMarginBps,
+      liqFeeBps: marginParams.liquidationFeeBps,
+      tierLabel: `Tier ${marginParams.tier.tier} (max ${marginParams.maxAllowedLeverage}x)`,
       estFundingMinor,
     };
   }, [
@@ -307,38 +322,33 @@ export function FuturesOrderForm({
           <span className="font-mono text-[11px] text-[var(--text-muted)]">Ký quỹ CR</span>
         </div>
 
-        {/* Leverage Selector */}
+        {/* Leverage Selector (Dynamic per-asset & regime cap up to 125x) */}
         <div className="space-y-1">
           <div className="flex items-center justify-between text-[11px]">
-            <span className="text-[var(--text-secondary)]">Đòn bẩy (Mặc định 1x)</span>
+            <span className="text-[var(--text-secondary)]">
+              Đòn bẩy (Tối đa {contract.effectiveMaxLeverage ?? contract.maxLeverage}x)
+            </span>
             <span className="font-mono font-bold text-[var(--accent)]">{leverage}x</span>
           </div>
-          <div className="grid grid-cols-6 gap-1">
-            {FUTURES_ALLOWED_LEVERAGES.map((lev) => (
+          <div className="flex flex-wrap gap-1">
+            {allowedLeverages.map((lev) => (
               <button
                 key={lev}
                 type="button"
                 onClick={() => setLeverage(lev)}
-                className={`py-1 rounded text-[11px] font-mono font-semibold border transition-colors cursor-pointer ${
+                className={`px-2 py-1 rounded text-[11px] font-mono font-semibold border transition-colors cursor-pointer ${
                   leverage === lev
-                    ? lev >= 5
-                      ? 'bg-[var(--warning)]/15 border-[var(--warning)] text-[var(--warning)]'
-                      : 'bg-[var(--accent)]/15 border-[var(--accent)] text-[var(--accent)]'
+                    ? lev >= 25
+                      ? 'bg-[var(--negative)]/15 border-[var(--negative)] text-[var(--negative)]'
+                      : lev >= 5
+                        ? 'bg-[var(--warning)]/15 border-[var(--warning)] text-[var(--warning)]'
+                        : 'bg-[var(--accent)]/15 border-[var(--accent)] text-[var(--accent)]'
                     : 'bg-[var(--bg-app)] border-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                 }`}
               >
                 {lev}x
               </button>
             ))}
-            <button
-              type="button"
-              disabled
-              title="Mức 20x chỉ mở khóa sau khi hoàn thành toàn bộ stress test rủi ro"
-              className="py-1 rounded text-[10px] font-mono bg-[var(--bg-app)] border border-[var(--border-subtle)] text-[var(--text-muted)] opacity-60 cursor-not-allowed inline-flex items-center justify-center gap-0.5"
-            >
-              <Lock className="w-2.5 h-2.5" />
-              20x
-            </button>
           </div>
         </div>
       </div>
@@ -717,7 +727,7 @@ export function FuturesOrderForm({
             />
             <span>
               Xác nhận đòn bẩy cao <strong>{leverage}x</strong>: giá ngược chiều mạnh theo Mark Price sẽ kích hoạt
-              thanh lý bắt buộc (phí 0.50%).
+              thanh lý bắt buộc (phí {(preview.liqFeeBps / 100).toFixed(2)}%).
             </span>
           </label>
         )}
