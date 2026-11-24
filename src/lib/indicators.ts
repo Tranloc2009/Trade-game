@@ -55,16 +55,9 @@ export function calculateEMA(candles: Candle[], period: number): LinePoint[] {
 }
 
 /**
- * Generated architectural illustration paths (client-only URL strings).
- * Explicitly presented as simulated illustrations in the UI — never labeled as real photographs.
+ * Generated district architectural photography paths (client-only URL strings).
  */
 export const DISTRICT_IMAGES: Record<Property['imageKey'], string> = {
-  landmark81: '/src/assets/images/vn_landmark81_saigon_1795485456055.jpg',
-  sala: '/src/assets/images/vn_sala_thuthiem_1795485456025.jpg',
-  empire_city: '/src/assets/images/vn_empire_city_thuthiem_1795485456859.jpg',
-  lotte_hanoi: '/src/assets/images/vn_lotte_hanoi_1795485456376.jpg',
-  keangnam72: '/src/assets/images/vn_keangnam_landmark72_1795485455682.jpg',
-  sun_cosmo: '/src/assets/images/vn_sun_cosmo_danang_1795485456716.jpg',
   financial: '/src/assets/images/district_central_financial_1795443839869.jpg',
   riverside: '/src/assets/images/district_riverside_1795443839033.jpg',
   industrial: '/src/assets/images/district_industrial_zone_1795443839037.jpg',

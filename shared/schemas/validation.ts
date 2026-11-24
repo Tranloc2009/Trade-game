@@ -34,11 +34,6 @@ export const PlaceAuctionBidSchema = z.object({
   bidAmountCR: z.number().positive().max(1_000_000_000),
 });
 
-export const PropertyCollateralLoanSchema = z.object({
-  principalCR: z.number().min(5_000, 'Khoản vay tối thiểu 5,000 CR').max(50_000_000),
-  termGameDays: z.number().int().min(5).max(30).default(15),
-});
-
 export const CreateCompanySchema = z.object({
   name: z.string().trim().min(3).max(40),
   ticker: z

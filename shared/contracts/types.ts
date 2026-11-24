@@ -1,14 +1,4 @@
 import type { CurrencyCode } from './money';
-import type {
-  PropertyListingRecord,
-  PropertyListingStatus,
-  PropertyRentalAgreement,
-  PropertyRentalCycleRecord,
-  PropertyRentalStatus,
-  PropertyTransactionRecord,
-  VietnamCityCode,
-  VietnamLandmarkImageKey,
-} from './property';
 
 export const API_CONTRACT_VERSION = '1.0.0';
 export const DEFAULT_WORLD_ID = 'WORLD-01';
@@ -39,12 +29,6 @@ export type Timeframe = '1m' | '5m' | '15m' | '1h' | '4h' | '1D';
 export type AccountRole = 'PLAYER' | 'MARKET_MAKER' | 'INVESTOR_BOT' | 'SYSTEM';
 
 export type PropertyDistrict =
-  | 'Tân Cảng, Bình Thạnh'
-  | 'Khu đô thị mới Thủ Thiêm, TP. Thủ Đức'
-  | 'Khu 2B, Đô thị mới Thủ Thiêm'
-  | 'Liễu Giai, Ba Đình'
-  | 'Khu đô thị mới Cầu Giấy, Nam Từ Liêm'
-  | 'Đường Trần Thị Lý, Ngũ Hành Sơn'
   | 'Central Financial District'
   | 'Riverside District'
   | 'Industrial Zone'
@@ -104,10 +88,7 @@ export type ErrorCode =
   | 'FUTURES_REDUCE_ONLY_VIOLATION'
   | 'FUTURES_POST_ONLY_REJECTED'
   | 'FUTURES_CROSS_MARGIN_DISABLED'
-  | 'FUTURES_POSITION_NOT_FOUND'
-  | 'PROPERTY_COLLATERAL_LOCKED'
-  | 'PROPERTY_RENTAL_CONFLICT'
-  | 'PROPERTY_MAX_UPGRADE';
+  | 'FUTURES_POSITION_NOT_FOUND';
 
 export const ERROR_MESSAGES_VI: Record<ErrorCode, string> = {
   UNAUTHORIZED: 'Phiên đăng nhập không hợp lệ hoặc đã hết hạn. Vui lòng kết nối lại.',
@@ -147,9 +128,6 @@ export const ERROR_MESSAGES_VI: Record<ErrorCode, string> = {
   FUTURES_POST_ONLY_REJECTED: 'Lệnh Post-Only bị từ chối vì sẽ khớp ngay lập tức (taker) thay vì tạo thanh khoản (maker).',
   FUTURES_CROSS_MARGIN_DISABLED: 'Cross Margin hiện đang khóa. Vui lòng sử dụng Isolated Margin.',
   FUTURES_POSITION_NOT_FOUND: 'Không tìm thấy vị thế Futures đang mở tương ứng.',
-  PROPERTY_COLLATERAL_LOCKED: 'Bất động sản này đang được thế chấp cho khoản vay Empire Bank. Vui lòng tất toán khoản vay trước khi chuyển nhượng hoặc thế chấp lại.',
-  PROPERTY_RENTAL_CONFLICT: 'Bất động sản này đã có hợp đồng cho thuê độc quyền đang hiệu lực.',
-  PROPERTY_MAX_UPGRADE: 'Bất động sản đã đạt cấp nâng cấp tối đa trong trò chơi.',
 };
 
 export interface CompanyFundamentals {
@@ -389,20 +367,13 @@ export interface Property {
   id: string;
   worldId: string;
   name: string;
-  realWorldLocationId: string;
-  cityCode: VietnamCityCode;
-  city: string;
   district: PropertyDistrict;
-  districtOrArea: string;
   type: PropertyType;
-  gameAssetType: PropertyType;
   areaSqm: number;
   ownerId: string;
   ownerName: string;
   isListed: boolean;
-  listingStatus: PropertyListingStatus;
   listingPriceMinor: number | null;
-  purchasePriceMinor: number;
   lastSalePriceMinor: number;
   estimatedValueMinor: number;
   monthlyGrossRentMinor: number;
@@ -410,20 +381,10 @@ export interface Property {
   monthlyTaxMinor: number;
   rentalYieldAnnualPct: number;
   isRented: boolean;
-  rentalStatus: PropertyRentalStatus;
   vacancyRatePct: number;
   accumulatedRentMinor: number;
-  upgradeLevel: number;
-  maxUpgradeLevel: number;
-  upgradeCostMinor: number;
-  collateralLoanId: string | null;
-  activeRentalAgreement: PropertyRentalAgreement | null;
-  rentalHistory: PropertyRentalCycleRecord[];
-  transactions: PropertyTransactionRecord[];
-  listing: PropertyListingRecord | null;
-  imageKey: VietnamLandmarkImageKey;
+  imageKey: 'financial' | 'riverside' | 'industrial' | 'luxury';
   description: string;
-  createdAt: string;
 }
 
 export interface AuctionBid {
@@ -437,13 +398,10 @@ export interface AuctionBid {
 export interface PropertyAuction {
   id: string;
   propertyId: string;
-  realWorldLocationId: string;
-  cityCode: VietnamCityCode;
-  city: string;
   propertyName: string;
   district: PropertyDistrict;
   propertyType: PropertyType;
-  imageKey: VietnamLandmarkImageKey;
+  imageKey: 'financial' | 'riverside' | 'industrial' | 'luxury';
   sellerId: string;
   sellerName: string;
   startingPriceMinor: number;
@@ -495,9 +453,6 @@ export interface Loan {
   outstandingMinor: number;
   annualInterestRatePct: number;
   collateralDescription: string;
-  collateralPropertyId?: string | null;
-  collateralValueMinor?: number;
-  ltvPct?: number;
   issuedAt: string;
   dueGameDay: number;
   status: 'ACTIVE' | 'REPAID' | 'DEFAULTED';
@@ -709,7 +664,6 @@ export type RealtimeEventType =
   | 'balance.updated'
   | 'property.listed'
   | 'property.sold'
-  | 'property.updated'
   | 'auction.bid_placed'
   | 'auction.ended'
   | 'company.updated'

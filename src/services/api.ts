@@ -14,11 +14,6 @@ import type {
 } from '../../shared/contracts/futures';
 import type { CurrencyCode } from '../../shared/contracts/money';
 import type {
-  PropertyLoanEligibility,
-  PropertyMarketEvent,
-  VietnamPropertyMarketSnapshot,
-} from '../../shared/contracts/property';
-import type {
   ApiResponse,
   Asset,
   BusinessSector,
@@ -182,17 +177,7 @@ export const PortfolioService = {
 };
 
 export const PropertyService = {
-  getAll: () =>
-    request<
-      {
-        properties: Property[];
-        auctions: PropertyAuction[];
-      } & VietnamPropertyMarketSnapshot
-    >('/api/properties'),
-  getById: (propertyId: string) =>
-    request<Property & { loanEligibility: PropertyLoanEligibility }>(
-      `/api/properties/${encodeURIComponent(propertyId)}`,
-    ),
+  getAll: () => request<{ properties: Property[]; auctions: PropertyAuction[] }>('/api/properties'),
   buy: (propertyId: string) =>
     request<{ property: Property; feeMinor: number; profile: PlayerProfile }>(
       `/api/properties/${encodeURIComponent(propertyId)}/buy`,
@@ -209,27 +194,6 @@ export const PropertyService = {
     }),
   toggleRent: (propertyId: string) =>
     request<{ property: Property }>(`/api/properties/${encodeURIComponent(propertyId)}/rent`, {
-      method: 'POST',
-    }),
-  upgrade: (propertyId: string) =>
-    request<{ property: Property; costMinor: number; profile: PlayerProfile }>(
-      `/api/properties/${encodeURIComponent(propertyId)}/upgrade`,
-      { method: 'POST' },
-    ),
-  getLoanEligibility: (propertyId: string, termDays = 15) =>
-    request<PropertyLoanEligibility>(
-      `/api/properties/${encodeURIComponent(propertyId)}/loan-eligibility?termDays=${termDays}`,
-    ),
-  applyCollateralLoan: (propertyId: string, principalCR: number, termGameDays = 15) =>
-    request<{ loan: Loan; property: Property; profile: PlayerProfile }>(
-      `/api/properties/${encodeURIComponent(propertyId)}/collateral-loan`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ principalCR, termGameDays }),
-      },
-    ),
-  devSimulateCycle: () =>
-    request<{ event: PropertyMarketEvent; newsItem: NewsItem }>('/api/properties/dev/simulate-cycle', {
       method: 'POST',
     }),
   placeBid: (auctionId: string, bidAmountCR: number) =>

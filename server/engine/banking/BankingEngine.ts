@@ -105,68 +105,6 @@ export class BankingEngine {
     return { ...loan };
   }
 
-  /**
-   * Issues a property-collateralized loan backed by finite SYS_BANK_RESERVE (strictly bounded by LTV limit).
-   */
-  applyForPropertyCollateralLoan(params: {
-    playerId: string;
-    propertyId: string;
-    propertyName: string;
-    collateralValueMinor: number;
-    ltvLimitPct: number;
-    principalCR: number;
-    termGameDays: number;
-    currentGameDay: number;
-    economy: EconomyState;
-  }): Loan {
-    const principalMinor = toMinor(params.principalCR);
-    const maxAllowedByLtv = Math.floor((params.collateralValueMinor * params.ltvLimitPct) / 100);
-
-    if (principalMinor > maxAllowedByLtv) {
-      throw new DomainError(
-        'LOAN_LIMIT_EXCEEDED',
-        `Khoản vay vượt giới hạn LTV ${params.ltvLimitPct}% (${(maxAllowedByLtv / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })} CR).`,
-      );
-    }
-
-    const loanId = `pl_${crypto.randomBytes(4).toString('hex')}`;
-    const disbursed = this.ledger.payFromSystemReserve(
-      SYSTEM_ACCOUNTS.BANK_RESERVE,
-      params.playerId,
-      principalMinor,
-      'LOAN_DISBURSEMENT',
-      loanId,
-      `Giải ngân vay thế chấp BĐS ${params.propertyName} (${params.propertyId})`,
-    );
-
-    if (!disbursed) {
-      throw new DomainError('WORLD_UNAVAILABLE', 'Thanh khoản dự trữ Empire Bank hiện không đủ.');
-    }
-
-    const ltvPct =
-      params.collateralValueMinor > 0
-        ? Number(((principalMinor / params.collateralValueMinor) * 100).toFixed(1))
-        : params.ltvLimitPct;
-
-    const loan: Loan = {
-      id: loanId,
-      playerId: params.playerId,
-      principalMinor,
-      outstandingMinor: principalMinor,
-      annualInterestRatePct: params.economy.loanInterestRatePct,
-      collateralDescription: `Thế chấp BĐS mô phỏng: ${params.propertyName} (${params.propertyId}) · LTV ${ltvPct}%`,
-      collateralPropertyId: params.propertyId,
-      collateralValueMinor: params.collateralValueMinor,
-      ltvPct,
-      issuedAt: new Date().toISOString(),
-      dueGameDay: params.currentGameDay + params.termGameDays,
-      status: 'ACTIVE',
-    };
-
-    this.loans.set(loan.id, loan);
-    return { ...loan };
-  }
-
   repayLoan(loanId: string, playerId: string, amountCR: number): Loan {
     const loan = this.loans.get(loanId);
     if (!loan || loan.playerId !== playerId) {
