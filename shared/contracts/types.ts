@@ -1,8 +1,10 @@
+import type { CurrencyCode } from './money';
+
 export const API_CONTRACT_VERSION = '1.0.0';
 export const DEFAULT_WORLD_ID = 'WORLD-01';
 export const DEFAULT_WORLD_NAME = 'WORLD-01: GLOBAL ECONOMY';
 
-export type MarketClass = 'CRYPTO' | 'STOCK';
+export type MarketClass = 'CRYPTO' | 'STOCK' | 'FOREX';
 export type MarketStatus = 'OPEN' | 'CLOSED' | 'HALTED';
 export type OrderSide = 'BUY' | 'SELL';
 export type OrderType = 'MARKET' | 'LIMIT';
@@ -78,7 +80,15 @@ export type ErrorCode =
   | 'VALIDATION_ERROR'
   | 'FORBIDDEN_IN_PRODUCTION'
   | 'WORLD_UNAVAILABLE'
-  | 'SERVER_ERROR';
+  | 'SERVER_ERROR'
+  | 'FUTURES_RISK_NOT_ACKNOWLEDGED'
+  | 'FUTURES_MARKET_DEGRADED'
+  | 'FUTURES_EMERGENCY_HALTED'
+  | 'FUTURES_LEVERAGE_EXCEEDED'
+  | 'FUTURES_REDUCE_ONLY_VIOLATION'
+  | 'FUTURES_POST_ONLY_REJECTED'
+  | 'FUTURES_CROSS_MARGIN_DISABLED'
+  | 'FUTURES_POSITION_NOT_FOUND';
 
 export const ERROR_MESSAGES_VI: Record<ErrorCode, string> = {
   UNAUTHORIZED: 'Phiên đăng nhập không hợp lệ hoặc đã hết hạn. Vui lòng kết nối lại.',
@@ -110,6 +120,14 @@ export const ERROR_MESSAGES_VI: Record<ErrorCode, string> = {
   FORBIDDEN_IN_PRODUCTION: 'Công cụ này chỉ khả dụng trong chế độ phát triển.',
   WORLD_UNAVAILABLE: 'Thế giới mô phỏng hiện chưa sẵn sàng.',
   SERVER_ERROR: 'Đã xảy ra lỗi hệ thống trên máy chủ.',
+  FUTURES_RISK_NOT_ACKNOWLEDGED: 'Bạn cần xác nhận cảnh báo rủi ro đòn bẩy trước khi giao dịch Futures.',
+  FUTURES_MARKET_DEGRADED: 'Thị trường Futures đang ở trạng thái giảm cấp (Degraded) do nguồn giá tham chiếu Spot chưa ổn định.',
+  FUTURES_EMERGENCY_HALTED: 'Hợp đồng Futures đang tạm dừng khẩn cấp để bảo vệ an toàn thanh toán.',
+  FUTURES_LEVERAGE_EXCEEDED: 'Mức đòn bẩy vượt quá giới hạn rủi ro cho quy mô vị thế này.',
+  FUTURES_REDUCE_ONLY_VIOLATION: 'Lệnh Reduce-Only chỉ được phép giảm hoặc đóng vị thế đối ứng hiện có.',
+  FUTURES_POST_ONLY_REJECTED: 'Lệnh Post-Only bị từ chối vì sẽ khớp ngay lập tức (taker) thay vì tạo thanh khoản (maker).',
+  FUTURES_CROSS_MARGIN_DISABLED: 'Cross Margin hiện đang khóa. Vui lòng sử dụng Isolated Margin.',
+  FUTURES_POSITION_NOT_FOUND: 'Không tìm thấy vị thế Futures đang mở tương ứng.',
 };
 
 export interface CompanyFundamentals {
@@ -139,10 +157,14 @@ export interface Asset {
   symbol: string;
   name: string;
   marketClass: MarketClass;
-  exchange: 'ECX' | 'ESE';
+  exchange: 'ECX' | 'ESE' | 'EFX';
   description: string;
-  priceTickMinor: number; // e.g., 1 = 0.01 CR, 100 = 1.00 CR
-  qtyStep: number; // e.g., 1 for stocks, 0.01 for crypto
+  baseCurrency?: CurrencyCode;
+  quoteCurrency?: CurrencyCode;
+  priceScale?: number; // Default 100 (2 decimals); e.g., 10_000 for 4-decimal FX pairs
+  priceDecimals?: number; // Default 2; e.g., 4 for EUR-SIM/USD-SIM, 2 for USD-SIM/JPY-SIM
+  priceTickMinor: number; // In priceScale integer units (e.g., 1 = 0.01 CR or 0.0001 FX pip)
+  qtyStep: number; // e.g., 1 for stocks, 0.01 for crypto, 10 for FX base currency units
   minQty: number;
   maxOrderQty: number;
   circulatingSupply: number;
@@ -236,6 +258,12 @@ export interface Candle {
   isHistoricalSeed: boolean;
 }
 
+export interface CurrencyBalance {
+  currency: CurrencyCode;
+  availableMinor: number;
+  lockedMinor: number;
+}
+
 export interface Wallet {
   playerId: string;
   availableMinor: number;
@@ -244,6 +272,7 @@ export interface Wallet {
   termDepositMinor: number;
   termDepositMaturityGameDay: number | null;
   entertainmentChips: number; // Strictly non-convertible to CR
+  currencyBalances: Record<CurrencyCode, CurrencyBalance>;
 }
 
 export interface Holding {
@@ -259,6 +288,7 @@ export interface LedgerEntry {
   id: string;
   worldId: string;
   transactionId: string;
+  currency: CurrencyCode;
   debitAccount: string;
   creditAccount: string;
   amountMinor: number;
@@ -266,6 +296,8 @@ export interface LedgerEntry {
     | 'SYSTEM_ISSUANCE'
     | 'TRADE_SETTLEMENT'
     | 'TRADING_FEE'
+    | 'FX_SETTLEMENT'
+    | 'FX_FEE'
     | 'DIVIDEND'
     | 'PROPERTY_SALE'
     | 'PROPERTY_FEE'
@@ -276,7 +308,14 @@ export interface LedgerEntry {
     | 'BANK_WITHDRAW'
     | 'BANK_INTEREST'
     | 'LOAN_DISBURSEMENT'
-    | 'LOAN_REPAYMENT';
+    | 'LOAN_REPAYMENT'
+    | 'FUTURES_MARGIN_LOCK'
+    | 'FUTURES_MARGIN_RELEASE'
+    | 'FUTURES_PNL_SETTLEMENT'
+    | 'FUTURES_FEE'
+    | 'FUTURES_FUNDING'
+    | 'FUTURES_LIQUIDATION'
+    | 'FUTURES_INSURANCE_FUND';
   referenceId: string;
   description: string;
   timestamp: string;
@@ -311,6 +350,10 @@ export interface PlayerProfile {
   unrealizedPnlMinor: number;
   stockValueMinor: number;
   cryptoValueMinor: number;
+  forexValueMinor: number;
+  futuresEquityMinor: number;
+  futuresMarginMinor: number;
+  futuresUnrealizedPnlMinor: number;
   propertyValueMinor: number;
   businessEquityMinor: number;
   totalDebtMinor: number;
@@ -431,12 +474,90 @@ export interface NewsItem {
   id: string;
   headline: string;
   summary: string;
-  category: 'MACRO' | 'CORPORATE' | 'CRYPTO' | 'PROPERTY' | 'MARKET';
+  category: 'MACRO' | 'CORPORATE' | 'CRYPTO' | 'PROPERTY' | 'MARKET' | 'FOREX';
   relatedSymbols: string[];
   sentiment: 'POSITIVE' | 'NEGATIVE' | 'NEUTRAL';
   source: 'EMPIRE_WIRE_SIM';
   publishedAt: string;
   eventId?: string;
+}
+
+export interface CentralBankPolicyEvent {
+  id: string;
+  bankCode: string;
+  currency: CurrencyCode;
+  eventType: 'RATE_HIKE' | 'RATE_CUT' | 'RATE_HOLD' | 'INFLATION_REPORT' | 'GDP_RELEASE' | 'LIQUIDITY_INJECTION';
+  title: string;
+  summary: string;
+  rateDeltaPct: number;
+  inflationDeltaPct: number;
+  growthDeltaPct: number;
+  confidenceDelta: number;
+  publishedAt: string;
+}
+
+export interface CentralBankState {
+  code: string;
+  name: string;
+  currency: CurrencyCode;
+  region: string;
+  policyRatePct: number;
+  previousRatePct: number;
+  inflationPct: number;
+  gdpGrowthPct: number;
+  currencySupplyMajor: number;
+  marketConfidence: number; // 0..100
+  stance: 'HAWKISH' | 'NEUTRAL' | 'DOVISH';
+  lastDecisionSummary: string;
+  lastUpdatedAt: string;
+}
+
+export interface ForexCalendarEvent {
+  id: string;
+  currency: CurrencyCode;
+  bankCode: string;
+  title: string;
+  impact: 'HIGH' | 'MEDIUM' | 'LOW';
+  scheduledGameDay: number;
+  scheduledTimeLabel: string;
+  previousValue: string;
+  forecastValue: string;
+  actualValue: string | null;
+  status: 'UPCOMING' | 'RELEASED';
+}
+
+export interface CurrencyStrengthItem {
+  currency: CurrencyCode;
+  score: number; // 0..100 relative strength derived from live matched FX rates
+  change24hPct: number;
+  policyRatePct: number;
+  rateVsCR: number; // Mark-to-market value of 1 major unit in CR
+}
+
+export interface ForexAgentSummary {
+  id: string;
+  name: string;
+  archetype:
+    | 'COMMERCIAL_BANK'
+    | 'CURRENCY_MARKET_MAKER'
+    | 'INSTITUTIONAL_FX'
+    | 'SPECULATIVE_TRADER'
+    | 'LONG_TERM_INVESTOR';
+  strategyLabel: string;
+  riskLimitPct: number;
+  tradesCount: number;
+  balances: Record<CurrencyCode, { availableMinor: number; lockedMinor: number }>;
+  lastActionNote: string;
+}
+
+export interface ForexOverviewSnapshot {
+  pairs: Asset[];
+  centralBanks: CentralBankState[];
+  calendar: ForexCalendarEvent[];
+  recentPolicyEvents: CentralBankPolicyEvent[];
+  currencyStrength: CurrencyStrengthItem[];
+  fxAgents: ForexAgentSummary[];
+  ratesToCR: Record<CurrencyCode, number>;
 }
 
 export interface GameClock {
@@ -547,6 +668,15 @@ export type RealtimeEventType =
   | 'auction.ended'
   | 'company.updated'
   | 'economy.event'
+  | 'forex.central_bank.updated'
+  | 'futures.quote.updated'
+  | 'futures.orderbook.updated'
+  | 'futures.trade.executed'
+  | 'futures.candle.updated'
+  | 'futures.position.updated'
+  | 'futures.funding.settled'
+  | 'futures.liquidation.executed'
+  | 'futures.margin_call'
   | 'news.published'
   | 'chat.message'
   | 'leaderboard.updated';

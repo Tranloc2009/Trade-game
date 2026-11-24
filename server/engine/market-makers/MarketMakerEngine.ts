@@ -93,6 +93,7 @@ export class MarketMakerEngine {
       );
 
       for (const asset of assets) {
+        if (asset.marketClass === 'FOREX') continue;
         const baseQty =
           asset.symbol === 'BTC-SIM'
             ? agent.role === 'MARKET_MAKER'
@@ -122,7 +123,7 @@ export class MarketMakerEngine {
    * executes cleanly at Alice's resting 50.00 CR!
    */
   seedInitialOrderBooks(volatility: VolatilityRegime): void {
-    const assets = this.matching.listAssets();
+    const assets = this.matching.listAssets().filter((a) => a.marketClass !== 'FOREX');
     for (const asset of assets) {
       if (asset.status !== 'OPEN') continue;
       this.refreshMakerQuotesForAsset(asset, volatility, true);
@@ -216,7 +217,7 @@ export class MarketMakerEngine {
    * - Refreshes passive market maker quotes if liquidity thinned out.
    */
   runSimulationTick(economy: EconomyState, targetSymbol?: string): { trades: Trade[]; affectedSymbols: string[] } {
-    const openAssets = this.matching.listAssets().filter((a) => a.status === 'OPEN');
+    const openAssets = this.matching.listAssets().filter((a) => a.status === 'OPEN' && a.marketClass !== 'FOREX');
     if (openAssets.length === 0) return { trades: [], affectedSymbols: [] };
 
     const selectedAsset =

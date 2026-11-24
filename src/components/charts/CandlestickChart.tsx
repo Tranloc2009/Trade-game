@@ -20,6 +20,7 @@ interface CandlestickChartProps {
   liveCandle: Candle | null;
   loading: boolean;
   theme: 'dark' | 'light';
+  priceDecimals?: number;
   onTimeframeChange: (tf: Timeframe) => void;
 }
 
@@ -32,6 +33,7 @@ export function CandlestickChart({
   liveCandle,
   loading,
   theme,
+  priceDecimals = 2,
   onTimeframeChange,
 }: CandlestickChartProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -94,6 +96,11 @@ export function CandlestickChart({
       borderVisible: false,
       wickUpColor: isDark ? '#22C55E' : '#16A34A',
       wickDownColor: isDark ? '#EF5555' : '#DC2626',
+      priceFormat: {
+        type: 'price',
+        precision: priceDecimals,
+        minMove: 1 / Math.pow(10, priceDecimals),
+      },
     });
 
     const volumeSeries = chart.addSeries(HistogramSeries, {
@@ -162,6 +169,18 @@ export function CandlestickChart({
       emaSeriesRef.current = null;
     };
   }, [theme]);
+
+  // Update series precision cleanly when switching between 2-decimal and 4-decimal FX pairs
+  useEffect(() => {
+    if (!candleSeriesRef.current) return;
+    candleSeriesRef.current.applyOptions({
+      priceFormat: {
+        type: 'price',
+        precision: priceDecimals,
+        minMove: 1 / Math.pow(10, priceDecimals),
+      },
+    });
+  }, [priceDecimals]);
 
   // Populate historical + live candles
   useEffect(() => {
@@ -287,10 +306,10 @@ export function CandlestickChart({
         <span className="font-semibold text-[var(--text-primary)]">{symbol}</span>
         {latest ? (
           <>
-            <span>O <strong className="text-[var(--text-primary)]">{latest.open.toFixed(2)}</strong></span>
-            <span>H <strong className="text-[var(--positive)]">{latest.high.toFixed(2)}</strong></span>
-            <span>L <strong className="text-[var(--negative)]">{latest.low.toFixed(2)}</strong></span>
-            <span>C <strong className="text-[var(--text-primary)]">{latest.close.toFixed(2)}</strong></span>
+            <span>O <strong className="text-[var(--text-primary)]">{latest.open.toFixed(priceDecimals)}</strong></span>
+            <span>H <strong className="text-[var(--positive)]">{latest.high.toFixed(priceDecimals)}</strong></span>
+            <span>L <strong className="text-[var(--negative)]">{latest.low.toFixed(priceDecimals)}</strong></span>
+            <span>C <strong className="text-[var(--text-primary)]">{latest.close.toFixed(priceDecimals)}</strong></span>
             {latest.volume !== undefined && (
               <span>Vol <strong className="text-[var(--text-primary)]">{latest.volume.toFixed(2)}</strong></span>
             )}

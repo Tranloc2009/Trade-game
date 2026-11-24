@@ -13,15 +13,25 @@ import {
   CompanyActionSchema,
   CreateCompanySchema,
   EntertainmentPlaySchema,
+  FuturesAcknowledgeRiskSchema,
+  FuturesAddMarginSchema,
+  FuturesClosePositionSchema,
   GuestLoginSchema,
   ListPropertySchema,
   LoanRepaySchema,
   LoanRequestSchema,
   PlaceAuctionBidSchema,
+  PlaceFuturesOrderSchema,
   PlaceOrderSchema,
 } from '../../shared/schemas/validation';
+import { z } from 'zod';
+import { ALL_CURRENCIES } from '../../shared/contracts/money';
 import { DomainError } from '../domain/DomainError';
 import { WorldEngine } from '../engine/WorldEngine';
+
+const TriggerCentralBankSchema = z.object({
+  currency: z.enum(ALL_CURRENCIES as unknown as [string, ...string[]]).optional(),
+});
 
 function ok<T>(res: Response, data: T, status = 200): void {
   const body: ApiSuccess<T> = {
@@ -118,10 +128,209 @@ export function createApiRouter(world: WorldEngine): Router {
   router.get('/markets', (req, res) => {
     const marketClass = typeof req.query.class === 'string' ? req.query.class.toUpperCase() : undefined;
     let assets = world.matching.listAssets();
-    if (marketClass === 'CRYPTO' || marketClass === 'STOCK') {
+    if (marketClass === 'CRYPTO' || marketClass === 'STOCK' || marketClass === 'FOREX') {
       assets = assets.filter((a) => a.marketClass === marketClass);
     }
     ok(res, assets);
+  });
+
+  // Empire Forex Exchange (EFX) Macro, Central Banks, Calendar, Currency Strength & AI FX Agents
+  router.get('/forex/overview', (_req, res) => {
+    ok(res, world.getForexOverview());
+  });
+
+  router.post('/forex/dev/trigger-policy', (req, res, next) => {
+    try {
+      if (!world.devToolsEnabled) throw new DomainError('FORBIDDEN_IN_PRODUCTION', undefined, 403);
+      const parsed = TriggerCentralBankSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return fail(res, 'VALIDATION_ERROR', 'Mã tiền tệ không hợp lệ.', 400);
+      }
+      const currency = parsed.data.currency as (typeof ALL_CURRENCIES)[number] | undefined;
+      ok(res, world.triggerCentralBankEvent(currency));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Empire Futures Exchange (Perpetual Futures — Isolated Margin, CR-Settled)
+  router.get('/futures/overview', (_req, res) => {
+    ok(res, world.getFuturesOverview());
+  });
+
+  router.get('/futures/contracts/:symbol/orderbook', (req, res, next) => {
+    try {
+      const symbol = req.params.symbol.toUpperCase();
+      const depth = Math.min(30, Math.max(5, Number(req.query.depth) || 15));
+      ok(res, world.futures.getOrderBook(symbol, depth));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get('/futures/contracts/:symbol/trades', (req, res, next) => {
+    try {
+      const symbol = req.params.symbol.toUpperCase();
+      if (!world.futures.getContract(symbol)) throw new DomainError('ASSET_NOT_FOUND', undefined, 404);
+      const limit = Math.min(100, Math.max(10, Number(req.query.limit) || 40));
+      ok(res, world.futures.listTrades(symbol, limit));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get('/futures/contracts/:symbol/candles', (req, res, next) => {
+    try {
+      const symbol = req.params.symbol.toUpperCase();
+      if (!world.futures.getContract(symbol)) throw new DomainError('ASSET_NOT_FOUND', undefined, 404);
+      const tfRaw = typeof req.query.timeframe === 'string' ? req.query.timeframe : '5m';
+      const timeframe: Timeframe = VALID_TIMEFRAMES.has(tfRaw as Timeframe) ? (tfRaw as Timeframe) : '5m';
+      const limit = Math.min(240, Math.max(20, Number(req.query.limit) || 100));
+      ok(res, {
+        symbol,
+        timeframe,
+        candles: world.futures.candles.getCandles(symbol, timeframe, limit),
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get('/futures/account', (req, res, next) => {
+    try {
+      const playerId = requirePlayerId(req);
+      ok(res, world.getFuturesAccount(playerId));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/futures/acknowledge-risk', (req, res, next) => {
+    try {
+      const playerId = requirePlayerId(req);
+      const parsed = FuturesAcknowledgeRiskSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return fail(res, 'VALIDATION_ERROR', 'Bạn cần xác nhận đã đọc và hiểu rõ cảnh báo rủi ro đòn bẩy.', 400);
+      }
+      const ack = world.acknowledgeFuturesRisk(playerId);
+      ok(res, { ...ack, account: world.getFuturesAccount(playerId) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/futures/orders', (req, res, next) => {
+    try {
+      const playerId = requirePlayerId(req);
+      const parsed = PlaceFuturesOrderSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return fail(res, 'VALIDATION_ERROR', parsed.error.issues[0]?.message, 400, parsed.error.flatten());
+      }
+      const headerIdem = req.header('idempotency-key') || parsed.data.idempotencyKey;
+      const result = world.placeFuturesOrder(playerId, {
+        symbol: parsed.data.symbol.toUpperCase(),
+        side: parsed.data.side,
+        type: parsed.data.type,
+        timeInForce: parsed.data.timeInForce,
+        marginMode: parsed.data.marginMode,
+        leverage: parsed.data.leverage,
+        priceCR: parsed.data.priceCR,
+        triggerPriceCR: parsed.data.triggerPriceCR,
+        triggerSource: parsed.data.triggerSource,
+        quantity: parsed.data.quantity,
+        reduceOnly: parsed.data.reduceOnly,
+        postOnly: parsed.data.postOnly,
+        stopLossCR: parsed.data.stopLossCR,
+        takeProfitCR: parsed.data.takeProfitCR,
+        maxSlippageBps: parsed.data.maxSlippageBps,
+        idempotencyKey: headerIdem,
+      });
+      ok(
+        res,
+        {
+          ...result,
+          account: world.getFuturesAccount(playerId),
+          profile: world.getPlayerProfile(playerId),
+        },
+        201,
+      );
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.delete('/futures/orders/:id', (req, res, next) => {
+    try {
+      const playerId = requirePlayerId(req);
+      const result = world.cancelFuturesOrder(playerId, req.params.id);
+      ok(res, {
+        ...result,
+        account: world.getFuturesAccount(playerId),
+        profile: world.getPlayerProfile(playerId),
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/futures/positions/:id/margin', (req, res, next) => {
+    try {
+      const playerId = requirePlayerId(req);
+      const parsed = FuturesAddMarginSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return fail(res, 'VALIDATION_ERROR', parsed.error.issues[0]?.message, 400);
+      }
+      const position = world.addFuturesPositionMargin(playerId, req.params.id, parsed.data.amountCR);
+      ok(res, {
+        position,
+        account: world.getFuturesAccount(playerId),
+        profile: world.getPlayerProfile(playerId),
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/futures/positions/:id/close', (req, res, next) => {
+    try {
+      const playerId = requirePlayerId(req);
+      const parsed = FuturesClosePositionSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return fail(res, 'VALIDATION_ERROR', parsed.error.issues[0]?.message, 400);
+      }
+      const headerIdem = req.header('idempotency-key') || parsed.data.idempotencyKey;
+      const result = world.closeFuturesPosition(playerId, req.params.id, {
+        ...parsed.data,
+        idempotencyKey: headerIdem,
+      });
+      ok(res, {
+        ...result,
+        account: world.getFuturesAccount(playerId),
+        profile: world.getPlayerProfile(playerId),
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/futures/dev/settle-funding', (req, res, next) => {
+    try {
+      if (!world.devToolsEnabled) throw new DomainError('FORBIDDEN_IN_PRODUCTION', undefined, 403);
+      const symbol = typeof req.body?.symbol === 'string' ? req.body.symbol.toUpperCase() : undefined;
+      ok(res, world.devSettleFuturesFunding(symbol));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/futures/dev/simulate-tick', (req, res, next) => {
+    try {
+      if (!world.devToolsEnabled) throw new DomainError('FORBIDDEN_IN_PRODUCTION', undefined, 403);
+      const symbol = typeof req.body?.symbol === 'string' ? req.body.symbol.toUpperCase() : undefined;
+      ok(res, world.devSimulateFuturesTick(symbol));
+    } catch (err) {
+      next(err);
+    }
   });
 
   router.get('/markets/:symbol', (req, res, next) => {

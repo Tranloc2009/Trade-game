@@ -10,6 +10,7 @@ import { WorldService } from './api';
 class RealtimeClient {
   private socket: Socket | null = null;
   private subscribedSymbol: string | null = null;
+  private subscribedFuturesSymbol: string | null = null;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
 
   connect(token: string | null): void {
@@ -49,6 +50,9 @@ class RealtimeClient {
       if (this.subscribedSymbol) {
         this.socket?.emit('market:subscribe', this.subscribedSymbol);
       }
+      if (this.subscribedFuturesSymbol) {
+        this.socket?.emit('futures:subscribe', this.subscribedFuturesSymbol);
+      }
     });
 
     this.socket.on('disconnect', () => {
@@ -84,6 +88,13 @@ class RealtimeClient {
     this.subscribedSymbol = symbol;
     if (this.socket?.connected) {
       this.socket.emit('market:subscribe', symbol);
+    }
+  }
+
+  subscribeFutures(symbol: string): void {
+    this.subscribedFuturesSymbol = symbol;
+    if (this.socket?.connected) {
+      this.socket.emit('futures:subscribe', symbol);
     }
   }
 

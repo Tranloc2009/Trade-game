@@ -45,9 +45,11 @@ export function ExchangePage() {
   const [prefilledPrice, setPrefilledPrice] = useState<number | null>(null);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
 
+  const nonForexAssets = useMemo(() => assets.filter((a) => a.marketClass !== 'FOREX'), [assets]);
+
   const selectedAsset = useMemo(
-    () => assets.find((a) => a.symbol === selectedSymbol) ?? assets[0],
-    [assets, selectedSymbol],
+    () => nonForexAssets.find((a) => a.symbol === selectedSymbol) ?? nonForexAssets[0],
+    [nonForexAssets, selectedSymbol],
   );
   const activeSymbol = selectedAsset?.symbol ?? 'NOVA';
 
@@ -90,7 +92,7 @@ export function ExchangePage() {
   });
 
   const filteredAssets = useMemo(() => {
-    return assets.filter((a) => {
+    return nonForexAssets.filter((a) => {
       if (exchangeClassFilter !== 'ALL' && a.marketClass !== exchangeClassFilter) return false;
       if (watchlistOnly && !watchlist.includes(a.symbol)) return false;
       if (search.trim()) {
@@ -99,7 +101,7 @@ export function ExchangePage() {
       }
       return true;
     });
-  }, [assets, exchangeClassFilter, watchlistOnly, watchlist, search]);
+  }, [nonForexAssets, exchangeClassFilter, watchlistOnly, watchlist, search]);
 
   const activeOrderBook = orderBooks[activeSymbol];
   const recentTrades = recentTradesBySymbol[activeSymbol] ?? [];

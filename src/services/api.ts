@@ -1,11 +1,28 @@
 import type {
+  FuturesAccountSummary,
+  FuturesFundingSettlementEvent,
+  FuturesMarginMode,
+  FuturesOrder,
+  FuturesOrderBookSnapshot,
+  FuturesOrderSide,
+  FuturesOrderType,
+  FuturesOverviewSnapshot,
+  FuturesPosition,
+  FuturesTimeInForce,
+  FuturesTrade,
+  FuturesTriggerSource,
+} from '../../shared/contracts/futures';
+import type { CurrencyCode } from '../../shared/contracts/money';
+import type {
   ApiResponse,
   Asset,
   BusinessSector,
   Candle,
+  CentralBankPolicyEvent,
   ChatMessage,
   DiagnosticsSnapshot,
   EconomyState,
+  ForexOverviewSnapshot,
   GameClock,
   LeaderboardEntry,
   LedgerEntry,
@@ -102,7 +119,7 @@ export const WorldService = {
 };
 
 export const TradingService = {
-  getMarkets: (marketClass?: 'CRYPTO' | 'STOCK') =>
+  getMarkets: (marketClass?: 'CRYPTO' | 'STOCK' | 'FOREX') =>
     request<Asset[]>(marketClass ? `/api/markets?class=${marketClass}` : '/api/markets'),
   getOrderBook: (symbol: string, depth = 15) =>
     request<OrderBookSnapshot>(`/api/markets/${encodeURIComponent(symbol)}/orderbook?depth=${depth}`),
@@ -280,4 +297,128 @@ export const EntertainmentService = {
       body: JSON.stringify({ wagerChips, targetMultiplier }),
     }),
   refill: () => request<{ remainingChips: number }>('/api/entertainment/refill', { method: 'POST' }),
+};
+
+export const ForexService = {
+  getOverview: () => request<ForexOverviewSnapshot>('/api/forex/overview'),
+  triggerPolicyEvent: (currency?: CurrencyCode) =>
+    request<{
+      policyEvent: CentralBankPolicyEvent;
+      newsItem: NewsItem;
+      tradesExecuted: number;
+      affectedSymbols: string[];
+      overview: ForexOverviewSnapshot;
+    }>('/api/forex/dev/trigger-policy', {
+      method: 'POST',
+      body: JSON.stringify(currency ? { currency } : {}),
+    }),
+};
+
+export const FuturesService = {
+  getOverview: () => request<FuturesOverviewSnapshot>('/api/futures/overview'),
+  getOrderBook: (symbol: string, depth = 15) =>
+    request<FuturesOrderBookSnapshot>(`/api/futures/contracts/${encodeURIComponent(symbol)}/orderbook?depth=${depth}`),
+  getRecentTrades: (symbol: string, limit = 40) =>
+    request<FuturesTrade[]>(`/api/futures/contracts/${encodeURIComponent(symbol)}/trades?limit=${limit}`),
+  getCandles: (symbol: string, timeframe: Timeframe, limit = 120) =>
+    request<{ symbol: string; timeframe: Timeframe; candles: Candle[] }>(
+      `/api/futures/contracts/${encodeURIComponent(symbol)}/candles?timeframe=${timeframe}&limit=${limit}`,
+    ),
+  getAccount: () => request<FuturesAccountSummary>('/api/futures/account'),
+  acknowledgeRisk: () =>
+    request<{ acknowledged: true; acknowledgedAt: string; account: FuturesAccountSummary }>(
+      '/api/futures/acknowledge-risk',
+      {
+        method: 'POST',
+        body: JSON.stringify({ acknowledged: true }),
+      },
+    ),
+  placeOrder: (params: {
+    symbol: string;
+    side: FuturesOrderSide;
+    type: FuturesOrderType;
+    timeInForce?: FuturesTimeInForce;
+    marginMode?: FuturesMarginMode;
+    leverage?: number;
+    priceCR?: number;
+    triggerPriceCR?: number;
+    triggerSource?: FuturesTriggerSource;
+    quantity: number;
+    reduceOnly?: boolean;
+    postOnly?: boolean;
+    stopLossCR?: number;
+    takeProfitCR?: number;
+    maxSlippageBps?: number;
+    idempotencyKey: string;
+  }) =>
+    request<{
+      order: FuturesOrder;
+      trades: FuturesTrade[];
+      position: FuturesPosition | null;
+      orderBook: FuturesOrderBookSnapshot;
+      attachedConditionalOrders: FuturesOrder[];
+      deduplicated: boolean;
+      account: FuturesAccountSummary;
+      profile: PlayerProfile;
+    }>('/api/futures/orders', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': params.idempotencyKey },
+      body: JSON.stringify(params),
+    }),
+  cancelOrder: (orderId: string) =>
+    request<{
+      order: FuturesOrder;
+      orderBook: FuturesOrderBookSnapshot;
+      refundedMarginMinor: number;
+      account: FuturesAccountSummary;
+      profile: PlayerProfile;
+    }>(`/api/futures/orders/${encodeURIComponent(orderId)}`, {
+      method: 'DELETE',
+    }),
+  addMargin: (positionId: string, amountCR: number) =>
+    request<{
+      position: FuturesPosition;
+      account: FuturesAccountSummary;
+      profile: PlayerProfile;
+    }>(`/api/futures/positions/${encodeURIComponent(positionId)}/margin`, {
+      method: 'POST',
+      body: JSON.stringify({ amountCR }),
+    }),
+  closePosition: (
+    positionId: string,
+    params: {
+      type?: 'MARKET' | 'LIMIT';
+      priceCR?: number;
+      quantity?: number;
+      idempotencyKey: string;
+    },
+  ) =>
+    request<{
+      order: FuturesOrder;
+      trades: FuturesTrade[];
+      position: FuturesPosition | null;
+      orderBook: FuturesOrderBookSnapshot;
+      account: FuturesAccountSummary;
+      profile: PlayerProfile;
+    }>(`/api/futures/positions/${encodeURIComponent(positionId)}/close`, {
+      method: 'POST',
+      headers: { 'Idempotency-Key': params.idempotencyKey },
+      body: JSON.stringify(params),
+    }),
+  devSettleFunding: (symbol?: string) =>
+    request<{ events: FuturesFundingSettlementEvent[]; overview: FuturesOverviewSnapshot }>(
+      '/api/futures/dev/settle-funding',
+      {
+        method: 'POST',
+        body: JSON.stringify(symbol ? { symbol } : {}),
+      },
+    ),
+  devSimulateTick: (symbol?: string) =>
+    request<{ tradesExecuted: number; affectedSymbols: string[]; marginCalls: number; liquidations: number }>(
+      '/api/futures/dev/simulate-tick',
+      {
+        method: 'POST',
+        body: JSON.stringify(symbol ? { symbol } : {}),
+      },
+    ),
 };

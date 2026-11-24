@@ -3,7 +3,7 @@ import { formatDateTimeShort } from '../../lib/indicators';
 import { useAppStore } from '../../store/useAppStore';
 
 export function EconomyNewsPage() {
-  const { economy, news, gameClock, openAssetInExchange } = useAppStore();
+  const { economy, news, gameClock, openAssetInExchange, openForexPair } = useAppStore();
 
   return (
     <div className="max-w-[1440px] mx-auto space-y-5">
@@ -79,7 +79,12 @@ export function EconomyNewsPage() {
                       key={sym}
                       type="button"
                       onClick={() => {
-                        if (sym.includes('-') || ['NOVA', 'AERO', 'TITAN', 'NEXB', 'ENRG', 'LOGX', 'MEDI', 'RETL'].includes(sym)) {
+                        if (sym.includes('/')) {
+                          openForexPair(sym);
+                        } else if (
+                          sym.includes('-') ||
+                          ['NOVA', 'AERO', 'TITAN', 'NEXB', 'ENRG', 'LOGX', 'MEDI', 'RETL'].includes(sym)
+                        ) {
                           openAssetInExchange(sym);
                         }
                       }}
@@ -115,6 +120,10 @@ export function EconomyNewsPage() {
                 </div>
                 <div className="flex justify-between">
                   <span className="font-sans text-[var(--text-muted)]">Crypto (ECX)</span>
+                  <span className="text-[var(--positive)]">Hoạt động 24/7</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="font-sans text-[var(--text-muted)]">Forex (EFX)</span>
                   <span className="text-[var(--positive)]">Hoạt động 24/7</span>
                 </div>
               </div>

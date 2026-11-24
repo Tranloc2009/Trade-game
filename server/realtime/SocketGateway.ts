@@ -48,7 +48,7 @@ export class SocketGateway implements IRealtimeTransport {
       });
 
       socket.on('market:subscribe', (symbol: string) => {
-        if (typeof symbol !== 'string' || symbol.length > 16) return;
+        if (typeof symbol !== 'string' || symbol.length > 24) return;
         // Leave previous market rooms so client only receives subscribed market book/candles
         for (const room of socket.rooms) {
           if (room.startsWith('market:')) {
@@ -69,6 +69,30 @@ export class SocketGateway implements IRealtimeTransport {
           } satisfies RealtimeEnvelope);
         } catch {
           // Invalid symbol ignored safely
+        }
+      });
+
+      socket.on('futures:subscribe', (symbol: string) => {
+        if (typeof symbol !== 'string' || symbol.length > 24) return;
+        const normalized = symbol.toUpperCase();
+        for (const room of socket.rooms) {
+          if (room.startsWith('futures:')) {
+            socket.leave(room);
+          }
+        }
+        socket.join(`futures:${normalized}`);
+        try {
+          const book = this.world.futures.getOrderBook(normalized);
+          socket.emit('world:event', {
+            eventId: `sync_fbook_${Date.now()}`,
+            eventType: 'futures.orderbook.updated',
+            worldId: this.world.worldId,
+            sequenceNumber: this.world.eventBus.getSequenceNumber(),
+            serverTimestamp: new Date().toISOString(),
+            payload: book,
+          } satisfies RealtimeEnvelope);
+        } catch {
+          // Invalid futures symbol ignored safely
         }
       });
 
@@ -117,7 +141,7 @@ export class SocketGateway implements IRealtimeTransport {
       gameClock: this.world.economy.getGameClock(),
       economy: this.world.economy.state,
       onlineHumanPlayers: this.getOnlinePlayerIds().length,
-      simulatedAgentsCount: 4,
+      simulatedAgentsCount: this.world.getDiagnostics().simulatedAgentsCount,
     });
   }
 

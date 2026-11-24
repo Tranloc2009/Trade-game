@@ -1,9 +1,19 @@
 import { create } from 'zustand';
 import type {
+  FuturesContract,
+  FuturesFundingSettlementEvent,
+  FuturesLiquidationEvent,
+  FuturesOrderBookSnapshot,
+  FuturesOverviewSnapshot,
+  FuturesPosition,
+  FuturesTrade,
+} from '../../shared/contracts/futures';
+import type {
   Asset,
   Candle,
   ChatMessage,
   EconomyState,
+  ForexOverviewSnapshot,
   GameClock,
   NewsItem,
   OrderBookSnapshot,
@@ -17,6 +27,8 @@ import type {
 export type NavPage =
   | 'overview'
   | 'exchange'
+  | 'forex'
+  | 'futures'
   | 'portfolio'
   | 'property'
   | 'business'
@@ -81,6 +93,8 @@ interface AppState {
   activePage: NavPage;
   exchangeClassFilter: 'ALL' | 'CRYPTO' | 'STOCK';
   selectedSymbol: string;
+  selectedForexSymbol: string;
+  selectedFuturesSymbol: string;
   timeframe: Timeframe;
   theme: 'dark' | 'light';
   sidebarCollapsed: boolean;
@@ -101,9 +115,15 @@ interface AppState {
   gameClock: GameClock | null;
   economy: EconomyState | null;
   assets: Asset[];
+  forexOverview: ForexOverviewSnapshot | null;
+  futuresOverview: FuturesOverviewSnapshot | null;
   orderBooks: Record<string, OrderBookSnapshot>;
   recentTradesBySymbol: Record<string, Trade[]>;
   liveCandleTick: { symbol: string; candles: Record<Timeframe, Candle> } | null;
+  futuresOrderBooks: Record<string, FuturesOrderBookSnapshot>;
+  futuresRecentTradesBySymbol: Record<string, FuturesTrade[]>;
+  futuresLiveCandleTick: { symbol: string; candles: Record<Timeframe, Candle> } | null;
+  futuresSyncSeq: number;
   news: NewsItem[];
   chatMessages: ChatMessage[];
   notifications: NotificationItem[];
@@ -113,8 +133,16 @@ interface AppState {
   // Actions
   setActivePage: (page: NavPage) => void;
   openAssetInExchange: (symbol: string, marketClass?: 'CRYPTO' | 'STOCK') => void;
+  openForexPair: (symbol: string) => void;
+  openFuturesContract: (symbol: string) => void;
   setExchangeClassFilter: (filter: 'ALL' | 'CRYPTO' | 'STOCK') => void;
   setSelectedSymbol: (symbol: string) => void;
+  setSelectedForexSymbol: (symbol: string) => void;
+  setSelectedFuturesSymbol: (symbol: string) => void;
+  setForexOverview: (overview: ForexOverviewSnapshot) => void;
+  setFuturesOverview: (overview: FuturesOverviewSnapshot) => void;
+  setFuturesOrderBook: (book: FuturesOrderBookSnapshot) => void;
+  setFuturesRecentTrades: (symbol: string, trades: FuturesTrade[]) => void;
   setTimeframe: (tf: Timeframe) => void;
   toggleTheme: () => void;
   toggleSidebar: () => void;
@@ -138,6 +166,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   activePage: 'overview',
   exchangeClassFilter: 'ALL',
   selectedSymbol: 'NOVA',
+  selectedForexSymbol: 'EUR-SIM/USD-SIM',
+  selectedFuturesSymbol: 'BTC-SIM/CR-PERP',
   timeframe: '5m',
   theme: initialPrefs.theme,
   sidebarCollapsed: initialPrefs.sidebarCollapsed,
@@ -152,13 +182,19 @@ export const useAppStore = create<AppState>((set, get) => ({
   worldId: 'WORLD-01',
   worldName: 'WORLD-01: GLOBAL ECONOMY',
   onlineHumanPlayers: 0,
-  simulatedAgentsCount: 4,
+  simulatedAgentsCount: 14,
   gameClock: null,
   economy: null,
   assets: [],
+  forexOverview: null,
+  futuresOverview: null,
   orderBooks: {},
   recentTradesBySymbol: {},
   liveCandleTick: null,
+  futuresOrderBooks: {},
+  futuresRecentTradesBySymbol: {},
+  futuresLiveCandleTick: null,
+  futuresSyncSeq: 0,
   news: [],
   chatMessages: [],
   notifications: [],
@@ -174,8 +210,32 @@ export const useAppStore = create<AppState>((set, get) => ({
       activePage: 'exchange',
     }),
 
+  openForexPair: (symbol) =>
+    set({
+      selectedForexSymbol: symbol,
+      activePage: 'forex',
+    }),
+
+  openFuturesContract: (symbol) =>
+    set({
+      selectedFuturesSymbol: symbol,
+      activePage: 'futures',
+    }),
+
   setExchangeClassFilter: (filter) => set({ exchangeClassFilter: filter }),
   setSelectedSymbol: (symbol) => set({ selectedSymbol: symbol }),
+  setSelectedForexSymbol: (symbol) => set({ selectedForexSymbol: symbol }),
+  setSelectedFuturesSymbol: (symbol) => set({ selectedFuturesSymbol: symbol }),
+  setForexOverview: (forexOverview) => set({ forexOverview }),
+  setFuturesOverview: (futuresOverview) => set({ futuresOverview }),
+  setFuturesOrderBook: (book) =>
+    set((state) => ({
+      futuresOrderBooks: { ...state.futuresOrderBooks, [book.symbol]: book },
+    })),
+  setFuturesRecentTrades: (symbol, trades) =>
+    set((state) => ({
+      futuresRecentTradesBySymbol: { ...state.futuresRecentTradesBySymbol, [symbol]: trades },
+    })),
   setTimeframe: (tf) => set({ timeframe: tf }),
 
   toggleTheme: () =>
@@ -362,6 +422,136 @@ export const useAppStore = create<AppState>((set, get) => ({
             chatMessages: [...s.chatMessages, msg].slice(-120),
           };
         });
+        break;
+      }
+
+      case 'forex.central_bank.updated': {
+        const overview = envelope.payload as ForexOverviewSnapshot;
+        set({ lastSequenceNumber: nextSeq, forexOverview: overview });
+        break;
+      }
+
+      case 'futures.quote.updated': {
+        const updatedContract = envelope.payload as FuturesContract;
+        set((s) => ({
+          lastSequenceNumber: nextSeq,
+          futuresOverview: s.futuresOverview
+            ? {
+                ...s.futuresOverview,
+                contracts: s.futuresOverview.contracts.map((c) =>
+                  c.symbol === updatedContract.symbol ? updatedContract : c,
+                ),
+              }
+            : s.futuresOverview,
+        }));
+        break;
+      }
+
+      case 'futures.orderbook.updated': {
+        const book = envelope.payload as FuturesOrderBookSnapshot;
+        set((s) => ({
+          lastSequenceNumber: nextSeq,
+          futuresOrderBooks: { ...s.futuresOrderBooks, [book.symbol]: book },
+        }));
+        break;
+      }
+
+      case 'futures.trade.executed': {
+        const trade = envelope.payload as FuturesTrade;
+        const involvesSelf = Boolean(
+          state.player && (trade.buyerId === state.player.id || trade.sellerId === state.player.id),
+        );
+        set((s) => {
+          const existing = s.futuresRecentTradesBySymbol[trade.symbol] ?? [];
+          if (existing.some((t) => t.id === trade.id)) {
+            return { lastSequenceNumber: nextSeq };
+          }
+          return {
+            lastSequenceNumber: nextSeq,
+            futuresSyncSeq: involvesSelf ? s.futuresSyncSeq + 1 : s.futuresSyncSeq,
+            futuresRecentTradesBySymbol: {
+              ...s.futuresRecentTradesBySymbol,
+              [trade.symbol]: [trade, ...existing].slice(0, 60),
+            },
+          };
+        });
+        break;
+      }
+
+      case 'futures.candle.updated': {
+        const payload = envelope.payload as { symbol: string; candles: Record<Timeframe, Candle> };
+        set({ lastSequenceNumber: nextSeq, futuresLiveCandleTick: payload });
+        break;
+      }
+
+      case 'futures.position.updated': {
+        const posPayload = envelope.payload as { playerId?: string } | null;
+        const isSelf = Boolean(state.player && posPayload?.playerId === state.player.id);
+        set((s) => ({
+          lastSequenceNumber: nextSeq,
+          futuresSyncSeq: isSelf ? s.futuresSyncSeq + 1 : s.futuresSyncSeq,
+        }));
+        break;
+      }
+
+      case 'futures.funding.settled': {
+        const evt = envelope.payload as FuturesFundingSettlementEvent;
+        set((s) => ({
+          lastSequenceNumber: nextSeq,
+          futuresSyncSeq: s.futuresSyncSeq + 1,
+          futuresOverview: s.futuresOverview
+            ? {
+                ...s.futuresOverview,
+                recentFundingSettlements: [
+                  evt,
+                  ...s.futuresOverview.recentFundingSettlements.filter((f) => f.id !== evt.id),
+                ].slice(0, 30),
+              }
+            : s.futuresOverview,
+        }));
+        break;
+      }
+
+      case 'futures.liquidation.executed': {
+        const liq = envelope.payload as FuturesLiquidationEvent;
+        const isSelf = state.player && liq.playerId === state.player.id;
+        set((s) => ({
+          lastSequenceNumber: nextSeq,
+          futuresSyncSeq: s.futuresSyncSeq + 1,
+          futuresOverview: s.futuresOverview
+            ? {
+                ...s.futuresOverview,
+                recentLiquidations: [
+                  liq,
+                  ...s.futuresOverview.recentLiquidations.filter((l) => l.id !== liq.id),
+                ].slice(0, 30),
+              }
+            : s.futuresOverview,
+        }));
+        if (isSelf) {
+          state.pushToast({
+            tone: 'error',
+            title: `Thanh lý vị thế ${liq.symbol}`,
+            description: liq.note,
+          });
+        }
+        break;
+      }
+
+      case 'futures.margin_call': {
+        const pos = envelope.payload as FuturesPosition;
+        const isSelf = Boolean(state.player && pos.playerId === state.player.id);
+        set((s) => ({
+          lastSequenceNumber: nextSeq,
+          futuresSyncSeq: isSelf ? s.futuresSyncSeq + 1 : s.futuresSyncSeq,
+        }));
+        if (isSelf) {
+          state.pushToast({
+            tone: 'warning',
+            title: `Cảnh báo Margin Call: ${pos.symbol}`,
+            description: `Tỷ lệ ký quỹ đạt ${pos.marginRatioPct.toFixed(1)}%. Hãy bổ sung ký quỹ hoặc giảm vị thế trước khi chạm 100%.`,
+          });
+        }
         break;
       }
 

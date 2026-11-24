@@ -1,12 +1,19 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { calcNotionalMinor, formatCR, formatQty } from '../../../shared/contracts/money';
+import {
+  ALL_CURRENCIES,
+  CURRENCY_SPECS,
+  calcNotionalMinor,
+  formatCR,
+  formatCurrencyAmount,
+  formatQty,
+} from '../../../shared/contracts/money';
 import { formatDateTimeShort } from '../../lib/indicators';
 import { PortfolioService } from '../../services/api';
 import { useAppStore } from '../../store/useAppStore';
 
 export function PortfolioPage() {
-  const { player, assets, openAssetInExchange } = useAppStore();
+  const { player, assets, openAssetInExchange, openForexPair } = useAppStore();
   const [ledgerFilter, setLedgerFilter] = useState<string>('ALL');
 
   const { data: ledger = [], isLoading: ledgerLoading } = useQuery({
@@ -27,12 +34,16 @@ export function PortfolioPage() {
     cashTotalMinor +
       player.stockValueMinor +
       player.cryptoValueMinor +
+      (player.forexValueMinor ?? 0) +
+      (player.futuresEquityMinor ?? 0) +
       player.propertyValueMinor +
       player.businessEquityMinor,
   );
 
   const allocations = [
-    { label: 'Tiền mặt & Tiết kiệm', value: cashTotalMinor, color: '#39B8AD' },
+    { label: 'Tiền mặt & Tiết kiệm (CR)', value: cashTotalMinor, color: '#39B8AD' },
+    { label: 'Futures (PERP)', value: player.futuresEquityMinor ?? 0, color: '#F97316' },
+    { label: 'Ngoại hối (EFX)', value: player.forexValueMinor ?? 0, color: '#06B6D4' },
     { label: 'Cổ phiếu (ESE)', value: player.stockValueMinor, color: '#3B82F6' },
     { label: 'Crypto (ECX)', value: player.cryptoValueMinor, color: '#F5B942' },
     { label: 'Bất động sản', value: player.propertyValueMinor, color: '#22C55E' },
@@ -45,9 +56,9 @@ export function PortfolioPage() {
   return (
     <div className="max-w-[1440px] mx-auto space-y-5">
       <div>
-        <h1 className="text-lg font-bold tracking-tight">Danh mục đầu tư & Sổ cái kép</h1>
+        <h1 className="text-lg font-bold tracking-tight">Danh mục đầu tư, Ví đa tiền tệ & Sổ cái kép</h1>
         <p className="text-xs text-[var(--text-secondary)] mt-0.5">
-          NET WORTH = CASH + STOCKS + CRYPTO + PROPERTY + BUSINESS EQUITY - LIABILITIES (không tính trùng tài sản phong tỏa)
+          NET WORTH = CASH (CR) + FUTURES EQUITY + FOREX (EFX) + STOCKS + CRYPTO + PROPERTY + BUSINESS EQUITY - LIABILITIES (không tính trùng ký quỹ)
         </p>
       </div>
 
@@ -107,7 +118,7 @@ export function PortfolioPage() {
             );
           })}
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 text-xs">
           {allocations.map((a) => {
             const pct = (a.value / grossAssets) * 100;
             return (
@@ -122,6 +133,80 @@ export function PortfolioPage() {
               </div>
             );
           })}
+        </div>
+      </section>
+
+      {/* Multi-Currency Forex Wallet */}
+      <section className="rounded-lg bg-[var(--bg-panel)] border border-[var(--border-subtle)] overflow-hidden">
+        <div className="px-4 py-3 border-b border-[var(--border-subtle)] flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-semibold">Ví đa tiền tệ (Currency Wallet — EFX)</h2>
+            <p className="text-[11px] text-[var(--text-muted)]">
+              Mỗi đồng tiền mô phỏng có số dư khả dụng, phong tỏa và bút toán sổ cái kép độc lập
+            </p>
+          </div>
+          <span className="text-xs font-mono text-[var(--accent)]">
+            Tổng ngoại tệ: {formatCR(player.forexValueMinor ?? 0)} CR
+          </span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="bg-[var(--bg-surface)]/50 text-[var(--text-muted)] text-[11px] font-mono">
+              <tr>
+                <th className="text-left px-4 py-2 font-medium">Đồng tiền</th>
+                <th className="text-right px-4 py-2 font-medium">Khả dụng</th>
+                <th className="text-right px-4 py-2 font-medium">Phong tỏa lệnh</th>
+                <th className="text-right px-4 py-2 font-medium">Tổng số dư</th>
+                <th className="text-right px-4 py-2 font-medium">Thao tác</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--border-subtle)]/50 font-mono">
+              {ALL_CURRENCIES.map((code) => {
+                const bal = player.wallet.currencyBalances?.[code] ?? {
+                  currency: code,
+                  availableMinor: code === 'CR' ? player.wallet.availableMinor : 0,
+                  lockedMinor: code === 'CR' ? player.wallet.lockedMinor : 0,
+                };
+                const totalMinor = bal.availableMinor + bal.lockedMinor;
+                const targetPair =
+                  code === 'USD-SIM' || code === 'CR'
+                    ? 'USD-SIM/CR'
+                    : code === 'EUR-SIM'
+                      ? 'EUR-SIM/CR'
+                      : code === 'GBP-SIM'
+                        ? 'GBP-SIM/USD-SIM'
+                        : code === 'JPY-SIM'
+                          ? 'USD-SIM/JPY-SIM'
+                          : 'AUD-SIM/USD-SIM';
+                return (
+                  <tr key={code} className="hover:bg-[var(--bg-surface)]/40">
+                    <td className="px-4 py-2">
+                      <div className="font-semibold text-[var(--text-primary)]">{code}</div>
+                      <div className="text-[10px] font-sans text-[var(--text-muted)]">{CURRENCY_SPECS[code].name}</div>
+                    </td>
+                    <td className="px-4 py-2 text-right font-semibold">
+                      {formatCurrencyAmount(bal.availableMinor, code)}
+                    </td>
+                    <td className="px-4 py-2 text-right text-[var(--warning)]">
+                      {formatCurrencyAmount(bal.lockedMinor, code)}
+                    </td>
+                    <td className="px-4 py-2 text-right font-semibold">
+                      {formatCurrencyAmount(totalMinor, code)} {code}
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      <button
+                        type="button"
+                        onClick={() => openForexPair(targetPair)}
+                        className="px-2.5 py-1 rounded text-[11px] font-sans font-medium bg-[var(--bg-surface)] hover:text-[var(--accent)] cursor-pointer"
+                      >
+                        Mở {targetPair}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       </section>
 
@@ -184,7 +269,9 @@ export function PortfolioPage() {
                       <td className="px-4 py-2.5 text-right">
                         <button
                           type="button"
-                          onClick={() => openAssetInExchange(h.symbol, h.marketClass)}
+                          onClick={() =>
+                            openAssetInExchange(h.symbol, h.marketClass === 'FOREX' ? undefined : h.marketClass)
+                          }
                           className="px-2.5 py-1 rounded text-[11px] font-sans font-medium bg-[var(--bg-surface)] hover:text-[var(--accent)] cursor-pointer"
                         >
                           Giao dịch
@@ -204,22 +291,33 @@ export function PortfolioPage() {
         <div className="px-4 py-3 border-b border-[var(--border-subtle)] flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-semibold">Lịch sử bút toán sổ cái (Double-Entry Ledger)</h2>
           <div className="flex items-center gap-1 overflow-x-auto">
-            {(['ALL', 'TRADE_SETTLEMENT', 'TRADING_FEE', 'PROPERTY_SALE', 'BANK_DEPOSIT', 'COMPANY_CAPITAL'] as const).map(
-              (cat) => (
-                <button
-                  key={cat}
-                  type="button"
-                  onClick={() => setLedgerFilter(cat)}
-                  className={`px-2 py-1 text-[11px] font-mono rounded whitespace-nowrap cursor-pointer ${
-                    ledgerFilter === cat
-                      ? 'bg-[var(--bg-surface)] text-[var(--accent)] font-semibold'
-                      : 'text-[var(--text-secondary)]'
-                  }`}
-                >
-                  {cat === 'ALL' ? 'Tất cả' : cat.replace('_', ' ')}
-                </button>
-              ),
-            )}
+            {(
+              [
+                'ALL',
+                'FUTURES_MARGIN_LOCK',
+                'FUTURES_PNL_SETTLEMENT',
+                'FUTURES_FUNDING',
+                'FUTURES_LIQUIDATION',
+                'FX_SETTLEMENT',
+                'TRADE_SETTLEMENT',
+                'TRADING_FEE',
+                'PROPERTY_SALE',
+                'BANK_DEPOSIT',
+              ] as const
+            ).map((cat) => (
+              <button
+                key={cat}
+                type="button"
+                onClick={() => setLedgerFilter(cat)}
+                className={`px-2 py-1 text-[11px] font-mono rounded whitespace-nowrap cursor-pointer ${
+                  ledgerFilter === cat
+                    ? 'bg-[var(--bg-surface)] text-[var(--accent)] font-semibold'
+                    : 'text-[var(--text-secondary)]'
+                }`}
+              >
+                {cat === 'ALL' ? 'Tất cả' : cat.replaceAll('_', ' ')}
+              </button>
+            ))}
           </div>
         </div>
         <div className="overflow-x-auto max-h-96 overflow-y-auto">
@@ -230,7 +328,7 @@ export function PortfolioPage() {
                 <th className="text-left px-4 py-2 font-medium">Loại bút toán</th>
                 <th className="text-left px-4 py-2 font-medium">Diễn giải</th>
                 <th className="text-left px-4 py-2 font-medium">Mã tham chiếu</th>
-                <th className="text-right px-4 py-2 font-medium">Số tiền (CR)</th>
+                <th className="text-right px-4 py-2 font-medium">Số tiền</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--border-subtle)]/50 font-mono">
@@ -249,6 +347,7 @@ export function PortfolioPage() {
               ) : (
                 filteredLedger.map((e) => {
                   const isCredit = e.creditAccount === player.id;
+                  const entryCurrency = e.currency ?? 'CR';
                   return (
                     <tr key={e.id} className="hover:bg-[var(--bg-surface)]/40">
                       <td className="px-4 py-2 text-[var(--text-muted)] whitespace-nowrap">
@@ -263,7 +362,7 @@ export function PortfolioPage() {
                         }`}
                       >
                         {isCredit ? '+' : '-'}
-                        {formatCR(e.amountMinor)}
+                        {formatCurrencyAmount(e.amountMinor, entryCurrency)} {entryCurrency}
                       </td>
                     </tr>
                   );

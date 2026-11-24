@@ -12,12 +12,12 @@ export const GuestLoginSchema = z.object({
 
 export const PlaceOrderSchema = z
   .object({
-    symbol: z.string().trim().min(2).max(16),
+    symbol: z.string().trim().min(2).max(24),
     side: z.enum(['BUY', 'SELL']),
     type: z.enum(['MARKET', 'LIMIT']),
     timeInForce: z.enum(['GTC', 'IOC']).optional().default('GTC'),
     priceCR: z.number().positive('Giá phải lớn hơn 0').max(10_000_000).optional(),
-    quantity: z.number().positive('Khối lượng phải lớn hơn 0').max(1_000_000),
+    quantity: z.number().positive('Khối lượng phải lớn hơn 0').max(10_000_000),
     maxSlippageBps: z.number().int().min(10).max(5000).optional().default(500), // default 5%
     idempotencyKey: z.string().trim().min(4).max(128).optional(),
   })
@@ -81,3 +81,67 @@ export const EntertainmentPlaySchema = z.object({
   wagerChips: z.number().int().min(10).max(10_000),
   targetMultiplier: z.enum(['2x', '4x', '8x']),
 });
+
+export const PlaceFuturesOrderSchema = z
+  .object({
+    symbol: z.string().trim().min(4).max(24),
+    side: z.enum(['BUY', 'SELL']),
+    type: z.enum([
+      'MARKET',
+      'LIMIT',
+      'STOP_MARKET',
+      'STOP_LIMIT',
+      'TAKE_PROFIT_MARKET',
+      'TAKE_PROFIT_LIMIT',
+    ]),
+    timeInForce: z.enum(['GTC', 'IOC']).optional().default('GTC'),
+    marginMode: z.enum(['ISOLATED', 'CROSS']).optional().default('ISOLATED'),
+    leverage: z.number().int().min(1).max(20).optional().default(1),
+    priceCR: z.number().positive('Giá đặt phải lớn hơn 0').max(10_000_000).optional(),
+    triggerPriceCR: z.number().positive('Giá kích hoạt phải lớn hơn 0').max(10_000_000).optional(),
+    triggerSource: z.enum(['MARK_PRICE', 'LAST_PRICE']).optional().default('MARK_PRICE'),
+    quantity: z.number().positive('Khối lượng phải lớn hơn 0').max(10_000_000),
+    reduceOnly: z.boolean().optional().default(false),
+    postOnly: z.boolean().optional().default(false),
+    stopLossCR: z.number().positive('Giá Stop Loss phải lớn hơn 0').max(10_000_000).optional(),
+    takeProfitCR: z.number().positive('Giá Take Profit phải lớn hơn 0').max(10_000_000).optional(),
+    maxSlippageBps: z.number().int().min(10).max(5000).optional().default(500),
+    idempotencyKey: z.string().trim().min(4).max(128).optional(),
+  })
+  .refine(
+    (d) =>
+      d.type === 'MARKET' ||
+      d.type === 'STOP_MARKET' ||
+      d.type === 'TAKE_PROFIT_MARKET' ||
+      (d.priceCR !== undefined && d.priceCR > 0),
+    {
+      message: 'Lệnh Limit bắt buộc phải nhập mức giá hợp lệ.',
+      path: ['priceCR'],
+    },
+  )
+  .refine(
+    (d) =>
+      d.type === 'MARKET' ||
+      d.type === 'LIMIT' ||
+      (d.triggerPriceCR !== undefined && d.triggerPriceCR > 0),
+    {
+      message: 'Lệnh điều kiện (Stop Loss / Take Profit) bắt buộc phải nhập giá kích hoạt.',
+      path: ['triggerPriceCR'],
+    },
+  );
+
+export const FuturesAddMarginSchema = z.object({
+  amountCR: z.number().positive('Số CR ký quỹ thêm phải lớn hơn 0').max(50_000_000),
+});
+
+export const FuturesClosePositionSchema = z.object({
+  type: z.enum(['MARKET', 'LIMIT']).optional().default('MARKET'),
+  priceCR: z.number().positive().max(10_000_000).optional(),
+  quantity: z.number().positive().max(10_000_000).optional(),
+  idempotencyKey: z.string().trim().min(4).max(128).optional(),
+});
+
+export const FuturesAcknowledgeRiskSchema = z.object({
+  acknowledged: z.literal(true),
+});
+

@@ -7,6 +7,8 @@ import { BusinessPage } from './features/business/BusinessPage';
 import { OverviewPage } from './features/dashboard/OverviewPage';
 import { EntertainmentPage } from './features/entertainment/EntertainmentPage';
 import { ExchangePage } from './features/exchange/ExchangePage';
+import { ForexPage } from './features/forex/ForexPage';
+import { FuturesPage } from './features/futures/FuturesPage';
 import { LeaderboardPage } from './features/leaderboard/LeaderboardPage';
 import { EconomyNewsPage } from './features/news/EconomyNewsPage';
 import { PortfolioPage } from './features/portfolio/PortfolioPage';
@@ -61,6 +63,15 @@ function TradingEmpireWorkspace() {
         const params = new URLSearchParams(window.location.search);
         const guestParam = params.get('guest');
         const autostart = params.get('autostart') === '1';
+        const pageParam = params.get('page');
+        if (
+          pageParam === 'forex' ||
+          pageParam === 'exchange' ||
+          pageParam === 'futures' ||
+          pageParam === 'portfolio'
+        ) {
+          useAppStore.getState().setActivePage(pageParam);
+        }
 
         if (guestParam || autostart) {
           const upper = (guestParam || '').toUpperCase();
@@ -137,6 +148,10 @@ function TradingEmpireWorkspace() {
         return <OverviewPage />;
       case 'exchange':
         return <ExchangePage />;
+      case 'futures':
+        return <FuturesPage />;
+      case 'forex':
+        return <ForexPage />;
       case 'portfolio':
         return <PortfolioPage />;
       case 'property':

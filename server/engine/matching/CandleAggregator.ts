@@ -1,4 +1,4 @@
-import { fromMinor } from '../../../shared/contracts/money';
+import { CR_SCALE } from '../../../shared/contracts/money';
 import type { Candle, Timeframe, Trade } from '../../../shared/contracts/types';
 
 export const TIMEFRAME_SECONDS: Record<Timeframe, number> = {
@@ -34,19 +34,35 @@ function seededRng(seedStr: string): () => number {
 
 export class CandleAggregator {
   private candles = new Map<string, Map<Timeframe, Candle[]>>();
+  private precisionBySymbol = new Map<string, { scale: number; decimals: number }>();
 
   clear(): void {
     this.candles.clear();
+    this.precisionBySymbol.clear();
+  }
+
+  setSymbolPrecision(symbol: string, scale = CR_SCALE, decimals = 2): void {
+    this.precisionBySymbol.set(symbol, { scale, decimals });
   }
 
   /**
    * Generates deterministic historical simulated candles ending at `basePriceMinor` right before server boot.
    * Marked explicitly with `isHistoricalSeed: true`.
    */
-  seedSymbol(symbol: string, basePriceMinor: number, volatilityFactor = 0.014, nowMs = Date.now()): void {
+  seedSymbol(
+    symbol: string,
+    basePriceMinor: number,
+    volatilityFactor = 0.014,
+    nowMs = Date.now(),
+    priceScale = CR_SCALE,
+    priceDecimals = 2,
+  ): void {
+    this.precisionBySymbol.set(symbol, { scale: priceScale, decimals: priceDecimals });
+
     const tfMap = new Map<Timeframe, Candle[]>();
-    const endPrice = fromMinor(basePriceMinor);
+    const endPrice = basePriceMinor / priceScale;
     const nowSec = Math.floor(nowMs / 1000);
+    const minTick = 1 / priceScale;
 
     for (const tf of ALL_TIMEFRAMES) {
       const stepSec = TIMEFRAME_SECONDS[tf];
@@ -54,15 +70,14 @@ export class CandleAggregator {
       const rng = seededRng(`${symbol}:${tf}:WORLD-01`);
       const lastBucket = Math.floor(nowSec / stepSec) * stepSec;
 
-      // Build backward walk so the final historical close converges cleanly to basePrice
       const closes: number[] = new Array(count);
-      closes[count - 1] = endPrice;
+      closes[count - 1] = Number(endPrice.toFixed(priceDecimals));
       const tfScale = Math.sqrt(stepSec / 300);
 
       for (let i = count - 2; i >= 0; i--) {
         const drift = (rng() - 0.5) * 2 * volatilityFactor * Math.min(tfScale, 2.5);
-        const prev = Math.max(endPrice * 0.65, Math.min(endPrice * 1.4, closes[i + 1] / (1 + drift)));
-        closes[i] = Number(prev.toFixed(2));
+        const prev = Math.max(endPrice * 0.82, Math.min(endPrice * 1.18, closes[i + 1] / (1 + drift)));
+        closes[i] = Number(prev.toFixed(priceDecimals));
       }
 
       const series: Candle[] = [];
@@ -70,17 +85,17 @@ export class CandleAggregator {
         const bucketTime = lastBucket - (count - 1 - i) * stepSec;
         const open = i === 0 ? closes[0] : closes[i - 1];
         const close = closes[i];
-        const wickSpan = Math.max(0.02, Math.abs(close - open) + close * volatilityFactor * 0.35 * rng());
-        const high = Number((Math.max(open, close) + wickSpan * rng()).toFixed(2));
-        const low = Number(Math.max(0.01, Math.min(open, close) - wickSpan * rng()).toFixed(2));
+        const wickSpan = Math.max(minTick * 2, Math.abs(close - open) + close * volatilityFactor * 0.35 * rng());
+        const high = Number((Math.max(open, close) + wickSpan * rng()).toFixed(priceDecimals));
+        const low = Number(Math.max(minTick, Math.min(open, close) - wickSpan * rng()).toFixed(priceDecimals));
         const volume = Number((15 + rng() * 140 * Math.max(1, tfScale)).toFixed(2));
 
         series.push({
           time: bucketTime,
-          open: Number(open.toFixed(2)),
+          open: Number(open.toFixed(priceDecimals)),
           high,
           low,
-          close: Number(close.toFixed(2)),
+          close: Number(close.toFixed(priceDecimals)),
           volume,
           isHistoricalSeed: true,
         });
@@ -101,8 +116,9 @@ export class CandleAggregator {
       this.candles.set(trade.symbol, tfMap);
     }
 
+    const prec = this.precisionBySymbol.get(trade.symbol) ?? { scale: CR_SCALE, decimals: 2 };
     const tradeSec = Math.floor(new Date(trade.timestamp).getTime() / 1000);
-    const price = fromMinor(trade.priceMinor);
+    const price = Number((trade.priceMinor / prec.scale).toFixed(prec.decimals));
     const updated = {} as Record<Timeframe, Candle>;
 
     for (const tf of ALL_TIMEFRAMES) {

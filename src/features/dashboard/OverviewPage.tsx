@@ -1,14 +1,25 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowDownRight, ArrowRight, ArrowUpRight } from 'lucide-react';
-import { formatCR, formatCompactCR } from '../../../shared/contracts/money';
+import { formatCR, formatCompactCR, formatCurrencyAmount } from '../../../shared/contracts/money';
 import { NetWorthChart } from '../../components/charts/NetWorthChart';
 import { formatDateTimeShort } from '../../lib/indicators';
 import { PortfolioService } from '../../services/api';
 import { useAppStore } from '../../store/useAppStore';
 
 export function OverviewPage() {
-  const { player, assets, economy, news, gameClock, theme, openAssetInExchange, setActivePage } = useAppStore();
+  const {
+    player,
+    assets,
+    economy,
+    news,
+    gameClock,
+    theme,
+    openAssetInExchange,
+    openForexPair,
+    openFuturesContract,
+    setActivePage,
+  } = useAppStore();
   const [range, setRange] = useState<'24H' | '7D' | '30D' | 'ALL'>('24H');
 
   const { data: ledger = [] } = useQuery({
@@ -37,6 +48,8 @@ export function OverviewPage() {
     player.wallet.termDepositMinor +
     player.stockValueMinor +
     player.cryptoValueMinor +
+    (player.forexValueMinor ?? 0) +
+    (player.futuresEquityMinor ?? 0) +
     player.propertyValueMinor +
     player.businessEquityMinor;
 
@@ -84,17 +97,24 @@ export function OverviewPage() {
           </button>
           <button
             type="button"
+            onClick={() => openFuturesContract('BTC-SIM/CR-PERP')}
+            className="px-3.5 py-2 rounded-md text-xs font-medium border border-[var(--accent)]/50 bg-[var(--bg-panel)] text-[var(--accent)] hover:bg-[var(--bg-surface)] transition-colors cursor-pointer whitespace-nowrap"
+          >
+            Giao dịch Futures (PERP)
+          </button>
+          <button
+            type="button"
+            onClick={() => openForexPair('EUR-SIM/USD-SIM')}
+            className="px-3.5 py-2 rounded-md text-xs font-medium border border-[var(--border-subtle)] bg-[var(--bg-panel)] hover:bg-[var(--bg-surface)] transition-colors cursor-pointer whitespace-nowrap"
+          >
+            Giao dịch Forex (EFX)
+          </button>
+          <button
+            type="button"
             onClick={() => setActivePage('portfolio')}
             className="px-3.5 py-2 rounded-md text-xs font-medium border border-[var(--border-subtle)] bg-[var(--bg-panel)] hover:bg-[var(--bg-surface)] transition-colors cursor-pointer whitespace-nowrap"
           >
             Xem danh mục
-          </button>
-          <button
-            type="button"
-            onClick={() => setActivePage('property')}
-            className="px-3.5 py-2 rounded-md text-xs font-medium border border-[var(--border-subtle)] bg-[var(--bg-panel)] hover:bg-[var(--bg-surface)] transition-colors cursor-pointer whitespace-nowrap"
-          >
-            Bất động sản
           </button>
         </div>
       </div>
@@ -374,7 +394,7 @@ export function OverviewPage() {
                       }`}
                     >
                       {isCredit ? '+' : '-'}
-                      {formatCR(entry.amountMinor)}
+                      {formatCurrencyAmount(entry.amountMinor, entry.currency ?? 'CR')} {entry.currency ?? 'CR'}
                     </div>
                   </div>
                 );

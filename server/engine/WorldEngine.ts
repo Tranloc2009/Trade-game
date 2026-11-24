@@ -1,6 +1,12 @@
 import crypto from 'node:crypto';
 import type { IEventBus } from '../../shared/contracts/interfaces';
-import { calcNotionalMinor, toMinor } from '../../shared/contracts/money';
+import {
+  ALL_CURRENCIES,
+  type CurrencyCode,
+  calcNotionalMinor,
+  fromCurrencyMinor,
+  toMinor,
+} from '../../shared/contracts/money';
 import {
   API_CONTRACT_VERSION,
   DEFAULT_WORLD_ID,
@@ -9,6 +15,7 @@ import {
   type Achievement,
   type ChatMessage,
   type DiagnosticsSnapshot,
+  type ForexOverviewSnapshot,
   type LeaderboardEntry,
   type NetWorthPoint,
   type PlayerProfile,
@@ -26,7 +33,17 @@ import { DemoAuthProvider, SecurityGuard, sanitizePlainText } from '../security/
 import { BankingEngine } from './banking/BankingEngine';
 import { BusinessEngine } from './business/BusinessEngine';
 import { EconomyEngine } from './economy/EconomyEngine';
-import { LedgerService } from './ledger/LedgerService';
+import { CentralBankEngine } from './forex/CentralBankEngine';
+import { FOREX_AI_AGENTS, ForexBotEngine } from './forex/ForexBotEngine';
+import { buildSeedForexPairs } from './forex/forexSeed';
+import type {
+  FuturesAccountSummary,
+  FuturesOverviewSnapshot,
+} from '../../shared/contracts/futures';
+import { FUTURES_RISK_TIERS } from '../../shared/contracts/futures';
+import { FuturesBotEngine, FUTURES_AI_BOTS } from './futures/FuturesBotEngine';
+import { FuturesEngine, type PlaceFuturesOrderCommand } from './futures/FuturesEngine';
+import { LedgerService, cloneWallet } from './ledger/LedgerService';
 import { MarketMakerEngine, SIMULATED_AGENTS } from './market-makers/MarketMakerEngine';
 import { CandleAggregator } from './matching/CandleAggregator';
 import { MatchingEngine, type PlaceOrderCommand } from './matching/MatchingEngine';
@@ -117,6 +134,10 @@ export class WorldEngine {
   public readonly candles: CandleAggregator;
   public readonly matching: MatchingEngine;
   public readonly marketMakers: MarketMakerEngine;
+  public readonly centralBanks: CentralBankEngine;
+  public readonly forexBots: ForexBotEngine;
+  public readonly futures: FuturesEngine;
+  public readonly futuresBots: FuturesBotEngine;
   public readonly economy: EconomyEngine;
   public readonly properties: PropertyEngine;
   public readonly business: BusinessEngine;
@@ -147,16 +168,68 @@ export class WorldEngine {
       worldId: this.worldId,
     });
     this.marketMakers = new MarketMakerEngine(this.ledger, this.matching);
+    this.centralBanks = new CentralBankEngine();
+    this.forexBots = new ForexBotEngine(this.ledger, this.matching, this.centralBanks);
+    this.futures = new FuturesEngine(this.worldId, this.ledger, this.matching);
+    this.futuresBots = new FuturesBotEngine(this.ledger, this.futures);
     this.economy = new EconomyEngine(options.calendarMode ?? 'ACCELERATED');
     this.properties = new PropertyEngine(this.worldId, this.ledger);
     this.business = new BusinessEngine(this.worldId, this.ledger);
     this.banking = new BankingEngine(this.ledger);
 
+    this.bindFuturesHooks();
     this.bootstrapWorld();
 
     if (options.enableBackgroundLoops !== false) {
       this.startBackgroundLoops();
     }
+  }
+
+  private bindFuturesHooks(): void {
+    this.futures.setHooks({
+      onQuote: (contract) => {
+        this.eventBus.publish('futures.quote.updated', contract);
+      },
+      onOrderBook: (book) => {
+        this.eventBus.publish('futures.orderbook.updated', book, `futures:${book.symbol}`);
+      },
+      onTrade: (trade) => {
+        const buyer = this.players.get(trade.buyerId);
+        const seller = this.players.get(trade.sellerId);
+        if (buyer) buyer.tradingVolumeMinor += trade.notionalMinor;
+        if (seller) seller.tradingVolumeMinor += trade.notionalMinor;
+        this.eventBus.publish('futures.trade.executed', trade, `futures:${trade.symbol}`);
+        this.emitPlayerFinancialSync(trade.buyerId);
+        this.emitPlayerFinancialSync(trade.sellerId);
+      },
+      onCandle: (symbol, candles) => {
+        this.eventBus.publish('futures.candle.updated', { symbol, candles }, `futures:${symbol}`);
+      },
+      onPosition: (playerId, position, symbol) => {
+        const rec = this.players.get(playerId);
+        if (rec?.role === 'PLAYER') {
+          this.eventBus.publish(
+            'futures.position.updated',
+            { playerId, symbol, position },
+            `player:${playerId}`,
+          );
+          this.emitPlayerFinancialSync(playerId);
+        }
+      },
+      onFunding: (event) => {
+        this.eventBus.publish('futures.funding.settled', event);
+      },
+      onLiquidation: (event) => {
+        this.eventBus.publish('futures.liquidation.executed', event);
+        this.emitPlayerFinancialSync(event.playerId);
+      },
+      onMarginCall: (position) => {
+        const rec = this.players.get(position.playerId);
+        if (rec?.role === 'PLAYER') {
+          this.eventBus.publish('futures.margin_call', position, `player:${position.playerId}`);
+        }
+      },
+    });
   }
 
   public bootstrapWorld(): void {
@@ -168,15 +241,23 @@ export class WorldEngine {
     this.ledger.reset();
     this.matching.reset();
     this.marketMakers.reset();
+    this.centralBanks.reset();
+    this.forexBots.reset();
+    this.futures.reset();
+    this.futuresBots.reset();
     this.economy.reset();
     this.properties.reset();
     this.business.reset();
     this.banking.reset();
 
-    // 1. Seed 6 ECX Crypto + 8 ESE Stocks
+    // 1. Seed 6 ECX Crypto + 8 ESE Stocks + 6 EFX Forex Pairs
     const assets = buildSeedAssets();
     for (const asset of assets) {
       this.matching.registerAsset(asset, true);
+    }
+    const forexPairs = buildSeedForexPairs();
+    for (const pair of forexPairs) {
+      this.matching.registerAsset(pair, true);
     }
 
     // 2. Register & fund NPC Market Makers & Investor Bots with finite wallets/inventory
@@ -192,6 +273,30 @@ export class WorldEngine {
         exp: 10_000,
         title: agent.role === 'MARKET_MAKER' ? 'Market Maker' : 'Institutional Fund',
         startingCapitalMinor: agent.role === 'MARKET_MAKER' ? toMinor(12_000_000) : toMinor(4_500_000),
+        tradingVolumeMinor: 0,
+        achievements: [],
+        netWorthHistory: [],
+      });
+    }
+
+    // 2b. Register & fund 5 Finite-Capital AI Forex Market Participants
+    this.forexBots.fundAgents();
+    const initialRatesToCR = this.centralBanks.computeRatesToCR(forexPairs);
+    for (const fxAgent of FOREX_AI_AGENTS) {
+      let initialTotalCrMinor = 0;
+      for (const currency of ALL_CURRENCIES) {
+        initialTotalCrMinor += toMinor(fxAgent.initialBalancesMajor[currency] * initialRatesToCR[currency]);
+      }
+      this.players.set(fxAgent.id, {
+        id: fxAgent.id,
+        username: fxAgent.username,
+        avatarInitials: fxAgent.username.slice(0, 2).toUpperCase(),
+        role: fxAgent.role,
+        joinedAt: new Date().toISOString(),
+        level: 10,
+        exp: 10_000,
+        title: fxAgent.role === 'MARKET_MAKER' ? 'FX Liquidity Desk' : 'Institutional FX Bot',
+        startingCapitalMinor: initialTotalCrMinor,
         tradingVolumeMinor: 0,
         achievements: [],
         netWorthHistory: [],
@@ -214,12 +319,57 @@ export class WorldEngine {
       netWorthHistory: [],
     });
 
-    // 3. Populate initial resting order books across ECX & ESE via real MatchingEngine
+    // 3. Populate initial resting order books across ECX, ESE & EFX via real MatchingEngine
     this.marketMakers.seedInitialOrderBooks(this.economy.state.volatilityRegime);
+    this.forexBots.seedInitialOrderBooks();
 
-    // 4. Seed initial grounded news & sync ledger metrics
-    this.economy.seedInitialNews(this.matching.listAssets());
+    // 3b. Seed 6 Empire Futures Exchange Perpetual Contracts & 5 Finite-Capital Futures AI Desks
+    this.futures.bootstrapContracts();
+    this.futuresBots.fundBots();
+    for (const fBot of FUTURES_AI_BOTS) {
+      this.players.set(fBot.id, {
+        id: fBot.id,
+        username: fBot.username,
+        avatarInitials: fBot.username.slice(0, 2).toUpperCase(),
+        role: fBot.role,
+        joinedAt: new Date().toISOString(),
+        level: 10,
+        exp: 10_000,
+        title: fBot.role === 'MARKET_MAKER' ? 'Perp Liquidity Desk' : 'Futures AI Desk',
+        startingCapitalMinor: toMinor(fBot.initialCapitalCR),
+        tradingVolumeMinor: 0,
+        achievements: [],
+        netWorthHistory: [],
+      });
+    }
+    this.futuresBots.seedInitialOrderBooks();
+
+    // 4. Seed initial grounded news & sync ledger + Central Bank metrics
+    this.economy.seedInitialNews(assets);
     this.economy.syncLedgerMetrics(this.ledger);
+    this.centralBanks.syncEmpireCentralBank(this.economy.state, this.economy.state.totalMoneySupplyMinor);
+    this.economy.news.unshift({
+      id: 'news_boot_efx',
+      headline: '[EFX] Empire Forex Exchange mở giao dịch 24/7 cho 6 cặp ngoại hối mô phỏng',
+      summary:
+        'Tỷ giá EUR-SIM/USD-SIM, GBP-SIM/USD-SIM, USD-SIM/JPY-SIM, AUD-SIM/USD-SIM, USD-SIM/CR và EUR-SIM/CR được hình thành hoàn toàn từ sổ lệnh thực trên Matching Engine.',
+      category: 'FOREX',
+      relatedSymbols: ['EUR-SIM/USD-SIM', 'USD-SIM/CR', 'USD-SIM/JPY-SIM'],
+      sentiment: 'NEUTRAL',
+      source: 'EMPIRE_WIRE_SIM',
+      publishedAt: new Date().toISOString(),
+    });
+    this.economy.news.unshift({
+      id: 'news_boot_futures',
+      headline: '[EMPIRE FUTURES] Ra mắt 6 hợp đồng vĩnh cửu ký quỹ bằng CR (Isolated Margin 1x–10x)',
+      summary:
+        'BTC-SIM/CR-PERP, ETH-SIM/CR-PERP, SOL-SIM/CR-PERP, NOVA/CR-PERP, TITAN/CR-PERP và EUR-SIM/CR-PERP vận hành với sổ lệnh độc lập, Mark Price chống thao túng, Funding ngang hàng tổng bằng 0 và Quỹ bảo hiểm hữu hạn.',
+      category: 'MACRO',
+      relatedSymbols: ['BTC-SIM', 'ETH-SIM', 'NOVA'],
+      sentiment: 'NEUTRAL',
+      source: 'EMPIRE_WIRE_SIM',
+      publishedAt: new Date().toISOString(),
+    });
 
     // 5. Initial welcome world message (system notice, clearly labeled)
     this.chatMessages.push({
@@ -240,7 +390,7 @@ export class WorldEngine {
   public startBackgroundLoops(): void {
     this.stopBackgroundLoops();
 
-    // Every 8s: simulated economic agent tick (real orders through MatchingEngine) + auction expiry check
+    // Every 8s: simulated economic agent tick (ECX/ESE + EFX real orders through MatchingEngine) + auction expiry check
     const marketTimer = setInterval(() => {
       try {
         const res = this.marketMakers.runSimulationTick(this.economy.state);
@@ -254,6 +404,25 @@ export class WorldEngine {
             this.eventBus.publish('market.orderbook.updated', this.matching.getOrderBook(sym), `market:${sym}`);
           }
         }
+
+        const fxRes = this.forexBots.runForexTick();
+        for (const trade of fxRes.trades) {
+          this.onTradeExecuted(trade);
+        }
+        for (const sym of fxRes.affectedSymbols) {
+          const asset = this.matching.getAsset(sym);
+          if (asset) {
+            this.eventBus.publish('market.quote.updated', asset);
+            this.eventBus.publish('market.orderbook.updated', this.matching.getOrderBook(sym), `market:${sym}`);
+          }
+        }
+
+        // Empire Futures Exchange tick: AI bot liquidity & orders -> Mark Price refresh -> Liquidation Engine -> Due Funding
+        this.futuresBots.runFuturesTick(this.economy.state);
+        this.futures.refreshAllMarkPrices();
+        this.futures.runLiquidationCheck();
+        this.futures.settleDueFunding();
+
         const settledAuctions = this.properties.settleExpiredAuctions();
         for (const auc of settledAuctions) {
           this.eventBus.publish('auction.ended', auc);
@@ -263,14 +432,22 @@ export class WorldEngine {
       }
     }, 8_000);
 
-    // Every 60s: economy event, business operating cycle, rental payouts, bank interest, leaderboard broadcast
+    // Every 60s: economy event, Central Bank FX policy cycle, business operating cycle, rental payouts, bank interest, leaderboard broadcast
     const macroTimer = setInterval(() => {
       try {
         const { newEvent, newNews } = this.economy.tickEconomy(this.matching);
         this.economy.syncLedgerMetrics(this.ledger);
+        this.centralBanks.syncEmpireCentralBank(this.economy.state, this.economy.state.totalMoneySupplyMinor);
 
         if (newEvent) this.eventBus.publish('economy.event', newEvent);
-        if (newNews) this.eventBus.publish('news.published', newNews);
+        if (newNews) {
+          this.eventBus.publish('news.published', newNews);
+          this.futuresBots.reactToNews(newNews);
+        }
+
+        this.triggerCentralBankEvent();
+        this.futures.refreshAllMarkPrices();
+        this.futures.runLiquidationCheck();
 
         const updatedCompanies = this.business.runOperatingCycle(this.economy.state);
         for (const cmp of updatedCompanies) {
@@ -289,7 +466,7 @@ export class WorldEngine {
           gameClock: this.economy.getGameClock(),
           economy: this.economy.state,
           onlineHumanPlayers: this.onlineHumanPlayerIds.size,
-          simulatedAgentsCount: SIMULATED_AGENTS.length,
+          simulatedAgentsCount: SIMULATED_AGENTS.length + FOREX_AI_AGENTS.length + FUTURES_AI_BOTS.length,
         });
         this.eventBus.publish('leaderboard.updated', this.getLeaderboard('PLAYERS'));
       } catch (err) {
@@ -429,13 +606,37 @@ export class WorldEngine {
     const businessEquityMinor = this.business.getPlayerBusinessEquityMinor(playerId);
     const totalDebtMinor = this.banking.getPlayerTotalDebtMinor(playerId);
 
+    const clonedWallet = cloneWallet(wallet);
+    const fxPairs = this.matching.listAssets('FOREX');
+    const ratesToCR = this.centralBanks.computeRatesToCR(fxPairs);
+    let forexValueMinor = 0;
+    for (const currency of ALL_CURRENCIES) {
+      if (currency === 'CR') continue;
+      const bal = clonedWallet.currencyBalances[currency];
+      if (!bal) continue;
+      const totalMajor = fromCurrencyMinor(bal.availableMinor + bal.lockedMinor, currency);
+      if (totalMajor > 0) {
+        forexValueMinor += toMinor(totalMajor * ratesToCR[currency]);
+      }
+    }
+
     const totalCashMinor =
-      wallet.availableMinor + wallet.lockedMinor + wallet.savingsMinor + wallet.termDepositMinor;
+      clonedWallet.availableMinor +
+      clonedWallet.lockedMinor +
+      clonedWallet.savingsMinor +
+      clonedWallet.termDepositMinor;
+
+    const futuresVal = this.futures.getPlayerFuturesValuation(playerId);
+    const futuresEquityMinor = futuresVal.equityMinor;
+    const futuresMarginMinor = futuresVal.isolatedMarginMinor + futuresVal.openOrderMarginMinor;
+    const futuresUnrealizedPnlMinor = futuresVal.unrealizedPnlMinor;
 
     const netWorthMinor =
       totalCashMinor +
       stockValueMinor +
       cryptoValueMinor +
+      forexValueMinor +
+      futuresEquityMinor +
       propertyValueMinor +
       businessEquityMinor -
       totalDebtMinor;
@@ -449,12 +650,16 @@ export class WorldEngine {
       level: record.level,
       exp: record.exp,
       title: record.title,
-      wallet: { ...wallet },
+      wallet: clonedWallet,
       holdings: holdings.map((h) => ({ ...h })),
       realizedPnlMinor,
-      unrealizedPnlMinor,
+      unrealizedPnlMinor: unrealizedPnlMinor + futuresUnrealizedPnlMinor,
       stockValueMinor,
       cryptoValueMinor,
+      forexValueMinor,
+      futuresEquityMinor,
+      futuresMarginMinor,
+      futuresUnrealizedPnlMinor,
       propertyValueMinor,
       businessEquityMinor,
       totalDebtMinor,
@@ -475,12 +680,186 @@ export class WorldEngine {
       sequenceNumber: this.eventBus.getSequenceNumber(),
       serverTimestamp: new Date().toISOString(),
       onlineHumanPlayers: this.onlineHumanPlayerIds.size,
-      simulatedAgentsCount: SIMULATED_AGENTS.length,
+      simulatedAgentsCount: SIMULATED_AGENTS.length + FOREX_AI_AGENTS.length + FUTURES_AI_BOTS.length,
       gameClock: this.economy.getGameClock(),
       economy: { ...this.economy.state, activeEvents: [...this.economy.state.activeEvents] },
       assets: this.matching.listAssets().map((a) => ({ ...a })),
       news: this.economy.news.slice(0, 30),
       player: playerId ? this.getPlayerProfile(playerId) : null,
+    };
+  }
+
+  public getForexOverview(): ForexOverviewSnapshot {
+    const fxPairs = this.matching.listAssets('FOREX');
+    return {
+      pairs: fxPairs.map((p) => ({ ...p })),
+      centralBanks: this.centralBanks.listCentralBanks(),
+      calendar: this.centralBanks.listCalendar(),
+      recentPolicyEvents: this.centralBanks.listRecentPolicyEvents(15),
+      currencyStrength: this.centralBanks.computeCurrencyStrength(fxPairs),
+      ratesToCR: this.centralBanks.computeRatesToCR(fxPairs),
+      fxAgents: this.forexBots.listAgentSummaries(),
+    };
+  }
+
+  public triggerCentralBankEvent(targetCurrency?: CurrencyCode) {
+    const gameDay = this.economy.getGameClock().gameDay;
+    const { policyEvent, newsItem } = this.centralBanks.triggerPolicyEvent(targetCurrency, gameDay);
+
+    this.economy.news.unshift(newsItem);
+    if (this.economy.news.length > 60) this.economy.news.pop();
+    this.eventBus.publish('news.published', newsItem);
+
+    const reaction = this.forexBots.reactToPolicyEvent(policyEvent);
+    for (const trade of reaction.trades) {
+      this.onTradeExecuted(trade);
+    }
+    for (const sym of reaction.affectedSymbols) {
+      const asset = this.matching.getAsset(sym);
+      if (asset) {
+        this.eventBus.publish('market.quote.updated', asset);
+        this.eventBus.publish('market.orderbook.updated', this.matching.getOrderBook(sym), `market:${sym}`);
+      }
+    }
+
+    const overview = this.getForexOverview();
+    this.eventBus.publish('forex.central_bank.updated', overview);
+
+    return {
+      policyEvent,
+      newsItem,
+      tradesExecuted: reaction.trades.length,
+      affectedSymbols: reaction.affectedSymbols,
+      overview,
+    };
+  }
+
+  // ============================================================================
+  // EMPIRE FUTURES EXCHANGE (PERPETUAL FUTURES — AUTHORITATIVE ENTRY POINTS)
+  // ============================================================================
+
+  public getFuturesOverview(): FuturesOverviewSnapshot {
+    return {
+      contracts: this.futures.listContracts(),
+      insuranceFund: this.futures.getInsuranceFundState(),
+      recentLiquidations: this.futures.listRecentLiquidations(30),
+      recentFundingSettlements: this.futures.listFundingSettlements(undefined, 30),
+      bots: this.futuresBots.listBotSummaries(),
+      riskTiers: FUTURES_RISK_TIERS,
+      crossMarginStatus: {
+        enabled: false,
+        reason: this.futures.crossMargin.statusReason,
+      },
+    };
+  }
+
+  public getFuturesAccount(playerId: string): FuturesAccountSummary {
+    const player = this.players.get(playerId);
+    if (!player) throw new DomainError('UNAUTHORIZED');
+    return this.futures.getPlayerAccountSummary(playerId);
+  }
+
+  public acknowledgeFuturesRisk(playerId: string) {
+    const player = this.players.get(playerId);
+    if (!player) throw new DomainError('UNAUTHORIZED');
+    return this.futures.acknowledgeRisk(playerId);
+  }
+
+  public placeFuturesOrder(
+    playerId: string,
+    input: Omit<PlaceFuturesOrderCommand, 'playerId' | 'playerName'>,
+  ) {
+    const player = this.players.get(playerId);
+    if (!player) throw new DomainError('UNAUTHORIZED');
+
+    if (player.role === 'PLAYER') {
+      this.security.checkRateLimit(`futures_order:${playerId}`, 25, 10_000, playerId);
+    }
+
+    const result = this.futures.placeOrder({
+      ...input,
+      playerId: player.id,
+      playerName: player.username,
+    });
+
+    if (!result.deduplicated) {
+      this.economy.syncLedgerMetrics(this.ledger);
+      this.emitPlayerFinancialSync(playerId);
+      if (result.trades.length > 0) {
+        this.unlockAchievement(
+          playerId,
+          'FIRST_FUTURES_TRADE',
+          'Nhà giao dịch Phái sinh',
+          'Hoàn thành lệnh khớp hợp đồng vĩnh cửu đầu tiên trên Empire Futures Exchange.',
+          75,
+        );
+      }
+    }
+
+    return result;
+  }
+
+  public cancelFuturesOrder(playerId: string, orderId: string) {
+    const result = this.futures.cancelOrder(orderId, playerId);
+    this.emitPlayerFinancialSync(playerId);
+    return result;
+  }
+
+  public addFuturesPositionMargin(playerId: string, positionId: string, amountCR: number) {
+    const player = this.players.get(playerId);
+    if (!player) throw new DomainError('UNAUTHORIZED');
+    const position = this.futures.addPositionMargin(playerId, positionId, toMinor(amountCR));
+    this.emitPlayerFinancialSync(playerId);
+    return position;
+  }
+
+  public closeFuturesPosition(
+    playerId: string,
+    positionId: string,
+    input: { type?: 'MARKET' | 'LIMIT'; priceCR?: number; quantity?: number; idempotencyKey?: string },
+  ) {
+    const player = this.players.get(playerId);
+    if (!player) throw new DomainError('UNAUTHORIZED');
+
+    const pos = this.futures.listPlayerPositions(playerId).find((p) => p.id === positionId);
+    if (!pos) throw new DomainError('FUTURES_POSITION_NOT_FOUND');
+
+    const closeSide = pos.side === 'LONG' ? 'SELL' : 'BUY';
+    const qty = input.quantity ? Math.min(input.quantity, pos.quantity) : pos.quantity;
+
+    return this.placeFuturesOrder(playerId, {
+      symbol: pos.symbol,
+      side: closeSide,
+      type: input.type ?? 'MARKET',
+      timeInForce: input.type === 'LIMIT' ? 'GTC' : 'IOC',
+      priceCR: input.priceCR,
+      quantity: qty,
+      leverage: pos.leverage,
+      reduceOnly: true,
+      idempotencyKey: input.idempotencyKey,
+    });
+  }
+
+  public devSettleFuturesFunding(symbol?: string) {
+    const contracts = symbol
+      ? [this.futures.getContract(symbol)].filter((c): c is NonNullable<typeof c> => Boolean(c))
+      : this.futures.listContracts();
+    const events = contracts.map((c) => this.futures.settleFundingForSymbol(c.symbol));
+    return {
+      events,
+      overview: this.getFuturesOverview(),
+    };
+  }
+
+  public devSimulateFuturesTick(symbol?: string) {
+    const tick = this.futuresBots.runFuturesTick(this.economy.state, symbol);
+    this.futures.refreshAllMarkPrices();
+    const liq = this.futures.runLiquidationCheck(symbol);
+    return {
+      tradesExecuted: tick.trades.length + liq.trades.length,
+      affectedSymbols: tick.affectedSymbols,
+      marginCalls: liq.marginCalls.length,
+      liquidations: liq.liquidations.length,
     };
   }
 
@@ -560,10 +939,18 @@ export class WorldEngine {
     sellerId: string;
     grossAmountMinor: number;
   }): void {
+    let volumeCrMinor = trade.grossAmountMinor;
+    const asset = this.matching.getAsset(trade.symbol);
+    if (asset?.marketClass === 'FOREX' && asset.quoteCurrency && asset.quoteCurrency !== 'CR') {
+      const rates = this.centralBanks.computeRatesToCR(this.matching.listAssets('FOREX'));
+      const quoteMajor = fromCurrencyMinor(trade.grossAmountMinor, asset.quoteCurrency);
+      volumeCrMinor = toMinor(quoteMajor * rates[asset.quoteCurrency]);
+    }
+
     const buyer = this.players.get(trade.buyerId);
     const seller = this.players.get(trade.sellerId);
-    if (buyer) buyer.tradingVolumeMinor += trade.grossAmountMinor;
-    if (seller) seller.tradingVolumeMinor += trade.grossAmountMinor;
+    if (buyer) buyer.tradingVolumeMinor += volumeCrMinor;
+    if (seller) seller.tradingVolumeMinor += volumeCrMinor;
 
     this.eventBus.publish('market.trade.executed', trade, `market:${trade.symbol}`);
     this.emitPlayerFinancialSync(trade.buyerId);
@@ -755,11 +1142,11 @@ export class WorldEngine {
       eventSequence: this.eventBus.getSequenceNumber(),
       activeConnections: this.activeConnectionCount,
       onlineHumanPlayers: this.onlineHumanPlayerIds.size,
-      simulatedAgentsCount: SIMULATED_AGENTS.length,
+      simulatedAgentsCount: SIMULATED_AGENTS.length + FOREX_AI_AGENTS.length + FUTURES_AI_BOTS.length,
       matchingEngineHealth: 'OPERATIONAL',
-      totalOrders: this.matching.getTotalOrdersCount(),
+      totalOrders: this.matching.getTotalOrdersCount() + this.futures.getTotalOrdersCount(),
       openOrdersCount: this.matching.getOpenOrdersCount(),
-      totalTrades: this.matching.getTotalTradesCount(),
+      totalTrades: this.matching.getTotalTradesCount() + this.futures.getTotalTradesCount(),
       totalLedgerEntries: this.ledger.ledger.count(),
       economyPhase: this.economy.state.phase,
       volatilityRegime: this.economy.state.volatilityRegime,

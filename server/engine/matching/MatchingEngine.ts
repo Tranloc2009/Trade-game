@@ -1,15 +1,22 @@
 import crypto from 'node:crypto';
 import {
+  CR_SCALE,
   DEFAULT_MAKER_FEE_BPS,
   DEFAULT_TAKER_FEE_BPS,
+  FOREX_MAKER_FEE_BPS,
+  FOREX_TAKER_FEE_BPS,
   calcFeeMinor,
+  calcFxQuoteMinor,
   calcNotionalMinor,
+  formatRate,
   roundQty,
-  toMinor,
+  toCurrencyMinor,
+  toScaledInt,
 } from '../../../shared/contracts/money';
 import type {
   Asset,
   Candle,
+  MarketClass,
   Order,
   OrderBookLevel,
   OrderBookSnapshot,
@@ -30,7 +37,7 @@ export interface PlaceOrderCommand {
   side: OrderSide;
   type: OrderType;
   timeInForce?: TimeInForce;
-  priceCR?: number;
+  priceCR?: number; // Price in quote units (CR for stocks/crypto, quote currency rate for FX)
   quantity: number;
   maxSlippageBps?: number;
   idempotencyKey?: string;
@@ -60,12 +67,12 @@ export interface MatchingEngineConfig {
 }
 
 /**
- * Central Authoritative Price-Time Priority Matching Engine.
+ * Central Authoritative Price-Time Priority Matching Engine for ECX (Crypto), ESE (Stocks), and EFX (Forex).
  *
  * Guarantees:
  * - Price-Time Priority: best price first, FIFO sequence on equal price.
  * - Resting-order execution pricing: maker price determines fill price.
- * - Exact integer minor-unit settlement via LedgerService (zero floating drift).
+ * - Exact integer minor-unit settlement via LedgerService (CR for Stocks/Crypto; Base & Quote currencies for Forex).
  * - Self-Trade Prevention: never matches two orders from the same playerId.
  * - Idempotency: duplicate idempotencyKey returns original order without double-fill.
  * - Double-Settlement Guard: each trade ID can settle at most once.
@@ -117,14 +124,45 @@ export class MatchingEngine {
     this.candles.clear();
   }
 
+  private getPriceScale(asset: Asset): number {
+    return asset.priceScale ?? CR_SCALE;
+  }
+
+  private getPriceDecimals(asset: Asset): number {
+    return asset.priceDecimals ?? 2;
+  }
+
+  private isForex(asset: Asset): boolean {
+    return asset.marketClass === 'FOREX' && Boolean(asset.baseCurrency && asset.quoteCurrency);
+  }
+
+  private getMakerFeeBps(asset: Asset): number {
+    return this.isForex(asset) ? FOREX_MAKER_FEE_BPS : this.makerFeeBps;
+  }
+
+  private getTakerFeeBps(asset: Asset): number {
+    return this.isForex(asset) ? FOREX_TAKER_FEE_BPS : this.takerFeeBps;
+  }
+
+  private calcQuoteGrossMinor(asset: Asset, priceInt: number, quantity: number): number {
+    if (this.isForex(asset) && asset.quoteCurrency) {
+      return calcFxQuoteMinor(priceInt, this.getPriceScale(asset), quantity, asset.quoteCurrency);
+    }
+    return calcNotionalMinor(priceInt, quantity);
+  }
+
   registerAsset(asset: Asset, seedCandles = true): void {
-    this.assets.set(asset.symbol, { ...asset });
+    const scale = this.getPriceScale(asset);
+    const decimals = this.getPriceDecimals(asset);
+    this.assets.set(asset.symbol, { ...asset, priceScale: scale, priceDecimals: decimals });
     if (!this.bids.has(asset.symbol)) this.bids.set(asset.symbol, []);
     if (!this.asks.has(asset.symbol)) this.asks.set(asset.symbol, []);
     if (!this.tradesBySymbol.has(asset.symbol)) this.tradesBySymbol.set(asset.symbol, []);
     if (seedCandles) {
-      const vol = asset.marketClass === 'CRYPTO' ? 0.018 : 0.01;
-      this.candles.seedSymbol(asset.symbol, asset.lastPriceMinor, vol);
+      const vol = asset.marketClass === 'CRYPTO' ? 0.018 : asset.marketClass === 'FOREX' ? 0.0028 : 0.01;
+      this.candles.seedSymbol(asset.symbol, asset.lastPriceMinor, vol, Date.now(), scale, decimals);
+    } else {
+      this.candles.setSymbolPrecision(asset.symbol, scale, decimals);
     }
   }
 
@@ -132,11 +170,12 @@ export class MatchingEngine {
     return this.assets.get(symbol);
   }
 
-  listAssets(): Asset[] {
-    return Array.from(this.assets.values());
+  listAssets(marketClass?: MarketClass): Asset[] {
+    const all = Array.from(this.assets.values());
+    return marketClass ? all.filter((a) => a.marketClass === marketClass) : all;
   }
 
-  setMarketStatusForClass(marketClass: 'CRYPTO' | 'STOCK', status: 'OPEN' | 'CLOSED' | 'HALTED'): void {
+  setMarketStatusForClass(marketClass: MarketClass, status: 'OPEN' | 'CLOSED' | 'HALTED'): void {
     for (const asset of this.assets.values()) {
       if (asset.marketClass === marketClass) {
         asset.status = status;
@@ -210,7 +249,7 @@ export class MatchingEngine {
       for (const ord of orders) {
         if (ord.remainingQuantity <= 0) continue;
         const existing = levelMap.get(ord.priceMinor);
-        const levelTotal = calcNotionalMinor(ord.priceMinor, ord.remainingQuantity);
+        const levelTotal = this.calcQuoteGrossMinor(asset, ord.priceMinor, ord.remainingQuantity);
         if (existing) {
           existing.quantity = roundQty(existing.quantity + ord.remainingQuantity);
           existing.totalMinor += levelTotal;
@@ -236,7 +275,7 @@ export class MatchingEngine {
     const spreadMinor = bestBidMinor !== null && bestAskMinor !== null ? bestAskMinor - bestBidMinor : null;
     const spreadPct =
       spreadMinor !== null && bestAskMinor && bestAskMinor > 0
-        ? Number(((spreadMinor / bestAskMinor) * 100).toFixed(3))
+        ? Number(((spreadMinor / bestAskMinor) * 100).toFixed(4))
         : null;
 
     return {
@@ -287,12 +326,19 @@ export class MatchingEngine {
       throw new DomainError('MARKET_HALTED');
     }
 
+    const isFx = this.isForex(asset);
+    const priceScale = this.getPriceScale(asset);
+    const priceDecimals = this.getPriceDecimals(asset);
+    const makerFeeBps = this.getMakerFeeBps(asset);
+    const takerFeeBps = this.getTakerFeeBps(asset);
+    const maxFeeBps = Math.max(makerFeeBps, takerFeeBps);
+
     // 3. Validate quantity & step
     const quantity = roundQty(cmd.quantity);
     if (!Number.isFinite(quantity) || quantity < asset.minQty || quantity > asset.maxOrderQty) {
       throw new DomainError(
         'INVALID_ORDER',
-        `Khối lượng phải từ ${asset.minQty} đến ${asset.maxOrderQty} ${asset.symbol}.`,
+        `Khối lượng phải từ ${asset.minQty} đến ${asset.maxOrderQty} ${asset.baseCurrency ?? asset.symbol}.`,
       );
     }
     const stepRatio = quantity / asset.qtyStep;
@@ -307,11 +353,13 @@ export class MatchingEngine {
       if (cmd.priceCR === undefined || !Number.isFinite(cmd.priceCR) || cmd.priceCR <= 0) {
         throw new DomainError('INVALID_PRICE');
       }
-      priceMinor = toMinor(cmd.priceCR);
+      priceMinor = toScaledInt(cmd.priceCR, priceScale);
       if (priceMinor <= 0 || priceMinor % asset.priceTickMinor !== 0) {
+        const tickLabel = (asset.priceTickMinor / priceScale).toFixed(priceDecimals);
+        const unitLabel = asset.quoteCurrency ?? 'CR';
         throw new DomainError(
           'INVALID_PRICE',
-          `Giá đặt phải là bội số của bước giá ${(asset.priceTickMinor / 100).toFixed(2)} CR.`,
+          `Giá đặt phải là bội số của bước giá ${tickLabel} ${unitLabel}.`,
         );
       }
 
@@ -319,9 +367,10 @@ export class MatchingEngine {
         const minAllowed = Math.max(asset.priceTickMinor, Math.floor(asset.referencePriceMinor * (1 - this.priceBandPct)));
         const maxAllowed = Math.ceil(asset.referencePriceMinor * (1 + this.priceBandPct));
         if (priceMinor < minAllowed || priceMinor > maxAllowed) {
+          const unitLabel = asset.quoteCurrency ?? 'CR';
           throw new DomainError(
             'PRICE_BAND_EXCEEDED',
-            `Giá nằm ngoài biên độ cho phép (${(minAllowed / 100).toFixed(2)} – ${(maxAllowed / 100).toFixed(2)} CR).`,
+            `Giá nằm ngoài biên độ cho phép (${formatRate(minAllowed, priceScale, priceDecimals)} – ${formatRate(maxAllowed, priceScale, priceDecimals)} ${unitLabel}).`,
           );
         }
       }
@@ -352,20 +401,21 @@ export class MatchingEngine {
       }
     }
 
-    // 7. Lock required funds or asset BEFORE matching (prevents concurrent double-spend)
-    let initialLockedFundsMinor = 0;
-    let initialLockedAssetQty = 0;
+    // 7. Lock required funds/currency/asset BEFORE matching (prevents concurrent double-spend)
+    let initialLockedFundsMinor = 0; // In quoteCurrency minor units (CR for Stocks/Crypto, quoteCurrency for FX)
+    let initialLockedAssetQty = 0; // Base units (shares/coins for Stocks/Crypto, baseCurrency major qty for FX)
 
     if (cmd.side === 'BUY') {
       if (cmd.type === 'LIMIT') {
-        const gross = calcNotionalMinor(priceMinor, quantity);
-        // Lock max potential taker fee; excess refunded if filled as maker or at better price
-        const maxFee = calcFeeMinor(gross, Math.max(this.makerFeeBps, this.takerFeeBps));
+        const gross = this.calcQuoteGrossMinor(asset, priceMinor, quantity);
+        const maxFee = calcFeeMinor(gross, maxFeeBps, isFx);
         initialLockedFundsMinor = gross + maxFee;
-        this.ledger.lockFunds(cmd.playerId, initialLockedFundsMinor);
+        if (isFx && asset.quoteCurrency) {
+          this.ledger.lockCurrency(cmd.playerId, asset.quoteCurrency, initialLockedFundsMinor);
+        } else {
+          this.ledger.lockFunds(cmd.playerId, initialLockedFundsMinor);
+        }
       } else {
-        // MARKET BUY: estimate max required cash across available asks within slippage guard
-        const wallet = this.ledger.requireWallet(cmd.playerId);
         const bestAsk = oppositeBook.find((o) => o.remainingQuantity > 0 && o.playerId !== cmd.playerId);
         if (!bestAsk) {
           throw new DomainError('INSUFFICIENT_LIQUIDITY');
@@ -380,24 +430,40 @@ export class MatchingEngine {
           if (ask.playerId === cmd.playerId || ask.remainingQuantity <= 0) continue;
           if (ask.priceMinor > maxPriceMinor) break;
           const fill = Math.min(rem, ask.remainingQuantity);
-          estGross += calcNotionalMinor(ask.priceMinor, fill);
+          estGross += this.calcQuoteGrossMinor(asset, ask.priceMinor, fill);
           rem = roundQty(rem - fill);
         }
         if (estGross <= 0) {
           throw new DomainError('SLIPPAGE_EXCEEDED');
         }
-        const estFee = calcFeeMinor(estGross, this.takerFeeBps);
+        const estFee = calcFeeMinor(estGross, takerFeeBps, isFx);
         const required = estGross + estFee;
-        if (wallet.availableMinor < required) {
-          throw new DomainError('INSUFFICIENT_FUNDS');
+
+        if (isFx && asset.quoteCurrency) {
+          const quoteBal = this.ledger.getCurrencyBalance(cmd.playerId, asset.quoteCurrency);
+          if (quoteBal.availableMinor < required) {
+            throw new DomainError('INSUFFICIENT_FUNDS');
+          }
+          initialLockedFundsMinor = required;
+          this.ledger.lockCurrency(cmd.playerId, asset.quoteCurrency, initialLockedFundsMinor);
+        } else {
+          const wallet = this.ledger.requireWallet(cmd.playerId);
+          if (wallet.availableMinor < required) {
+            throw new DomainError('INSUFFICIENT_FUNDS');
+          }
+          initialLockedFundsMinor = required;
+          this.ledger.lockFunds(cmd.playerId, initialLockedFundsMinor);
         }
-        initialLockedFundsMinor = required;
-        this.ledger.lockFunds(cmd.playerId, initialLockedFundsMinor);
       }
     } else {
-      // SELL (MARKET or LIMIT): lock exact asset quantity
+      // SELL (MARKET or LIMIT): lock exact asset quantity (or baseCurrency minor units for FX)
       initialLockedAssetQty = quantity;
-      this.ledger.lockAsset(cmd.playerId, asset.symbol, quantity);
+      if (isFx && asset.baseCurrency) {
+        const baseLockMinor = toCurrencyMinor(quantity, asset.baseCurrency);
+        this.ledger.lockCurrency(cmd.playerId, asset.baseCurrency, baseLockMinor);
+      } else {
+        this.ledger.lockAsset(cmd.playerId, asset.symbol, quantity);
+      }
     }
 
     // 8. Create authoritative Order record
@@ -436,7 +502,7 @@ export class MatchingEngine {
     // 9. Match against opposite book in strict Price-Time Priority
     const trades: Trade[] = [];
     let updatedCandles: Record<Timeframe, Candle> | null = null;
-    let totalExecNotional = 0;
+    let totalExecWeightedPrice = 0;
 
     const bestOpposite = oppositeBook.find((o) => o.remainingQuantity > 0 && o.playerId !== order.playerId);
     const maxSlippageBps = cmd.maxSlippageBps ?? 500;
@@ -455,17 +521,15 @@ export class MatchingEngine {
         continue;
       }
 
-      // Self-trade prevention
       if (resting.playerId === order.playerId) {
         idx++;
         continue;
       }
 
-      // Price compatibility check
       if (order.type === 'LIMIT') {
         const compatible =
           order.side === 'BUY' ? resting.priceMinor <= order.priceMinor : resting.priceMinor >= order.priceMinor;
-        if (!compatible) break; // Book is sorted by best price, so no further orders can match
+        if (!compatible) break;
       } else if (marketSlippageLimitMinor !== null) {
         const withinSlippage =
           order.side === 'BUY'
@@ -479,18 +543,19 @@ export class MatchingEngine {
 
       // Resting-order pricing (maker sets execution price)
       const execPriceMinor = resting.priceMinor;
-      const grossAmountMinor = calcNotionalMinor(execPriceMinor, execQty);
+      const grossAmountMinor = this.calcQuoteGrossMinor(asset, execPriceMinor, execQty);
 
-      // Incoming order is Taker, resting order is Maker
       const buyerOrder = order.side === 'BUY' ? order : resting;
       const sellerOrder = order.side === 'SELL' ? order : resting;
       const buyerFeeMinor = calcFeeMinor(
         grossAmountMinor,
-        order.side === 'BUY' ? this.takerFeeBps : this.makerFeeBps,
+        order.side === 'BUY' ? takerFeeBps : makerFeeBps,
+        isFx,
       );
       const sellerFeeMinor = calcFeeMinor(
         grossAmountMinor,
-        order.side === 'SELL' ? this.takerFeeBps : this.makerFeeBps,
+        order.side === 'SELL' ? takerFeeBps : makerFeeBps,
+        isFx,
       );
 
       const tradeTimestamp = new Date().toISOString();
@@ -533,22 +598,25 @@ export class MatchingEngine {
       sellerOrder.feesPaidMinor += sellerFeeMinor;
       sellerOrder.updatedAt = tradeTimestamp;
 
-      // Recompute average execution price for both sides
-      totalExecNotional += grossAmountMinor;
-      order.avgExecutionPriceMinor = Math.round(totalExecNotional / order.filledQuantity);
+      // Recompute average execution price in priceScale integer units
+      totalExecWeightedPrice += execPriceMinor * execQty;
+      order.avgExecutionPriceMinor = Math.round(totalExecWeightedPrice / order.filledQuantity);
 
-      // Resting order avg price update
       const prevRestingFilled = roundQty(resting.filledQuantity - execQty);
       resting.avgExecutionPriceMinor =
         resting.filledQuantity > 0
-          ? Math.round((prevRestingFilled * resting.avgExecutionPriceMinor + grossAmountMinor) / resting.filledQuantity)
+          ? Math.round((prevRestingFilled * resting.avgExecutionPriceMinor + execPriceMinor * execQty) / resting.filledQuantity)
           : execPriceMinor;
 
-      // Update resting order status & refund excess locked cash on full fill
+      // Update resting order status & refund excess locked funds on full fill
       if (resting.remainingQuantity <= 1e-9) {
         resting.status = 'FILLED';
         if (resting.side === 'BUY' && resting.lockedFundsMinor > 0) {
-          this.ledger.unlockFunds(resting.playerId, resting.lockedFundsMinor);
+          if (isFx && asset.quoteCurrency) {
+            this.ledger.unlockCurrency(resting.playerId, asset.quoteCurrency, resting.lockedFundsMinor);
+          } else {
+            this.ledger.unlockFunds(resting.playerId, resting.lockedFundsMinor);
+          }
           resting.lockedFundsMinor = 0;
         }
       } else {
@@ -572,43 +640,56 @@ export class MatchingEngine {
       idx++;
     }
 
-    // Prune filled resting orders from opposite book
     this.pruneFilledOrders(asset.symbol, cmd.side === 'BUY' ? 'SELL' : 'BUY');
 
     // 10. Finalize incoming order state & handle IOC/MARKET remainder or resting GTC placement
+    const unlockOrderFunds = (amount: number) => {
+      if (amount <= 0) return;
+      if (isFx && asset.quoteCurrency) {
+        this.ledger.unlockCurrency(order.playerId, asset.quoteCurrency, amount);
+      } else {
+        this.ledger.unlockFunds(order.playerId, amount);
+      }
+    };
+
+    const unlockOrderAsset = (qty: number) => {
+      if (qty <= 0) return;
+      if (isFx && asset.baseCurrency) {
+        this.ledger.unlockCurrency(order.playerId, asset.baseCurrency, toCurrencyMinor(qty, asset.baseCurrency));
+      } else {
+        this.ledger.unlockAsset(order.playerId, asset.symbol, qty);
+      }
+    };
+
     if (order.remainingQuantity <= 1e-9) {
       order.status = 'FILLED';
       if (order.side === 'BUY' && order.lockedFundsMinor > 0) {
-        // Refund price-improvement / fee-reserve surplus
-        this.ledger.unlockFunds(order.playerId, order.lockedFundsMinor);
+        unlockOrderFunds(order.lockedFundsMinor);
         order.lockedFundsMinor = 0;
       }
       if (order.side === 'SELL' && order.lockedAssetQty > 0) {
-        this.ledger.unlockAsset(order.playerId, asset.symbol, order.lockedAssetQty);
+        unlockOrderAsset(order.lockedAssetQty);
         order.lockedAssetQty = 0;
       }
     } else if (order.type === 'MARKET' || order.timeInForce === 'IOC') {
-      // Cancel unfilled remainder and release remaining locked collateral
-      order.status = order.filledQuantity > 0 ? 'CANCELLED' : 'CANCELLED';
+      order.status = 'CANCELLED';
       if (order.side === 'BUY' && order.lockedFundsMinor > 0) {
-        this.ledger.unlockFunds(order.playerId, order.lockedFundsMinor);
+        unlockOrderFunds(order.lockedFundsMinor);
         order.lockedFundsMinor = 0;
       }
       if (order.side === 'SELL' && order.lockedAssetQty > 0) {
-        this.ledger.unlockAsset(order.playerId, asset.symbol, order.lockedAssetQty);
+        unlockOrderAsset(order.lockedAssetQty);
         order.lockedAssetQty = 0;
       }
     } else {
-      // GTC Limit order rests on the book
       order.status = order.filledQuantity > 0 ? 'PARTIALLY_FILLED' : 'OPEN';
-      // Refund any price-improvement surplus above what is needed for remainingQuantity at limit price
       if (order.side === 'BUY') {
-        const neededGross = calcNotionalMinor(order.priceMinor, order.remainingQuantity);
-        const neededFee = calcFeeMinor(neededGross, Math.max(this.makerFeeBps, this.takerFeeBps));
+        const neededGross = this.calcQuoteGrossMinor(asset, order.priceMinor, order.remainingQuantity);
+        const neededFee = calcFeeMinor(neededGross, maxFeeBps, isFx);
         const neededLock = neededGross + neededFee;
         if (order.lockedFundsMinor > neededLock) {
           const surplus = order.lockedFundsMinor - neededLock;
-          this.ledger.unlockFunds(order.playerId, surplus);
+          unlockOrderFunds(surplus);
           order.lockedFundsMinor = neededLock;
         }
       }
@@ -641,7 +722,32 @@ export class MatchingEngine {
 
     this.settledTradeIds.add(trade.id);
 
-    // 1. Settle cash & fees in double-entry ledger
+    if (this.isForex(targetAsset) && targetAsset.baseCurrency && targetAsset.quoteCurrency) {
+      const baseAmountMinor = toCurrencyMinor(trade.quantity, targetAsset.baseCurrency);
+      const rateLabel = formatRate(
+        trade.priceMinor,
+        this.getPriceScale(targetAsset),
+        this.getPriceDecimals(targetAsset),
+      );
+      this.ledger.settleFxTrade({
+        tradeId: trade.id,
+        symbol: trade.symbol,
+        baseCurrency: targetAsset.baseCurrency,
+        quoteCurrency: targetAsset.quoteCurrency,
+        buyerId: trade.buyerId,
+        sellerId: trade.sellerId,
+        baseAmountMinor,
+        quoteGrossMinor: trade.grossAmountMinor,
+        buyerFeeQuoteMinor: trade.buyerFeeMinor,
+        sellerFeeQuoteMinor: trade.sellerFeeMinor,
+        rateLabel,
+        baseQtyDisplay: trade.quantity,
+        timestamp: trade.timestamp,
+      });
+      return;
+    }
+
+    // Standard Stock / Crypto settlement in CR + asset holding
     this.ledger.settleTradeCash({
       tradeId: trade.id,
       symbol: trade.symbol,
@@ -655,7 +761,6 @@ export class MatchingEngine {
       timestamp: trade.timestamp,
     });
 
-    // 2. Settle asset ownership transfer
     this.ledger.settleTradeAsset({
       buyerId: trade.buyerId,
       sellerId: trade.sellerId,
@@ -668,7 +773,7 @@ export class MatchingEngine {
   }
 
   /**
-   * Cancels an open/partially-filled order and immediately releases remaining locked CR or asset.
+   * Cancels an open/partially-filled order and immediately releases remaining locked currency or asset.
    */
   cancelOrder(orderId: string, requesterPlayerId: string): CancelOrderResult {
     const order = this.ordersById.get(orderId);
@@ -678,6 +783,9 @@ export class MatchingEngine {
     if (order.status !== 'OPEN' && order.status !== 'PARTIALLY_FILLED') {
       throw new DomainError('ORDER_ALREADY_FILLED');
     }
+
+    const asset = this.assets.get(order.symbol);
+    const isFx = asset ? this.isForex(asset) : false;
 
     const book = order.side === 'BUY' ? this.bids.get(order.symbol)! : this.asks.get(order.symbol)!;
     const idx = book.findIndex((o) => o.id === order.id);
@@ -690,13 +798,21 @@ export class MatchingEngine {
 
     if (order.side === 'BUY' && order.lockedFundsMinor > 0) {
       refundedFundsMinor = order.lockedFundsMinor;
-      this.ledger.unlockFunds(order.playerId, refundedFundsMinor);
+      if (isFx && asset?.quoteCurrency) {
+        this.ledger.unlockCurrency(order.playerId, asset.quoteCurrency, refundedFundsMinor);
+      } else {
+        this.ledger.unlockFunds(order.playerId, refundedFundsMinor);
+      }
       order.lockedFundsMinor = 0;
     }
 
     if (order.side === 'SELL' && order.lockedAssetQty > 0) {
       refundedAssetQty = order.lockedAssetQty;
-      this.ledger.unlockAsset(order.playerId, order.symbol, refundedAssetQty);
+      if (isFx && asset?.baseCurrency) {
+        this.ledger.unlockCurrency(order.playerId, asset.baseCurrency, toCurrencyMinor(refundedAssetQty, asset.baseCurrency));
+      } else {
+        this.ledger.unlockAsset(order.playerId, order.symbol, refundedAssetQty);
+      }
       order.lockedAssetQty = 0;
     }
 
@@ -705,7 +821,6 @@ export class MatchingEngine {
     order.updatedAt = new Date().toISOString();
 
     this.bookSeq += 1;
-    const asset = this.assets.get(order.symbol);
     if (asset) this.recomputeLiquidityScore(asset);
 
     return {
@@ -716,9 +831,6 @@ export class MatchingEngine {
     };
   }
 
-  /**
-   * Cancels all open orders for a given player on a symbol (used by Market Makers to re-quote cleanly).
-   */
   cancelAllPlayerOrdersForSymbol(playerId: string, symbol: string): void {
     const openOrders = this.listPlayerOrders(playerId, symbol).filter(
       (o) => o.status === 'OPEN' || o.status === 'PARTIALLY_FILLED',
@@ -732,10 +844,8 @@ export class MatchingEngine {
     const book = order.side === 'BUY' ? this.bids.get(order.symbol)! : this.asks.get(order.symbol)!;
     book.push(order);
     if (order.side === 'BUY') {
-      // Highest price first; FIFO createdSeq on tie
       book.sort((a, b) => b.priceMinor - a.priceMinor || a.createdSeq - b.createdSeq);
     } else {
-      // Lowest price first; FIFO createdSeq on tie
       book.sort((a, b) => a.priceMinor - b.priceMinor || a.createdSeq - b.createdSeq);
     }
   }
@@ -758,25 +868,25 @@ export class MatchingEngine {
     asset.turnover24hMinor += trade.grossAmountMinor;
     asset.priceChange24hMinor = asset.lastPriceMinor - asset.open24hMinor;
     asset.priceChange24hPct =
-      asset.open24hMinor > 0 ? Number(((asset.priceChange24hMinor / asset.open24hMinor) * 100).toFixed(2)) : 0;
-    asset.marketCapMinor = Math.round(asset.lastPriceMinor * asset.circulatingSupply);
-    // Update sentiment slightly based on taker direction
+      asset.open24hMinor > 0 ? Number(((asset.priceChange24hMinor / asset.open24hMinor) * 100).toFixed(3)) : 0;
+    if (!this.isForex(asset)) {
+      asset.marketCapMinor = Math.round(asset.lastPriceMinor * asset.circulatingSupply);
+    }
     const delta = trade.takerSide === 'BUY' ? 1.5 : -1.5;
     asset.sentimentScore = Math.max(-100, Math.min(100, Number((asset.sentimentScore + delta).toFixed(1))));
   }
 
   private recomputeLiquidityScore(asset: Asset): void {
     const bidDepth = (this.bids.get(asset.symbol) ?? []).reduce(
-      (sum, o) => sum + calcNotionalMinor(o.priceMinor, o.remainingQuantity),
+      (sum, o) => sum + this.calcQuoteGrossMinor(asset, o.priceMinor, o.remainingQuantity),
       0,
     );
     const askDepth = (this.asks.get(asset.symbol) ?? []).reduce(
-      (sum, o) => sum + calcNotionalMinor(o.priceMinor, o.remainingQuantity),
+      (sum, o) => sum + this.calcQuoteGrossMinor(asset, o.priceMinor, o.remainingQuantity),
       0,
     );
-    const totalDepthCR = (bidDepth + askDepth) / 100;
-    // Log scale 0..100
-    const score = totalDepthCR <= 0 ? 0 : Math.min(100, Math.round((Math.log10(totalDepthCR + 1) / 6.2) * 100));
+    const totalDepthMajor = (bidDepth + askDepth) / (asset.quoteCurrency === 'JPY-SIM' ? 100 : 100);
+    const score = totalDepthMajor <= 0 ? 0 : Math.min(100, Math.round((Math.log10(totalDepthMajor + 1) / 6.0) * 100));
     asset.liquidityScore = score;
   }
 }

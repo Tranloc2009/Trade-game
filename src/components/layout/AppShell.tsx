@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import {
+  ArrowLeftRight,
   Bell,
   Building2,
   CandlestickChart as ChartIcon,
@@ -17,6 +18,7 @@ import {
   PieChart,
   Settings,
   Sun,
+  TrendingUp,
   Trophy,
   Users,
   Warehouse,
@@ -41,6 +43,8 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { id: 'overview', label: 'Tổng quan', icon: LayoutDashboard, group: 'CORE' },
   { id: 'exchange', label: 'Sàn giao dịch', icon: ChartIcon, group: 'CORE' },
+  { id: 'futures', label: 'Sàn Futures (PERP)', icon: TrendingUp, group: 'CORE' },
+  { id: 'forex', label: 'Sàn Forex (EFX)', icon: ArrowLeftRight, group: 'CORE' },
   { id: 'portfolio', label: 'Danh mục', icon: PieChart, group: 'CORE' },
   { id: 'property', label: 'Bất động sản', icon: Warehouse, group: 'ECONOMY' },
   { id: 'business', label: 'Doanh nghiệp', icon: Building2, group: 'ECONOMY' },
@@ -377,10 +381,10 @@ export function AppShell({ children, onSwitchAccount, onLogout }: AppShellProps)
         {(
           [
             { id: 'overview', label: 'Tổng quan', icon: LayoutDashboard },
-            { id: 'exchange', label: 'Giao dịch', icon: ChartIcon },
+            { id: 'exchange', label: 'Sàn Spot', icon: ChartIcon },
+            { id: 'futures', label: 'Futures', icon: TrendingUp },
+            { id: 'forex', label: 'Forex', icon: ArrowLeftRight },
             { id: 'portfolio', label: 'Danh mục', icon: PieChart },
-            { id: 'property', label: 'Nhà đất', icon: Warehouse },
-            { id: 'social', label: 'Cộng đồng', icon: MessageSquare },
           ] as const
         ).map((tab) => {
           const Icon = tab.icon;
