@@ -30,7 +30,6 @@ import { z } from 'zod';
 import { ALL_CURRENCIES } from '../../shared/contracts/money';
 import { DomainError } from '../domain/DomainError';
 import { WorldEngine } from '../engine/WorldEngine';
-import { adminAuth, requireAdminDev } from '../security/AdminAuth';
 import { createV4Router } from './v4Routes';
 import { createCoFounderRouter } from './cofounderRoutes';
 import { createConnectRouter } from './connectRoutes';
@@ -167,46 +166,9 @@ export function createApiRouter(world: WorldEngine): Router {
     ok(res, world.getForexOverview());
   });
 
-  const adminGuard = requireAdminDev(world.devToolsEnabled);
-
-  // Admin / Developer Authentication (separate from regular player Guest sessions)
-  router.get('/admin/status', (req, res) => {
-    ok(res, {
-      devToolsEnabled: world.devToolsEnabled,
-      authorized: adminAuth.isRequestAuthorized(req),
-      ...adminAuth.getStatus(),
-    });
-  });
-
-  router.post('/admin/claim', (req, res, next) => {
+  router.post('/forex/dev/trigger-policy', (req, res, next) => {
     try {
       if (!world.devToolsEnabled) throw new DomainError('FORBIDDEN_IN_PRODUCTION', undefined, 403);
-      const passcode = typeof req.body?.passcode === 'string' ? req.body.passcode : '';
-      const session = adminAuth.claimFirstRunPasscode(passcode);
-      ok(res, session, 201);
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  router.post('/admin/login', (req, res, next) => {
-    try {
-      if (!world.devToolsEnabled) throw new DomainError('FORBIDDEN_IN_PRODUCTION', undefined, 403);
-      const passcode = typeof req.body?.passcode === 'string' ? req.body.passcode : '';
-      const session = adminAuth.loginWithPasscode(passcode);
-      ok(res, session);
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  router.post('/admin/logout', (req, res) => {
-    adminAuth.logout(req.header('x-admin-token'));
-    ok(res, { loggedOut: true });
-  });
-
-  router.post('/forex/dev/trigger-policy', adminGuard, (req, res, next) => {
-    try {
       const parsed = TriggerCentralBankSchema.safeParse(req.body ?? {});
       if (!parsed.success) {
         return fail(res, 'VALIDATION_ERROR', 'Mã tiền tệ không hợp lệ.', 400);
@@ -414,8 +376,9 @@ export function createApiRouter(world: WorldEngine): Router {
     }
   });
 
-  router.post('/futures/dev/settle-funding', adminGuard, (req, res, next) => {
+  router.post('/futures/dev/settle-funding', (req, res, next) => {
     try {
+      if (!world.devToolsEnabled) throw new DomainError('FORBIDDEN_IN_PRODUCTION', undefined, 403);
       const symbol = typeof req.body?.symbol === 'string' ? req.body.symbol.toUpperCase() : undefined;
       ok(res, world.devSettleFuturesFunding(symbol));
     } catch (err) {
@@ -423,8 +386,9 @@ export function createApiRouter(world: WorldEngine): Router {
     }
   });
 
-  router.post('/futures/dev/simulate-tick', adminGuard, (req, res, next) => {
+  router.post('/futures/dev/simulate-tick', (req, res, next) => {
     try {
+      if (!world.devToolsEnabled) throw new DomainError('FORBIDDEN_IN_PRODUCTION', undefined, 403);
       const symbol = typeof req.body?.symbol === 'string' ? req.body.symbol.toUpperCase() : undefined;
       ok(res, world.devSimulateFuturesTick(symbol));
     } catch (err) {
@@ -902,8 +866,8 @@ export function createApiRouter(world: WorldEngine): Router {
     }
   });
 
-  // Diagnostics & Development QA Tools (Server-side Admin Protected)
-  router.get('/diagnostics', adminGuard, (_req, res) => {
+  // Diagnostics & Development QA Tools
+  router.get('/diagnostics', (_req, res) => {
     ok(res, world.getDiagnostics());
   });
 
@@ -922,8 +886,9 @@ export function createApiRouter(world: WorldEngine): Router {
     }
   });
 
-  router.post('/bots/dev/tick', adminGuard, (req, res, next) => {
+  router.post('/bots/dev/tick', (req, res, next) => {
     try {
+      if (!world.devToolsEnabled) throw new DomainError('FORBIDDEN_IN_PRODUCTION', undefined, 403);
       const parsed = BotDevTickSchema.safeParse(req.body ?? {});
       if (!parsed.success) {
         return fail(res, 'VALIDATION_ERROR', parsed.error.issues[0]?.message, 400);
@@ -965,8 +930,9 @@ export function createApiRouter(world: WorldEngine): Router {
     }
   });
 
-  router.post('/bots/dev/configure', adminGuard, (req, res, next) => {
+  router.post('/bots/dev/configure', (req, res, next) => {
     try {
+      if (!world.devToolsEnabled) throw new DomainError('FORBIDDEN_IN_PRODUCTION', undefined, 403);
       const parsed = BotDevConfigureSchema.safeParse(req.body ?? {});
       if (!parsed.success) {
         return fail(res, 'VALIDATION_ERROR', parsed.error.issues[0]?.message, 400);
@@ -978,8 +944,9 @@ export function createApiRouter(world: WorldEngine): Router {
     }
   });
 
-  router.post('/dev/simulate-bot-tick', adminGuard, (req, res, next) => {
+  router.post('/dev/simulate-bot-tick', (req, res, next) => {
     try {
+      if (!world.devToolsEnabled) throw new DomainError('FORBIDDEN_IN_PRODUCTION', undefined, 403);
       const symbol = typeof req.body?.symbol === 'string' ? req.body.symbol.toUpperCase() : undefined;
       const result = world.devSimulateBotTick(symbol);
       ok(res, { tradesExecuted: result.trades.length, affectedSymbols: result.affectedSymbols });
@@ -988,8 +955,9 @@ export function createApiRouter(world: WorldEngine): Router {
     }
   });
 
-  router.post('/dev/reset', adminGuard, (_req, res, next) => {
+  router.post('/dev/reset', (_req, res, next) => {
     try {
+      if (!world.devToolsEnabled) throw new DomainError('FORBIDDEN_IN_PRODUCTION', undefined, 403);
       world.auth.reset();
       world.bootstrapWorld();
       ok(res, { reset: true, diagnostics: world.getDiagnostics() });

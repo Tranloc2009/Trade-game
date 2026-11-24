@@ -5,6 +5,11 @@ import type {
   WorldMode,
 } from '../../shared/contracts/beginner';
 import type {
+  AccountOverviewPayload,
+  CareerStoryState,
+  GamePlayMode,
+} from '../../shared/contracts/careerStory';
+import type {
   FuturesContract,
   FuturesFundingSettlementEvent,
   FuturesLiquidationEvent,
@@ -38,16 +43,6 @@ import {
   queryClient,
 } from '../lib/queryClient';
 
-import {
-  resolveLegacyNavigation,
-  type AssetsTab,
-  type EmpireTab,
-  type ExchangeMarketTab,
-  type LifestyleTab,
-  type V5Section,
-  type WorldTab,
-} from '../lib/navigationV5';
-
 // Bounded deduplication set for incoming realtime event IDs (prevents duplicate mutations on redelivery)
 const MAX_SEEN_EVENT_IDS = 600;
 const seenEventIds = new Set<string>();
@@ -68,7 +63,6 @@ export function resetSeenRealtimeEvents(): void {
 }
 
 export type NavPage =
-  | V5Section
   | 'overview'
   | 'discover'
   | 'exchange'
@@ -89,7 +83,10 @@ export type NavPage =
   | 'leaderboard'
   | 'news'
   | 'entertainment'
-  | 'settings';
+  | 'settings'
+  | 'career_home'
+  | 'career_world'
+  | 'career_settings';
 
 export type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'polling';
 
@@ -119,6 +116,8 @@ interface UiPrefs {
   glossaryLang: GlossaryLanguage;
   tutorialCompletedIds: string[];
   futuresIntroSeen: boolean;
+  careerSoundMuted: boolean;
+  careerTypewriterEnabled: boolean;
 }
 
 const DEFAULT_UI_PREFS: UiPrefs = {
@@ -129,6 +128,8 @@ const DEFAULT_UI_PREFS: UiPrefs = {
   glossaryLang: 'vi',
   tutorialCompletedIds: [],
   futuresIntroSeen: false,
+  careerSoundMuted: false,
+  careerTypewriterEnabled: true,
 };
 
 function resolveInitialTradingModeFromUrl(): TradingExperienceMode | null {
@@ -160,6 +161,9 @@ function loadUiPrefs(): UiPrefs {
       glossaryLang: parsed.glossaryLang === 'en' ? 'en' : 'vi',
       tutorialCompletedIds: Array.isArray(parsed.tutorialCompletedIds) ? parsed.tutorialCompletedIds : [],
       futuresIntroSeen: Boolean(parsed.futuresIntroSeen),
+      careerSoundMuted: Boolean(parsed.careerSoundMuted),
+      careerTypewriterEnabled:
+        typeof parsed.careerTypewriterEnabled === 'boolean' ? parsed.careerTypewriterEnabled : true,
     };
   } catch {
     return { ...DEFAULT_UI_PREFS, tradingMode: urlMode ?? DEFAULT_UI_PREFS.tradingMode };
@@ -177,14 +181,6 @@ function saveUiPrefs(prefs: UiPrefs): void {
 interface AppState {
   // Navigation & UI Prefs
   activePage: NavPage;
-  activeSection: V5Section;
-  exchangeMarketTab: ExchangeMarketTab;
-  empireTab: EmpireTab;
-  assetsTab: AssetsTab;
-  lifestyleTab: LifestyleTab;
-  worldTab: WorldTab;
-  careerViewOpen: boolean;
-  companyHqOpen: boolean;
   exchangeClassFilter: 'ALL' | 'CRYPTO' | 'STOCK';
   selectedSymbol: string;
   selectedForexSymbol: string;
@@ -201,6 +197,19 @@ interface AppState {
   tutorialActiveLessonId: string;
   tutorialCompletedIds: string[];
   futuresIntroSeen: boolean;
+
+  // Project Immersion — Account Mode & Career Story State
+  playMode: GamePlayMode;
+  modeSwitching: boolean;
+  modeSwitchError: string | null;
+  accountOverview: AccountOverviewPayload | null;
+  careerStory: CareerStoryState | null;
+  activeCareerSaveId: string | null;
+  careerSoundMuted: boolean;
+  careerTypewriterEnabled: boolean;
+  phoneOpen: boolean;
+  journalOpen: boolean;
+  endingModalOpen: boolean;
 
   // Session & Connection (in-memory only)
   token: string | null;
@@ -241,14 +250,6 @@ interface AppState {
 
   // Actions
   setActivePage: (page: NavPage) => void;
-  setActiveSection: (section: V5Section) => void;
-  setExchangeMarketTab: (tab: ExchangeMarketTab) => void;
-  setEmpireTab: (tab: EmpireTab) => void;
-  setAssetsTab: (tab: AssetsTab) => void;
-  setLifestyleTab: (tab: LifestyleTab) => void;
-  setWorldTab: (tab: WorldTab) => void;
-  setCareerViewOpen: (open: boolean) => void;
-  setCompanyHqOpen: (open: boolean) => void;
   openCompanyHq: (companyId: string) => void;
   setSelectedHqCompanyId: (companyId: string | null) => void;
   setConnectUnreadCounts: (notifications: number, messages: number) => void;
@@ -275,6 +276,17 @@ interface AppState {
   setTutorialActiveLessonId: (lessonId: string) => void;
   completeTutorialLesson: (lessonId: string) => void;
   markFuturesIntroSeen: () => void;
+  setPlayMode: (mode: GamePlayMode) => void;
+  setModeSwitching: (switching: boolean, error?: string | null) => void;
+  setAccountOverview: (overview: AccountOverviewPayload | null) => void;
+  setCareerStory: (story: CareerStoryState | null) => void;
+  setActiveCareerSaveId: (saveId: string | null) => void;
+  toggleCareerSoundMuted: () => void;
+  toggleCareerTypewriter: () => void;
+  setPhoneOpen: (open: boolean) => void;
+  setJournalOpen: (open: boolean) => void;
+  setEndingModalOpen: (open: boolean) => void;
+  clearWorldCachesForModeSwitch: () => void;
   setSession: (token: string | null, player: PlayerProfile | null) => void;
   setPlayer: (player: PlayerProfile | null) => void;
   setConnectionState: (state: ConnectionState) => void;
@@ -300,19 +312,13 @@ function persistFromState(s: AppState, overrides: Partial<UiPrefs> = {}): void {
     glossaryLang: overrides.glossaryLang ?? s.glossaryLang,
     tutorialCompletedIds: overrides.tutorialCompletedIds ?? s.tutorialCompletedIds,
     futuresIntroSeen: overrides.futuresIntroSeen ?? s.futuresIntroSeen,
+    careerSoundMuted: overrides.careerSoundMuted ?? s.careerSoundMuted,
+    careerTypewriterEnabled: overrides.careerTypewriterEnabled ?? s.careerTypewriterEnabled,
   });
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
-  activePage: 'home',
-  activeSection: 'home',
-  exchangeMarketTab: 'STOCK',
-  empireTab: 'business',
-  assetsTab: 'summary',
-  lifestyleTab: 'showroom',
-  worldTab: 'news',
-  careerViewOpen: false,
-  companyHqOpen: false,
+  activePage: 'overview',
   exchangeClassFilter: 'ALL',
   selectedSymbol: 'NOVA',
   selectedForexSymbol: 'EUR-SIM/USD-SIM',
@@ -329,6 +335,18 @@ export const useAppStore = create<AppState>((set, get) => ({
   tutorialActiveLessonId: 'lesson_1_cr_wallet',
   tutorialCompletedIds: initialPrefs.tutorialCompletedIds,
   futuresIntroSeen: initialPrefs.futuresIntroSeen,
+
+  playMode: 'ONLINE',
+  modeSwitching: false,
+  modeSwitchError: null,
+  accountOverview: null,
+  careerStory: null,
+  activeCareerSaveId: null,
+  careerSoundMuted: initialPrefs.careerSoundMuted,
+  careerTypewriterEnabled: initialPrefs.careerTypewriterEnabled,
+  phoneOpen: false,
+  journalOpen: false,
+  endingModalOpen: false,
 
   token: null,
   player: null,
@@ -365,88 +383,29 @@ export const useAppStore = create<AppState>((set, get) => ({
   connectUnreadNotifications: 0,
   connectUnreadMessages: 0,
 
-  setActivePage: (page) =>
-    set((state) => {
-      const resolved = resolveLegacyNavigation(page);
-      return {
-        activePage: page,
-        activeSection: resolved.section,
-        exchangeMarketTab: resolved.exchangeMarketTab ?? state.exchangeMarketTab,
-        empireTab: resolved.empireTab ?? state.empireTab,
-        assetsTab: resolved.assetsTab ?? state.assetsTab,
-        lifestyleTab: resolved.lifestyleTab ?? state.lifestyleTab,
-        worldTab: resolved.worldTab ?? state.worldTab,
-        careerViewOpen: resolved.openCareerView ?? false,
-        companyHqOpen: resolved.openCompanyHq ?? false,
-      };
-    }),
-  setActiveSection: (section) =>
-    set({
-      activePage: section,
-      activeSection: section,
-      careerViewOpen: false,
-      companyHqOpen: false,
-    }),
-  setExchangeMarketTab: (exchangeMarketTab) =>
-    set({
-      exchangeMarketTab,
-      exchangeClassFilter:
-        exchangeMarketTab === 'STOCK' || exchangeMarketTab === 'CRYPTO' ? exchangeMarketTab : 'ALL',
-    }),
-  setEmpireTab: (empireTab) => set({ empireTab, companyHqOpen: false }),
-  setAssetsTab: (assetsTab) => set({ assetsTab }),
-  setLifestyleTab: (lifestyleTab) => set({ lifestyleTab }),
-  setWorldTab: (worldTab) => set({ worldTab }),
-  setCareerViewOpen: (careerViewOpen) => set({ careerViewOpen }),
-  setCompanyHqOpen: (companyHqOpen) => set({ companyHqOpen }),
-
-  openCompanyHq: (companyId) =>
-    set({
-      selectedHqCompanyId: companyId,
-      activePage: 'company_hq',
-      activeSection: 'empire',
-      empireTab: 'business',
-      companyHqOpen: true,
-    }),
+  setActivePage: (page) => set({ activePage: page }),
+  openCompanyHq: (companyId) => set({ selectedHqCompanyId: companyId, activePage: 'company_hq' }),
   setSelectedHqCompanyId: (selectedHqCompanyId) => set({ selectedHqCompanyId }),
   setConnectUnreadCounts: (connectUnreadNotifications, connectUnreadMessages) =>
     set({ connectUnreadNotifications, connectUnreadMessages }),
 
   openAssetInExchange: (symbol, marketClass) =>
-    set((state) => {
-      const found = state.assets.find((a) => a.symbol === symbol);
-      const inferredTab: ExchangeMarketTab =
-        marketClass === 'CRYPTO' || found?.marketClass === 'CRYPTO' || symbol.includes('-SIM')
-          ? found?.marketClass === 'FOREX' || symbol.includes('/')
-            ? 'FOREX'
-            : 'CRYPTO'
-          : found?.marketClass === 'FOREX' || symbol.includes('/')
-            ? 'FOREX'
-            : 'STOCK';
-      return {
-        selectedSymbol: inferredTab === 'FOREX' ? state.selectedSymbol : symbol,
-        selectedForexSymbol: inferredTab === 'FOREX' ? symbol : state.selectedForexSymbol,
-        exchangeClassFilter: inferredTab === 'CRYPTO' ? 'CRYPTO' : inferredTab === 'STOCK' ? 'STOCK' : 'ALL',
-        exchangeMarketTab: inferredTab,
-        activePage: 'exchange',
-        activeSection: 'exchange',
-      };
+    set({
+      selectedSymbol: symbol,
+      exchangeClassFilter: marketClass ?? 'ALL',
+      activePage: 'exchange',
     }),
 
   openForexPair: (symbol) =>
     set({
       selectedForexSymbol: symbol,
-      exchangeMarketTab: 'FOREX',
-      activePage: 'exchange',
-      activeSection: 'exchange',
+      activePage: 'forex',
     }),
 
   openFuturesContract: (symbol) =>
     set({
       selectedFuturesSymbol: symbol,
-      exchangeMarketTab: 'FUTURES',
-      activePage: 'exchange',
-      activeSection: 'exchange',
+      activePage: 'futures',
     }),
 
   setExchangeClassFilter: (filter) => set({ exchangeClassFilter: filter }),
@@ -530,6 +489,42 @@ export const useAppStore = create<AppState>((set, get) => ({
       return { futuresIntroSeen: true };
     }),
 
+  setPlayMode: (playMode) => set({ playMode }),
+  setModeSwitching: (modeSwitching, modeSwitchError = null) => set({ modeSwitching, modeSwitchError }),
+  setAccountOverview: (accountOverview) => set({ accountOverview }),
+  setCareerStory: (careerStory) => set({ careerStory }),
+  setActiveCareerSaveId: (activeCareerSaveId) => set({ activeCareerSaveId }),
+  toggleCareerSoundMuted: () =>
+    set((state) => {
+      const next = !state.careerSoundMuted;
+      persistFromState(state, { careerSoundMuted: next });
+      return { careerSoundMuted: next };
+    }),
+  toggleCareerTypewriter: () =>
+    set((state) => {
+      const next = !state.careerTypewriterEnabled;
+      persistFromState(state, { careerTypewriterEnabled: next });
+      return { careerTypewriterEnabled: next };
+    }),
+  setPhoneOpen: (phoneOpen) => set({ phoneOpen }),
+  setJournalOpen: (journalOpen) => set({ journalOpen }),
+  setEndingModalOpen: (endingModalOpen) => set({ endingModalOpen }),
+  clearWorldCachesForModeSwitch: () => {
+    resetSeenRealtimeEvents();
+    set({
+      orderBooks: {},
+      recentTradesBySymbol: {},
+      futuresOrderBooks: {},
+      futuresRecentTradesBySymbol: {},
+      forexOverview: null,
+      futuresOverview: null,
+      liveCandleTick: null,
+      futuresLiveCandleTick: null,
+      chatMessages: [],
+      lastSequenceNumber: 0,
+    });
+  },
+
   setSession: (token, player) => {
     resetSeenRealtimeEvents();
     set({ token, player });
@@ -574,8 +569,12 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   applyRealtimeEnvelope: (envelope) => {
     const state = get();
-    // Strict World isolation: NEVER apply WORLD-01 Socket.IO events while user is inside WORLD-PRACTICE!
-    if (state.worldMode === 'PRACTICE' || (envelope.worldId && envelope.worldId !== state.worldId && envelope.eventType !== 'world.snapshot')) {
+    // Strict World isolation: NEVER apply WORLD-01 Socket.IO events while user is inside CAREER MODE or WORLD-PRACTICE!
+    if (
+      state.playMode === 'CAREER' ||
+      state.worldMode === 'PRACTICE' ||
+      (envelope.worldId && envelope.worldId !== state.worldId && envelope.eventType !== 'world.snapshot')
+    ) {
       return false;
     }
 

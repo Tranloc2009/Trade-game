@@ -4,8 +4,6 @@ import {
   ArrowUpRight,
   Briefcase,
   CheckCircle2,
-  ChevronDown,
-  ChevronUp,
   Plus,
   RefreshCw,
   ShieldAlert,
@@ -79,8 +77,6 @@ export function InvestmentFundsPage() {
 
   const [funds, setFunds] = useState<InvestmentFund[]>([]);
   const [selectedFundId, setSelectedFundId] = useState<string>('');
-  const [fundView, setFundView] = useState<'DISCOVER' | 'MINE'>('DISCOVER');
-  const [showAdvanced, setShowAdvanced] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
@@ -131,21 +127,9 @@ export function InvestmentFundsPage() {
     loadFunds();
   }, [loadFunds, v4SyncSeq]);
 
-  const myFunds = useMemo(
-    () =>
-      player
-        ? funds.filter(
-            (f) => f.managerId === player.id || f.members.some((m) => m.playerId === player.id && m.units > 0),
-          )
-        : [],
-    [funds, player],
-  );
-
-  const visibleFunds = fundView === 'MINE' ? myFunds : funds;
-
   const activeFund = useMemo(
-    () => visibleFunds.find((f) => f.id === selectedFundId) ?? visibleFunds[0] ?? null,
-    [visibleFunds, selectedFundId],
+    () => funds.find((f) => f.id === selectedFundId) ?? funds[0] ?? null,
+    [funds, selectedFundId],
   );
 
   useEffect(() => {
@@ -378,123 +362,74 @@ export function InvestmentFundsPage() {
 
   return (
     <div className="max-w-[1440px] mx-auto space-y-5">
-      {/* Header & 2-Tab View Switcher */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border-subtle)] pb-4">
+      {/* Header & Marketplace Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-lg font-bold tracking-tight">Quỹ đầu tư</h1>
+          <h1 className="text-xl font-bold tracking-tight">Quỹ Đầu tư Đa người chơi (Investment Funds)</h1>
           <p className="text-xs text-[var(--text-secondary)] mt-0.5">
-            Góp vốn cùng nhà quản lý quỹ để đầu tư đa tài sản · Không đòn bẩy · Định giá minh bạch theo thị trường.
+            Tài khoản tách biệt 100% trên Sổ cái · Không đòn bẩy · Định giá NAV minh bạch theo giá thị trường thực
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div
-            role="tablist"
-            aria-label="Chế độ xem quỹ đầu tư"
-            className="inline-flex rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-0.5 text-xs"
-          >
-            <button
-              type="button"
-              role="tab"
-              aria-selected={fundView === 'DISCOVER'}
-              onClick={() => setFundView('DISCOVER')}
-              className={`px-3 py-1.5 rounded font-medium cursor-pointer transition-colors whitespace-nowrap ${
-                fundView === 'DISCOVER'
-                  ? 'bg-[var(--bg-panel)] text-[var(--accent)]'
-                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-              }`}
-            >
-              Khám phá quỹ ({funds.length})
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={fundView === 'MINE'}
-              onClick={() => setFundView('MINE')}
-              className={`px-3 py-1.5 rounded font-medium cursor-pointer transition-colors whitespace-nowrap ${
-                fundView === 'MINE'
-                  ? 'bg-[var(--bg-panel)] text-[var(--accent)]'
-                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-              }`}
-            >
-              Quỹ của tôi ({myFunds.length})
-            </button>
-          </div>
+        <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={loadFunds}
-            className="px-3 py-1.5 rounded-md text-xs font-medium bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+            className="px-3 py-1.5 rounded-md text-xs font-medium bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] inline-flex items-center gap-1.5 cursor-pointer"
           >
             <RefreshCw className="w-3.5 h-3.5" />
-            Làm mới
+            Làm mới NAV
           </button>
           <button
             type="button"
             onClick={() => setCreateOpen(true)}
-            className="px-3.5 py-1.5 rounded-md text-xs font-semibold bg-[var(--accent)] text-[#0B0F17] hover:bg-[var(--accent-hover)] inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+            className="px-3.5 py-1.5 rounded-md text-xs font-semibold bg-[var(--accent)] text-[#0B0F17] hover:bg-[var(--accent-hover)] inline-flex items-center gap-1.5 cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" />
-            Tạo quỹ mới
+            Thành lập Quỹ mới
           </button>
         </div>
       </div>
 
       {/* Fund Selector Strip */}
-      {visibleFunds.length > 0 && (
-        <div className="flex gap-2 overflow-x-auto pb-1">
-          {visibleFunds.map((f) => {
-            const active = f.id === activeFund?.id;
-            return (
-              <button
-                key={f.id}
-                type="button"
-                onClick={() => setSelectedFundId(f.id)}
-                className={`shrink-0 px-3.5 py-2.5 rounded-lg border text-left transition-colors cursor-pointer min-w-[210px] ${
-                  active
-                    ? 'bg-[var(--bg-surface)] border-[var(--accent)] text-[var(--text-primary)]'
-                    : 'bg-[var(--bg-panel)] border-[var(--border-subtle)] hover:border-[var(--accent)]/50'
-                }`}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-mono text-xs font-bold" style={{ color: active ? 'var(--accent)' : f.logoColor }}>
-                    {f.code}
-                  </span>
-                  <span
-                    className={`font-mono text-[11px] font-semibold ${
-                      f.returnPct >= 0 ? 'text-[var(--positive)]' : 'text-[var(--negative)]'
-                    }`}
-                  >
-                    {f.returnPct >= 0 ? '+' : ''}
-                    {f.returnPct.toFixed(2)}%
-                  </span>
-                </div>
-                <div className="text-xs font-semibold truncate mt-0.5">{f.name}</div>
-                <div className="text-[11px] font-mono text-[var(--text-muted)] mt-1">
-                  Quy mô {formatCompactCR(f.navMinor)} CR · {f.members.length} NĐT
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      )}
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        {funds.map((f) => {
+          const active = f.id === activeFund?.id;
+          return (
+            <button
+              key={f.id}
+              type="button"
+              onClick={() => setSelectedFundId(f.id)}
+              className={`shrink-0 px-3.5 py-2.5 rounded-lg border text-left transition-colors cursor-pointer min-w-[210px] ${
+                active
+                  ? 'bg-[#111c33] border-blue-500/70 text-white'
+                  : 'bg-[var(--bg-panel)] border-[var(--border-subtle)] hover:border-[var(--accent)]/50'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-mono text-xs font-bold" style={{ color: active ? '#60a5fa' : f.logoColor }}>
+                  {f.code}
+                </span>
+                <span
+                  className={`font-mono text-[11px] font-semibold ${
+                    f.returnPct >= 0 ? 'text-[var(--positive)]' : 'text-[var(--negative)]'
+                  }`}
+                >
+                  {f.returnPct >= 0 ? '+' : ''}
+                  {f.returnPct.toFixed(2)}%
+                </span>
+              </div>
+              <div className="text-xs font-semibold truncate mt-0.5">{f.name}</div>
+              <div className="text-[11px] font-mono text-[var(--text-muted)] mt-1">
+                AUM {formatCompactCR(f.navMinor)} CR · {f.members.length} NĐT
+              </div>
+            </button>
+          );
+        })}
+      </div>
 
       {loading && !activeFund ? (
         <div className="p-10 text-center text-xs text-[var(--text-muted)] rounded-lg bg-[var(--bg-panel)] border border-[var(--border-subtle)]">
-          Đang tải danh sách quỹ đầu tư...
-        </div>
-      ) : !activeFund && fundView === 'MINE' ? (
-        <div className="p-10 text-center space-y-3 rounded-lg bg-[var(--bg-panel)] border border-[var(--border-subtle)]">
-          <Briefcase className="w-8 h-8 text-[var(--text-muted)] mx-auto" />
-          <div className="text-sm font-semibold">Bạn chưa tham gia quỹ đầu tư nào</div>
-          <p className="text-xs text-[var(--text-secondary)] max-w-md mx-auto">
-            Khám phá các quỹ đang mở để góp vốn và nắm giữ chứng chỉ quỹ, hoặc tự thành lập quỹ đầu tư của riêng bạn.
-          </p>
-          <button
-            type="button"
-            onClick={() => setFundView('DISCOVER')}
-            className="px-4 py-2 rounded-md text-xs font-semibold bg-[var(--accent)] text-[#0B0F17] cursor-pointer"
-          >
-            Khám phá quỹ ngay
-          </button>
+          Đang tải dữ liệu Quỹ Đầu tư từ máy chủ...
         </div>
       ) : activeFund ? (
         <>
@@ -580,7 +515,168 @@ export function InvestmentFundsPage() {
             </div>
           </div>
 
-          {/* Investor Actions + Holdings Desk (Primary V5 Surface) */}
+          {/* 3-Column Analytical Deck: NAV Evolution + Asset Allocation Donut + Risk Indicators */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+            {/* NAV Evolution */}
+            <section className="lg:col-span-5 p-4 rounded-xl bg-[var(--bg-panel)] border border-[var(--border-subtle)] flex flex-col justify-between">
+              <div className="flex items-start justify-between gap-2 mb-3">
+                <div>
+                  <h2 className="text-sm font-semibold">Diễn biến Tài sản Ròng (NAV Evolution)</h2>
+                  <p className="text-[11px] text-[var(--text-muted)]">
+                    {activeFund.investmentObjective}
+                  </p>
+                </div>
+                <span className="font-mono text-xs text-blue-400">{activeFund.code}</span>
+              </div>
+
+              <svg viewBox="0 0 500 190" className="w-full h-48" role="img" aria-label="Biểu đồ diễn biến NAV quỹ">
+                <defs>
+                  <linearGradient id="navAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.32" />
+                    <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.01" />
+                  </linearGradient>
+                </defs>
+                {[
+                  { y: 36, val: navChart.max },
+                  { y: 78, val: navChart.min + (navChart.max - navChart.min) * 0.67 },
+                  { y: 120, val: navChart.min + (navChart.max - navChart.min) * 0.33 },
+                  { y: 162, val: navChart.min },
+                ].map((tick) => (
+                  <g key={tick.y}>
+                    <line
+                      x1="62"
+                      y1={tick.y}
+                      x2="484"
+                      y2={tick.y}
+                      stroke="rgba(148,163,184,0.14)"
+                      strokeDasharray="3 3"
+                    />
+                    <text x="56" y={tick.y + 3} textAnchor="end" fill="#64748b" fontSize="9.5" fontFamily="monospace">
+                      {formatCompactCR(tick.val)}
+                    </text>
+                  </g>
+                ))}
+                {navChart.area && <path d={navChart.area} fill="url(#navAreaGrad)" />}
+                {navChart.line && (
+                  <path
+                    d={navChart.line}
+                    fill="none"
+                    stroke="#3b82f6"
+                    strokeWidth="2.4"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                )}
+                <circle cx="484" cy={navChart.lastY} r="4" fill="#60a5fa" stroke="#0b1120" strokeWidth="2" />
+              </svg>
+
+              <div className="flex items-center justify-between text-[11px] font-mono text-[var(--text-muted)] pt-2 border-t border-[var(--border-subtle)]/60">
+                <span>Đòn bẩy: TẮT (Zero Leverage)</span>
+                <span>Phí QL: {activeFund.managementFeeAnnualPct.toFixed(2)}%/năm · Phí rút: {activeFund.redemptionFeePct.toFixed(2)}%</span>
+              </div>
+            </section>
+
+            {/* Asset Allocation Donut */}
+            <section className="lg:col-span-4 p-4 rounded-xl bg-[var(--bg-panel)] border border-[var(--border-subtle)] flex flex-col justify-between">
+              <div>
+                <h2 className="text-sm font-semibold">Cơ cấu Danh mục (Asset Allocation)</h2>
+                <p className="text-[11px] text-[var(--text-muted)]">Tỷ trọng định giá theo giá thị trường thực</p>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-4 my-3">
+                <div className="relative w-36 h-36 shrink-0 flex items-center justify-center">
+                  <svg viewBox="0 0 144 144" className="w-36 h-36 -rotate-90" role="img" aria-label="Biểu đồ cơ cấu tài sản quỹ">
+                    <circle cx="72" cy="72" r="56" fill="none" stroke="rgba(148,163,184,0.12)" strokeWidth="18" />
+                    {donutSegments.map((seg) => (
+                      <circle
+                        key={seg.label}
+                        cx="72"
+                        cy="72"
+                        r="56"
+                        fill="none"
+                        stroke={seg.color}
+                        strokeWidth="18"
+                        strokeDasharray={seg.dashArray}
+                        strokeDashoffset={seg.dashOffset}
+                      />
+                    ))}
+                  </svg>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none">
+                    <span className="text-xs font-mono font-bold tabular-nums">
+                      {formatCompactCR(activeFund.navMinor)}
+                    </span>
+                    <span className="text-[10px] text-[var(--text-muted)]">NAV (CR)</span>
+                  </div>
+                </div>
+
+                <div className="flex-1 w-full space-y-2 text-xs">
+                  {allocationSlices.map((s) => (
+                    <div key={s.label} className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
+                        <span className="truncate font-medium">{s.label}</span>
+                      </div>
+                      <span className="font-mono tabular-nums text-[var(--text-secondary)]">
+                        {s.pct.toFixed(1)}%
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="text-[11px] text-[var(--text-muted)] pt-2 border-t border-[var(--border-subtle)]/60">
+                Danh mục cho phép: <span className="font-mono text-[var(--text-secondary)]">{activeFund.allowedAssets.join(', ')}</span>
+              </div>
+            </section>
+
+            {/* Risk Indicators Table */}
+            <section className="lg:col-span-3 p-4 rounded-xl bg-[var(--bg-panel)] border border-[var(--border-subtle)] flex flex-col justify-between">
+              <div>
+                <h2 className="text-sm font-semibold">Chỉ số Rủi ro (Risk Indicators)</h2>
+                <p className="text-[11px] text-[var(--text-muted)]">Kiểm soát giới hạn trên máy chủ</p>
+              </div>
+
+              <dl className="divide-y divide-[var(--border-subtle)]/50 text-xs my-2">
+                <div className="py-2 flex justify-between">
+                  <dt className="text-[var(--text-secondary)]">Biến động năm hóa</dt>
+                  <dd className="font-mono font-semibold tabular-nums">{activeFund.annualizedVolatilityPct.toFixed(2)}%</dd>
+                </div>
+                <div className="py-2 flex justify-between">
+                  <dt className="text-[var(--text-secondary)]">Sụt giảm tối đa (Max DD)</dt>
+                  <dd className="font-mono font-semibold tabular-nums text-[var(--negative)]">
+                    -{activeFund.maxDrawdownPct.toFixed(2)}%
+                  </dd>
+                </div>
+                <div className="py-2 flex justify-between">
+                  <dt className="text-[var(--text-secondary)]">Sharpe Ratio</dt>
+                  <dd className="font-mono font-semibold tabular-nums">{activeFund.sharpeRatio.toFixed(2)}</dd>
+                </div>
+                <div className="py-2 flex justify-between">
+                  <dt className="text-[var(--text-secondary)]">Giới hạn 1 tài sản</dt>
+                  <dd className="font-mono font-semibold tabular-nums">{activeFund.maxSinglePositionPct}%</dd>
+                </div>
+                <div className="py-2 flex justify-between">
+                  <dt className="text-[var(--text-secondary)]">Dự trữ tiền mặt</dt>
+                  <dd className="font-mono font-semibold tabular-nums text-[var(--positive)]">
+                    {((activeFund.cashMinor / Math.max(activeFund.totalAssetsMinor, 1)) * 100).toFixed(1)}%
+                  </dd>
+                </div>
+                <div className="py-2 flex justify-between">
+                  <dt className="text-[var(--text-secondary)]">Hàng đợi rút vốn</dt>
+                  <dd className="font-mono font-semibold tabular-nums">
+                    {activeFund.redemptionQueue.filter((r) => r.status === 'QUEUED').length} lệnh
+                  </dd>
+                </div>
+              </dl>
+
+              <div className="text-[11px] text-[var(--text-muted)] flex items-center gap-1.5">
+                <ShieldAlert className="w-3.5 h-3.5 text-[var(--accent)] shrink-0" />
+                <span>Người quản lý không thể tự rút tiền mặt quỹ sang ví cá nhân.</span>
+              </div>
+            </section>
+          </div>
+
+          {/* Investor Actions + Manager Trade Desk + Net Flows */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
             {/* Subscribe & Redeem Panel */}
             <section className="lg:col-span-5 p-4 rounded-xl bg-[var(--bg-panel)] border border-[var(--border-subtle)] space-y-4">
@@ -615,10 +711,7 @@ export function InvestmentFundsPage() {
                       (Number(subscribeCR) || 0) /
                       Math.max(activeFund.navPerUnitMinor / 100, 1)
                     ).toFixed(2)}{' '}
-                    CCQ · Phí QL {activeFund.managementFeeAnnualPct.toFixed(1)}%/năm
-                  </div>
-                  <div className="text-[10px] text-[var(--text-muted)] leading-snug">
-                    Không đòn bẩy · Giá trị CCQ biến động theo thị trường · Phí rút {activeFund.redemptionFeePct}% ({activeFund.redemptionNoticeLabel}).
+                    CCQ
                   </div>
                   <button
                     type="button"
@@ -684,7 +777,7 @@ export function InvestmentFundsPage() {
             </section>
 
             {/* Manager Trade Desk & Holdings Table */}
-            <section className="lg:col-span-7 p-4 rounded-xl bg-[var(--bg-panel)] border border-[var(--border-subtle)] space-y-3">
+            <section className="lg:col-span-4 p-4 rounded-xl bg-[var(--bg-panel)] border border-[var(--border-subtle)] space-y-3">
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="text-sm font-semibold">Danh mục & Bàn Giao dịch Quỹ</h2>
@@ -769,151 +862,45 @@ export function InvestmentFundsPage() {
               </div>
             </section>
 
+            {/* Net Flows Bar Chart */}
+            <section className="lg:col-span-3 p-4 rounded-xl bg-[var(--bg-panel)] border border-[var(--border-subtle)] flex flex-col justify-between">
+              <div>
+                <h2 className="text-sm font-semibold">Dòng tiền Vào / Ra (Net Flows)</h2>
+                <p className="text-[11px] text-[var(--text-muted)]">Lịch sử góp vốn và rút vốn ròng</p>
+              </div>
+
+              <svg viewBox="0 0 260 140" className="w-full h-36 my-2" role="img" aria-label="Biểu đồ dòng tiền quỹ">
+                <line x1="8" y1="70" x2="252" y2="70" stroke="rgba(148,163,184,0.28)" />
+                {activeFund.navHistory.slice(-12).map((pt, i, arr) => {
+                  const maxAbs = Math.max(...arr.map((a) => Math.abs(a.netFlowMinor)), 100_000);
+                  const h = Math.min(58, Math.max(4, (Math.abs(pt.netFlowMinor) / maxAbs) * 56));
+                  const barW = Math.max(10, Math.floor(220 / Math.max(arr.length, 6)) - 4);
+                  const x = 14 + i * (barW + 5);
+                  const positive = pt.netFlowMinor >= 0;
+                  return (
+                    <rect
+                      key={`${pt.timestamp}_${i}`}
+                      x={x}
+                      y={positive ? 70 - h : 70}
+                      width={barW}
+                      height={h}
+                      rx="2"
+                      fill={positive ? '#3b82f6' : '#ef4444'}
+                      opacity={pt.netFlowMinor === 0 ? 0.25 : 0.9}
+                    />
+                  );
+                })}
+              </svg>
+
+              <div className="text-[11px] text-[var(--text-muted)] flex justify-between font-mono pt-2 border-t border-[var(--border-subtle)]/60">
+                <span>Định kỳ: {activeFund.redemptionNoticeLabel}</span>
+                <span>{activeFund.members.length} thành viên</span>
+              </div>
+            </section>
           </div>
 
-          {/* Collapsible Advanced Institutional Analytics & Governance */}
-          <div className="rounded-xl bg-[var(--bg-panel)] border border-[var(--border-subtle)] overflow-hidden">
-            <button
-              type="button"
-              onClick={() => setShowAdvanced((v) => !v)}
-              aria-expanded={showAdvanced}
-              className="w-full px-4 py-3 flex items-center justify-between text-xs font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-surface)]/50 transition-colors cursor-pointer"
-            >
-              <span>Chỉ số nâng cao & Quản trị quỹ (Biểu đồ NAV · Phân bổ · Rủi ro · Biểu quyết)</span>
-              {showAdvanced ? <ChevronUp className="w-4 h-4 text-[var(--text-muted)]" /> : <ChevronDown className="w-4 h-4 text-[var(--text-muted)]" />}
-            </button>
-
-            {showAdvanced && (
-              <div className="p-4 pt-2 border-t border-[var(--border-subtle)] space-y-4">
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-                  {/* NAV Evolution */}
-                  <section className="lg:col-span-5 p-4 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] flex flex-col justify-between">
-                    <div className="flex items-start justify-between gap-2 mb-3">
-                      <div>
-                        <h2 className="text-sm font-semibold">Diễn biến Tài sản Ròng (NAV)</h2>
-                        <p className="text-[11px] text-[var(--text-muted)]">{activeFund.investmentObjective}</p>
-                      </div>
-                      <span className="font-mono text-xs text-[var(--accent)]">{activeFund.code}</span>
-                    </div>
-
-                    <svg viewBox="0 0 500 190" className="w-full h-44" role="img" aria-label="Biểu đồ diễn biến NAV quỹ">
-                      <defs>
-                        <linearGradient id="navAreaGrad" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.32" />
-                          <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.01" />
-                        </linearGradient>
-                      </defs>
-                      {[
-                        { y: 36, val: navChart.max },
-                        { y: 78, val: navChart.min + (navChart.max - navChart.min) * 0.67 },
-                        { y: 120, val: navChart.min + (navChart.max - navChart.min) * 0.33 },
-                        { y: 162, val: navChart.min },
-                      ].map((tick) => (
-                        <g key={tick.y}>
-                          <line x1="62" y1={tick.y} x2="484" y2={tick.y} stroke="rgba(148,163,184,0.14)" strokeDasharray="3 3" />
-                          <text x="56" y={tick.y + 3} textAnchor="end" fill="#64748b" fontSize="9.5" fontFamily="monospace">
-                            {formatCompactCR(tick.val)}
-                          </text>
-                        </g>
-                      ))}
-                      {navChart.area && <path d={navChart.area} fill="url(#navAreaGrad)" />}
-                      {navChart.line && (
-                        <path d={navChart.line} fill="none" stroke="#3b82f6" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-                      )}
-                      <circle cx="484" cy={navChart.lastY} r="4" fill="#60a5fa" stroke="#0b1120" strokeWidth="2" />
-                    </svg>
-
-                    <div className="flex items-center justify-between text-[11px] font-mono text-[var(--text-muted)] pt-2 border-t border-[var(--border-subtle)]/60">
-                      <span>Không dùng đòn bẩy</span>
-                      <span>Phí QL: {activeFund.managementFeeAnnualPct.toFixed(2)}%/năm · Rút: {activeFund.redemptionFeePct.toFixed(2)}%</span>
-                    </div>
-                  </section>
-
-                  {/* Asset Allocation Donut */}
-                  <section className="lg:col-span-4 p-4 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] flex flex-col justify-between">
-                    <div>
-                      <h2 className="text-sm font-semibold">Cơ cấu danh mục</h2>
-                      <p className="text-[11px] text-[var(--text-muted)]">Tỷ trọng định giá theo thị trường thực</p>
-                    </div>
-                    <div className="flex flex-col sm:flex-row items-center justify-center gap-4 my-3">
-                      <div className="relative w-32 h-32 shrink-0 flex items-center justify-center">
-                        <svg viewBox="0 0 144 144" className="w-32 h-32 -rotate-90" role="img" aria-label="Biểu đồ cơ cấu tài sản quỹ">
-                          <circle cx="72" cy="72" r="56" fill="none" stroke="rgba(148,163,184,0.12)" strokeWidth="18" />
-                          {donutSegments.map((seg) => (
-                            <circle
-                              key={seg.label}
-                              cx="72"
-                              cy="72"
-                              r="56"
-                              fill="none"
-                              stroke={seg.color}
-                              strokeWidth="18"
-                              strokeDasharray={seg.dashArray}
-                              strokeDashoffset={seg.dashOffset}
-                            />
-                          ))}
-                        </svg>
-                        <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none">
-                          <span className="text-xs font-mono font-bold tabular-nums">{formatCompactCR(activeFund.navMinor)}</span>
-                          <span className="text-[10px] text-[var(--text-muted)]">NAV</span>
-                        </div>
-                      </div>
-                      <div className="flex-1 w-full space-y-1.5 text-xs">
-                        {allocationSlices.map((s) => (
-                          <div key={s.label} className="flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
-                              <span className="truncate font-medium">{s.label}</span>
-                            </div>
-                            <span className="font-mono tabular-nums text-[var(--text-secondary)]">{s.pct.toFixed(1)}%</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="text-[11px] text-[var(--text-muted)] pt-2 border-t border-[var(--border-subtle)]/60">
-                      Cho phép: <span className="font-mono text-[var(--text-secondary)]">{activeFund.allowedAssets.join(', ')}</span>
-                    </div>
-                  </section>
-
-                  {/* Risk Indicators & Net Flows */}
-                  <section className="lg:col-span-3 p-4 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] flex flex-col justify-between">
-                    <div>
-                      <h2 className="text-sm font-semibold">Chỉ số rủi ro</h2>
-                      <p className="text-[11px] text-[var(--text-muted)]">Kiểm soát giới hạn trên máy chủ</p>
-                    </div>
-                    <dl className="divide-y divide-[var(--border-subtle)]/50 text-xs my-2">
-                      <div className="py-1.5 flex justify-between">
-                        <dt className="text-[var(--text-secondary)]">Biến động năm hóa</dt>
-                        <dd className="font-mono font-semibold tabular-nums">{activeFund.annualizedVolatilityPct.toFixed(2)}%</dd>
-                      </div>
-                      <div className="py-1.5 flex justify-between">
-                        <dt className="text-[var(--text-secondary)]">Sụt giảm tối đa</dt>
-                        <dd className="font-mono font-semibold tabular-nums text-[var(--negative)]">-{activeFund.maxDrawdownPct.toFixed(2)}%</dd>
-                      </div>
-                      <div className="py-1.5 flex justify-between">
-                        <dt className="text-[var(--text-secondary)]">Sharpe Ratio</dt>
-                        <dd className="font-mono font-semibold tabular-nums">{activeFund.sharpeRatio.toFixed(2)}</dd>
-                      </div>
-                      <div className="py-1.5 flex justify-between">
-                        <dt className="text-[var(--text-secondary)]">Giới hạn 1 tài sản</dt>
-                        <dd className="font-mono font-semibold tabular-nums">{activeFund.maxSinglePositionPct}%</dd>
-                      </div>
-                      <div className="py-1.5 flex justify-between">
-                        <dt className="text-[var(--text-secondary)]">Dự trữ tiền mặt</dt>
-                        <dd className="font-mono font-semibold tabular-nums text-[var(--positive)]">
-                          {((activeFund.cashMinor / Math.max(activeFund.totalAssetsMinor, 1)) * 100).toFixed(1)}%
-                        </dd>
-                      </div>
-                    </dl>
-                    <div className="text-[11px] text-[var(--text-muted)] flex items-center gap-1.5">
-                      <ShieldAlert className="w-3.5 h-3.5 text-[var(--accent)] shrink-0" />
-                      <span>Quản lý quỹ không thể rút tiền quỹ về ví cá nhân.</span>
-                    </div>
-                  </section>
-                </div>
-
-                {/* Governance & Immutable Audit Log */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Governance & Immutable Audit Log */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <section className="p-4 rounded-xl bg-[var(--bg-panel)] border border-[var(--border-subtle)] space-y-3">
               <div className="flex items-center justify-between">
                 <h2 className="text-sm font-semibold flex items-center gap-1.5">
@@ -1022,9 +1009,6 @@ export function InvestmentFundsPage() {
                 ))}
               </div>
             </section>
-          </div>
-              </div>
-            )}
           </div>
         </>
       ) : null}

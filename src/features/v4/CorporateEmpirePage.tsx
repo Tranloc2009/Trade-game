@@ -44,19 +44,22 @@ function CorporateOwnershipTreeSvg({
         {/* Subsidiary nodes positioned radially or empty onboarding slot */}
         {subs.length === 0 ? (
           <g>
-            <circle
-              cx="245"
-              cy="60"
-              r="22"
-              fill="none"
+            <rect
+              x="183"
+              y="42"
+              width="124"
+              height="34"
+              rx="17"
+              fill="#0f172a"
+              fillOpacity="0.85"
               stroke="#475569"
-              strokeWidth="1.4"
+              strokeWidth="1.2"
               strokeDasharray="4 3"
             />
-            <text x="245" y="58" textAnchor="middle" fill="#64748b" fontSize="8.5">
+            <text x="245" y="56" textAnchor="middle" fill="#94a3b8" fontSize="9" fontWeight="600">
               0 DN con
             </text>
-            <text x="245" y="69" textAnchor="middle" fill="#64748b" fontSize="7.5">
+            <text x="245" y="68" textAnchor="middle" fill="#64748b" fontSize="8">
               Khởi nghiệp / M&A
             </text>
           </g>

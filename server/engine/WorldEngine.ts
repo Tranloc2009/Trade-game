@@ -932,6 +932,14 @@ export class WorldEngine {
     return this.getPlayerProfile(playerId)!;
   }
 
+  public hasPlayerUsername(username: string): boolean {
+    const lower = username.trim().toLowerCase();
+    for (const rec of this.players.values()) {
+      if (rec.username.toLowerCase() === lower) return true;
+    }
+    return false;
+  }
+
   /**
    * Computes exact PlayerProfile & Net Worth (INVARIANT / TEST 28):
    * NET WORTH = CASH (available + locked + savings + termDeposit) + STOCK VALUE + CRYPTO VALUE + PROPERTY VALUE + BUSINESS EQUITY - LIABILITIES

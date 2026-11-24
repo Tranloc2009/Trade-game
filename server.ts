@@ -4,9 +4,11 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApiRouter } from './server/api/routes';
+import { createCareerImmersionRouter } from './server/api/careerRoutes';
 import { createExternalProviderRegistry } from './server/adapters/ExternalProviders';
 import { env } from './server/config/env';
 import { WorldEngine } from './server/engine/WorldEngine';
+import { CareerWorldManager } from './server/engine/career/CareerWorldManager';
 import { SocketGateway } from './server/realtime/SocketGateway';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -61,10 +63,17 @@ async function startServer() {
     providers,
   });
 
+  // Boot strictly isolated Career Mode manager (separate WorldEngine per Career Save)
+  const careerManager = new CareerWorldManager(world, { enableTimers: true });
+
   // Attach authoritative Socket.IO gateway on same HTTP server/port for WORLD-01
   new SocketGateway(httpServer, world);
 
-  // Mount REST APIs (WORLD-01 & strictly isolated WORLD-PRACTICE)
+  // Mount REST APIs:
+  // 1) Account Mode Preferences, Career Story Director & Isolated Career World Proxy (/api/account/*, /api/career/*, /api/career-world/:saveId/*)
+  // 2) Strictly isolated WORLD-PRACTICE (/api/practice/*)
+  // 3) Authoritative Online WORLD-01 (/api/*)
+  app.use('/api', createCareerImmersionRouter(careerManager));
   app.use('/api/practice', createApiRouter(practiceWorld));
   app.use('/api', createApiRouter(world));
 

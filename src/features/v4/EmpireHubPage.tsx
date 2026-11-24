@@ -78,7 +78,7 @@ export function EmpireHubPage() {
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer disabled:opacity-50"
           >
             <Play className="w-3.5 h-3.5 text-[var(--accent)]" />
-            {advanceMutation.isPending ? 'Đang mô phỏng...' : 'Chạy 1 chu kỳ kinh tế (QA)'}
+            {advanceMutation.isPending ? 'Đang mô phỏng...' : 'Tiến 1 chu kỳ kinh tế'}
           </button>
           <button
             type="button"

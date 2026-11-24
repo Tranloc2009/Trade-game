@@ -1,0 +1,1631 @@
+# TRADING EMPIRE — PROJECT IMMERSION
+## STORY-FIRST CAREER MODE & DISTINCT ONLINE EXPERIENCE
+
+# 01. MỆNH LỆNH TRIỂN KHAI
+
+Bạn là đội ngũ phát triển game chuyên nghiệp gồm Game Director, Narrative Designer, Gameplay Programmer, UI/UX Designer và Senior Full-Stack Engineer.
+
+Hãy trực tiếp nâng cấp project Trading Empire hiện tại.
+
+Các prompt trước đây đã yêu cầu triển khai Career Mode, Online Mode và hệ thống cốt truyện, nhưng trải nghiệm thực tế vẫn chưa đáp ứng yêu cầu.
+
+Những vấn đề cần giải quyết:
+
+- Career và Online có giao diện quá giống nhau.
+- Người chơi không cảm nhận được mình đang chơi hai chế độ khác biệt.
+- Career thiếu cốt truyện được trình bày trực tiếp.
+- NPC chưa xuất hiện và tương tác đủ hấp dẫn.
+- Người chơi mới có thể bị choáng ngợp bởi các hệ thống tài chính.
+- Nhiệm vụ có nguy cơ trở thành một danh sách công việc nhàm chán.
+- Việc chuyển đổi chế độ chưa đủ trực quan.
+- Game đang giống phần mềm quản trị tài chính hơn một trò chơi.
+
+Tôi không muốn bạn chỉ tạo thêm dashboard hoặc một tab Career.
+
+Tôi muốn bạn thay đổi cách người chơi trải nghiệm toàn bộ Career Mode.
+
+TRIẾT LÝ THIẾT KẾ:
+
+STORY FIRST.
+
+IMMERSION FIRST.
+
+GAMEPLAY THROUGH STORY.
+
+Người chơi phải học cách kinh doanh thông qua các nhân vật, tình huống và diễn biến câu chuyện.
+
+YÊU CẦU BẮT BUỘC:
+
+- Triển khai code thật.
+- Không chỉ trả lời bằng kế hoạch.
+- Không tạo giao diện tĩnh rồi đánh dấu hoàn thành.
+- Không sử dụng AI API trả phí.
+- Không tạo lại project từ đầu.
+- Không xóa các tính năng hiện có.
+- Không làm mất dữ liệu người chơi.
+- Không thay đổi nghiệp vụ tài chính nếu không cần thiết.
+- Toàn bộ hoạt động tài chính sử dụng CR mô phỏng, không liên quan tới tiền thật.
+
+Trước khi sửa, hãy audit repository và xác định những phần đã tồn tại để nâng cấp thay vì xây dựng trùng lặp.
+
+Nếu có thể quản lý Git branch, sử dụng:
+
+feature/project-immersion
+
+Không force push, không tự merge main hoặc deploy production.
+
+# 02. THAY ĐỔI LUỒNG ĐĂNG KÝ VÀ ĐĂNG NHẬP
+
+Đây là yêu cầu có mức ưu tiên cao nhất.
+
+## 2.1. Người chơi đăng ký tài khoản mới
+
+Sau khi đăng ký và đăng nhập thành công lần đầu:
+
+1. Tự động thiết lập Career Mode là chế độ khởi đầu.
+2. Tạo hoặc khởi tạo Career Save đầu tiên đúng một lần.
+3. Hiển thị màn hình giới thiệu nhân vật ngắn gọn.
+4. Bắt đầu cảnh mở đầu cốt truyện.
+5. NPC Minh Quân xuất hiện.
+6. Người chơi tham gia hội thoại đầu tiên.
+7. Nhận nhiệm vụ mở đầu.
+8. Chuyển vào giao diện Career.
+
+Không đưa người chơi mới vào Online Dashboard.
+
+Không yêu cầu người chơi phải hiểu sự khác biệt giữa hai chế độ trước khi bắt đầu.
+
+Không bắt người chơi điền quá nhiều thông tin.
+
+Sử dụng tên tài khoản làm tên nhân vật mặc định. Cho phép thay đổi tên nhân vật sau.
+
+Mặc định sử dụng độ khó Normal, vốn khởi đầu phù hợp với nền kinh tế hiện có. Có thể cho phép tùy chỉnh khi tạo Career.
+
+Người chơi có quyền bỏ qua cảnh mở đầu hoặc chuyển sang Online ngay nếu muốn.
+
+Không ép hoàn thành một chương mới được chơi Online.
+
+## 2.2. Người chơi quay lại
+
+Hệ thống phải ghi nhớ:
+
+- lastPlayedMode.
+- activeCareerSaveId.
+- lastOnlineWorldId.
+- hasCompletedFirstLaunch.
+- lastPlayedAt.
+
+Ví dụ:
+
+Nếu hôm qua người chơi thoát game trong Career Mode, hôm nay tự động mở Career Save đó.
+
+Nếu hôm qua người chơi thoát game trong Online Mode, hôm nay tự động mở Online Mode.
+
+Không hiển thị màn hình chọn chế độ mỗi lần đăng nhập.
+
+Không phát lại cinematic intro của lần đăng ký đầu tiên.
+
+Không tạo thêm Career Save hoặc cấp lại vốn chỉ vì người chơi đăng nhập lại.
+
+Ưu tiên lưu preference theo tài khoản bằng hệ thống persistence hiện tại.
+
+Không dùng localStorage làm nguồn dữ liệu tài chính chính thức.
+
+## 2.3. Tài khoản đã tồn tại
+
+Đối với tài khoản cũ:
+
+- Bảo toàn World và tài sản hiện có.
+- Giữ chế độ gần nhất nếu đã lưu.
+- Nếu chưa xác định được chế độ, cho phép người chơi lựa chọn.
+- Không tự động chuyển toàn bộ tài sản Online vào Career.
+- Không reset dữ liệu cũ.
+
+Yêu cầu mới này thay thế logic bắt buộc mọi người chơi mới chọn Career hoặc Online ở lần đăng nhập đầu tiên.
+
+# 03. HỆ THỐNG CHUYỂN ĐỔI CHẾ ĐỘ
+
+Tạo nút chuyển chế độ luôn dễ tìm.
+
+Trên desktop:
+
+Đặt ở góc trên bên phải topbar, cạnh avatar người chơi.
+
+Ví dụ:
+
+CAREER MODE ▾
+
+Trên mobile:
+
+Đặt trong header hoặc menu tài khoản, không ẩn sâu trong nhiều cấp cài đặt.
+
+Khi nhấn vào:
+
+Hiển thị hai lựa chọn lớn:
+
+CAREER — Tiếp tục câu chuyện.
+
+ONLINE — Tham gia thế giới chung.
+
+Mỗi lựa chọn có hình ảnh, mô tả ngắn và trạng thái tiến trình hiện tại.
+
+Career hiển thị:
+
+- Chương hiện tại.
+- Nhiệm vụ đang thực hiện.
+- Save gần nhất.
+- Thời gian lưu.
+
+Online hiển thị:
+
+- Tên World.
+- Trạng thái máy chủ thực tế nếu có.
+- Tiến trình Online.
+
+Chỉ cần tối đa hai thao tác chính để chuyển chế độ.
+
+Không bắt đăng xuất.
+
+Không yêu cầu nhập lại mật khẩu.
+
+Không phát lại intro.
+
+Khi chuyển từ Career sang Online:
+
+- Lưu tiến trình cốt truyện.
+- Lưu trạng thái hội thoại.
+- Lưu tài sản và doanh nghiệp theo cơ chế hiện tại.
+- Tạm dừng Career World.
+- Ngắt các subscription thuộc Career.
+- Kết nối Online World.
+
+Khi chuyển từ Online sang Career:
+
+- Không tự động đóng vị thế Online.
+- Không tự động hủy lệnh đang mở.
+- Online World vẫn tiếp tục hoạt động.
+- Khôi phục chính xác Career Save gần nhất.
+
+Nếu quá trình chuyển chế độ thất bại, giữ trạng thái hợp lệ trước đó và hiển thị nút thử lại.
+
+Chỉ lưu lastPlayedMode sau khi chế độ mới đã được tải thành công.
+
+Ngăn người chơi thực hiện giao dịch trong khoảng thời gian đang chuyển World.
+
+# 04. HAI CHẾ ĐỘ — HAI GIAO DIỆN RIÊNG
+
+Đây là yêu cầu bắt buộc.
+
+Không sử dụng cùng một Dashboard cho cả hai chế độ rồi chỉ thay đổi nhãn Career/Online.
+
+Tạo hai application layouts độc lập về trải nghiệm.
+
+Có thể sử dụng chung design tokens, component giao dịch và các domain services, nhưng bố cục tổng thể phải khác biệt rõ ràng.
+
+## 4.1. CAREER MODE — CINEMATIC BUSINESS RPG
+
+Phong cách:
+
+- Điện ảnh.
+- Kể chuyện.
+- Cá nhân hóa.
+- Hình ảnh thành phố Việt Nam.
+- Màu đen than, vàng champagne, nâu ấm và trắng ngà.
+- Typography có cá tính.
+- Hình ảnh lớn thay vì hàng chục dashboard nhỏ.
+- Chuyển cảnh tinh tế.
+
+Navigation Career:
+
+1. Hành trình.
+2. Sàn giao dịch.
+3. Doanh nghiệp.
+4. Tài sản.
+5. Khám phá thế giới.
+6. Cài đặt.
+
+Nhật ký nhiệm vụ và điện thoại là công cụ truy cập nhanh trong Career, không tạo thêm nhiều mục sidebar.
+
+Trang chủ Career phải ưu tiên:
+
+- Cảnh nền của chương hiện tại.
+- Tên chương.
+- Đoạn dẫn cốt truyện.
+- Nhân vật đang liên quan tới nhiệm vụ.
+- Nhiệm vụ chính hiện tại.
+- Mục tiêu tiếp theo.
+- Nút Tiếp tục câu chuyện.
+- Tin nhắn NPC mới.
+- Thời gian trong game.
+- Số tiền khả dụng và tổng tài sản ở vị trí phụ.
+
+Nút lớn nhất trên trang chủ:
+
+TIẾP TỤC CÂU CHUYỆN.
+
+Không để nút giao dịch hoặc các chỉ số tài chính chiếm toàn bộ sự chú ý.
+
+Người chơi có thể mở các chức năng kinh doanh tự do, nhưng luôn dễ dàng quay về nhiệm vụ đang theo dõi.
+
+## 4.2. ONLINE MODE — CONNECTED FINANCIAL WORLD
+
+Phong cách:
+
+- Premium Fintech.
+- Hiện đại.
+- Màu xanh navy, xám lạnh và trắng.
+- Bố cục rõ ràng.
+- Dữ liệu thị trường theo thời gian thực của simulation.
+- Tương tác multiplayer.
+
+Navigation Online:
+
+1. Trang chủ.
+2. Sàn giao dịch.
+3. Đế chế của tôi.
+4. Tài sản.
+5. Phong cách sống.
+6. Thế giới.
+7. Cài đặt.
+
+Trang chủ Online tập trung vào:
+
+- Tổng tài sản.
+- Thị trường hiện tại.
+- Doanh nghiệp đang sở hữu.
+- Cơ hội góp vốn.
+- Quỹ đầu tư.
+- Lời mời hợp tác.
+- Hoạt động cộng đồng.
+- Tin tức kinh tế.
+
+Không hiển thị NPC cốt truyện Career trong Online.
+
+Không hiển thị chapter progression hoặc điều khiển tốc độ thời gian Career trong Online.
+
+Có thể giữ NPC thị trường và các chức năng simulation Online hiện có, nhưng phải phân biệt với người chơi thật.
+
+## 4.3. Quy tắc thiết kế
+
+Khi đặt hai ảnh chụp Career Home và Online Home cạnh nhau, người dùng phải nhận ra ngay đâu là chế độ cốt truyện và đâu là chế độ multiplayer, kể cả khi che chữ Career/Online.
+
+Không tạo sidebar kép.
+
+Không sử dụng quá nhiều card.
+
+Không lạm dụng gradient, glow hoặc hiệu ứng kính.
+
+Không hy sinh khả năng đọc để tạo cảm giác cinematic.
+
+Các trang chuyên môn như sàn giao dịch vẫn giữ bố cục dễ dùng và thống nhất.
+
+Cả Career và Online đều hỗ trợ Beginner/Pro.
+
+Beginner/Pro là độ phức tạp giao diện, không phải chế độ chơi.
+
+# 05. CỐT TRUYỆN CHÍNH
+
+Tên chiến dịch:
+
+TRADING EMPIRE: THE PRICE OF SUCCESS
+
+Tên tiếng Việt:
+
+CÁI GIÁ CỦA THÀNH CÔNG
+
+Bối cảnh Việt Nam hiện đại.
+
+Người chơi bắt đầu sự nghiệp trong một căn hộ nhỏ ở TP.HCM với một khoản vốn hữu hạn.
+
+Nguyễn Minh Quân, một doanh nhân từng sở hữu tập đoàn lớn nhưng thất bại trong cuộc khủng hoảng tài chính, trở thành người cố vấn.
+
+Trong quá trình phát triển, người chơi gặp các đối tác, đối thủ, nhà đầu tư và dần khám phá nguyên nhân đằng sau sự sụp đổ của tập đoàn cũ.
+
+Cốt truyện phải có:
+
+- Những thành công đầu tiên.
+- Sự phát triển của các mối quan hệ.
+- Mâu thuẫn giữa đối tác.
+- Những lựa chọn kinh doanh khó khăn.
+- Cơ hội gọi vốn.
+- Khủng hoảng tài chính.
+- Những thất bại có thể phục hồi.
+- Sự thay đổi trong quan điểm của các nhân vật.
+- Một đoạn kết có cảm xúc.
+
+Không xây dựng cốt truyện chỉ xoay quanh số tiền.
+
+Thông điệp cuối cùng:
+
+Thành công không chỉ nằm ở những gì bạn sở hữu, mà còn nằm ở những quyết định đã tạo nên con người bạn.
+
+# 06. DÀN NHÂN VẬT NPC
+
+Tất cả nhân vật là hư cấu.
+
+## NGUYỄN MINH QUÂN — THE MENTOR
+
+57 tuổi.
+
+Doanh nhân từng điều hành tập đoàn lớn nhưng thất bại vì mở rộng quá nhanh và thiếu quản trị dòng tiền.
+
+Tính cách:
+
+- Bình tĩnh.
+- Sâu sắc.
+- Có kinh nghiệm.
+- Không thích khoe khoang.
+- Mang cảm giác tiếc nuối về quá khứ.
+
+Vai trò:
+
+- Dẫn dắt chương đầu.
+- Hướng dẫn các quyết định tài chính.
+- Chủ động liên hệ khi người chơi gặp khó khăn.
+- Dần tiết lộ câu chuyện về tập đoàn cũ.
+- Xuất hiện trong đoạn kết.
+
+## TRẦN GIA HÂN — THE PARTNER
+
+26 tuổi.
+
+Người có khả năng quản lý vận hành và xây dựng thương hiệu.
+
+Tính cách:
+
+- Nhiệt huyết.
+- Thực tế.
+- Coi trọng sự công bằng.
+- Không đồng ý với việc mở rộng thiếu kiểm soát.
+
+Có thể trở thành:
+
+- Đồng sáng lập.
+- Giám đốc vận hành.
+- Đối tác kinh doanh.
+- Người bạn không sở hữu cổ phần.
+
+Nếu người chơi nhiều lần vi phạm cam kết hoặc bỏ qua quyền của đối tác, Gia Hân có thể phản đối, thay đổi quan hệ hoặc tìm cách rời công ty theo cơ chế hợp lệ.
+
+## PHẠM ĐỨC HUY — THE RIVAL
+
+32 tuổi.
+
+Doanh nhân trẻ đầy tham vọng.
+
+Từng làm việc trong tập đoàn của Minh Quân.
+
+Ban đầu xuất hiện như một đối thủ cạnh tranh.
+
+Về sau có thể trở thành đối tác hoặc đồng minh.
+
+Không xây dựng Huy như nhân vật phản diện một chiều.
+
+Huy có công ty, nguồn vốn, mục tiêu và chiến lược kinh doanh riêng trong Career World.
+
+## LÊ HOÀNG NAM — THE INVESTOR
+
+43 tuổi.
+
+Nhà đầu tư chuyên tìm kiếm cơ hội phát triển doanh nghiệp.
+
+Tính cách:
+
+- Tự tin.
+- Quyết đoán.
+- Giỏi đàm phán.
+- Quan tâm tới định giá và quyền biểu quyết.
+
+Có thể đề nghị góp vốn, liên doanh hoặc mua cổ phần.
+
+Không có nguồn tiền vô hạn.
+
+Mọi thương vụ phải được thực hiện qua Corporate Engine hoặc Co-Founder Engine hợp lệ.
+
+## VŨ THẢO LINH — THE STRATEGIST
+
+29 tuổi.
+
+Chuyên gia phân tích và quản trị tài chính.
+
+Tính cách:
+
+- Logic.
+- Điềm tĩnh.
+- Thận trọng.
+- Có quan điểm rõ ràng về quản trị rủi ro.
+
+Xuất hiện nhiều hơn khi doanh nghiệp mở rộng và bước vào khủng hoảng.
+
+Có thể trở thành CFO hoặc cố vấn tài chính.
+
+# 07. NPC INTERACTION SYSTEM
+
+Không biến NPC thành những cái tên xuất hiện trong bảng dữ liệu.
+
+Mỗi NPC phải có:
+
+- Chân dung nhất quán.
+- Tên hiển thị.
+- Hồ sơ cá nhân.
+- Tính cách riêng.
+- Quan hệ với người chơi.
+- Lịch sử tương tác.
+- Các đoạn hội thoại.
+- Điều kiện xuất hiện.
+- Những đề nghị kinh doanh phù hợp.
+
+Triển khai bốn hình thức tương tác.
+
+## 7.1. CINEMATIC DIALOGUE
+
+Khi gặp NPC trong nhiệm vụ quan trọng:
+
+Hiển thị cảnh hội thoại có:
+
+- Hình nền địa điểm.
+- Chân dung nhân vật.
+- Tên nhân vật.
+- Nội dung lời thoại.
+- Hai đến bốn lựa chọn phản hồi.
+- Hiệu ứng xuất hiện tự nhiên.
+- Nút tiếp tục.
+- Nút bỏ qua hoặc đóng cảnh khi phù hợp.
+
+Trên desktop, có thể bố trí nhân vật bên trái hoặc phải, lời thoại ở phần dưới màn hình.
+
+Trên mobile, sử dụng hình ảnh nhân vật và dialogue sheet dễ thao tác.
+
+Nhân vật phải có cảm giác đang nói chuyện với người chơi, không phải đang đọc tài liệu hướng dẫn.
+
+Cho phép bật hoặc tắt hiệu ứng chữ xuất hiện.
+
+Cho phép xem lại hội thoại quan trọng.
+
+Không tự động chọn đáp án thay người chơi khi bỏ qua hiệu ứng hội thoại.
+
+## 7.2. NPC APPEARANCE
+
+NPC có thể chủ động xuất hiện khi:
+
+- Người chơi hoàn thành nhiệm vụ.
+- Doanh nghiệp khai trương.
+- Công ty có doanh thu đầu tiên.
+- Người chơi nhận được đề nghị đầu tư.
+- Dòng tiền doanh nghiệp gặp khó khăn.
+- Một sự kiện kinh tế quan trọng xảy ra.
+- Bắt đầu hoặc kết thúc chương.
+
+Đối với cảnh quan trọng, có thể sử dụng một màn hình hội thoại toàn màn hình.
+
+Đối với sự kiện thông thường, NPC xuất hiện bằng hộp hội thoại nhỏ ở góc màn hình.
+
+Không mở popup liên tục.
+
+Không làm gián đoạn khi người chơi đang xác nhận giao dịch.
+
+Các cuộc hội thoại đến cùng lúc phải được đưa vào hàng đợi.
+
+Không kích hoạt cùng một cảnh nhiều lần khi reload.
+
+## 7.3. IN-GAME PHONE
+
+Tạo điện thoại mô phỏng trong Career Mode.
+
+Đây là cầu nối giữa các nhiệm vụ và nhân vật.
+
+Điện thoại gồm ba khu vực:
+
+- Tin nhắn.
+- Danh bạ.
+- Lịch hẹn.
+
+NPC có thể gửi tin nhắn như:
+
+Minh Quân:
+
+"Sáng mai cậu rảnh không? Tôi muốn nghe kế hoạch kinh doanh của cậu."
+
+Gia Hân:
+
+"Tôi đã xem qua kế hoạch. Chúng ta cần nói chuyện về ngân sách trước khi ký hợp đồng."
+
+Đức Huy:
+
+"Nghe nói công ty cậu chuẩn bị mở chi nhánh mới. Chúc may mắn."
+
+Hoàng Nam:
+
+"Tôi có một đề nghị đầu tư. Nếu quan tâm, hãy đến văn phòng của tôi."
+
+Thảo Linh:
+
+"Dòng tiền đang giảm nhanh hơn dự kiến. Tôi nghĩ chúng ta cần xem lại các khoản nợ."
+
+Người chơi có thể chọn câu trả lời được viết sẵn.
+
+Một số cuộc hội thoại sẽ mở nhiệm vụ, cuộc gặp hoặc lựa chọn mới.
+
+Không sử dụng LLM API.
+
+Không tạo chatbot giả vờ là AI.
+
+Dùng dialogue trees, state machine và nội dung được viết sẵn.
+
+## 7.4. NPC MEMORY
+
+NPC phải ghi nhớ những lựa chọn quan trọng của người chơi.
+
+Ví dụ:
+
+Nếu người chơi từ chối đề nghị đầu tư của Hoàng Nam ở Chương III, khi gặp lại tại Chương V, ông Nam có thể nhắc đến quyết định trước đó.
+
+Nếu người chơi từng giúp Đức Huy tái cấu trúc doanh nghiệp, Huy có thể thể hiện sự tin tưởng hơn.
+
+Nếu người chơi khởi nghiệp một mình, Gia Hân không được tự động xuất hiện với tư cách đồng sáng lập.
+
+Sử dụng:
+
+- Relationship state.
+- Story flags.
+- Decision history.
+- Completed encounters.
+- Character role.
+- Company membership.
+
+Không chỉ tăng hoặc giảm một thanh điểm.
+
+Hãy thay đổi nội dung hội thoại, cơ hội hợp tác và các nhiệm vụ tương ứng.
+
+Mọi hậu quả tài chính vẫn phải thông qua engine hợp lệ.
+
+# 08. CẢNH MỞ ĐẦU — TRIỂN KHAI CHÍNH XÁC
+
+Đây phải là trải nghiệm đầu tiên của một tài khoản mới.
+
+Không được bỏ qua phần này để chỉ tạo Career Dashboard.
+
+## SCENE 01 — THE CITY
+
+Hình nền:
+
+TP.HCM lúc bình minh.
+
+Những tòa nhà đang được chiếu sáng bởi ánh nắng đầu ngày.
+
+Âm nhạc nhẹ nếu có asset hợp lệ.
+
+Văn bản xuất hiện:
+
+"Thành phố này chưa bao giờ thiếu cơ hội."
+
+"Nhưng cơ hội không tự biến thành thành công."
+
+"Mọi đế chế đều bắt đầu từ một quyết định."
+
+Sau đó chuyển sang căn hộ của nhân vật.
+
+Hiển thị:
+
+CHAPTER I
+
+THE BEGINNING
+
+KHỞI ĐẦU
+
+Cho phép bỏ qua cảnh giới thiệu.
+
+Không yêu cầu video nếu chưa có video asset.
+
+Dùng ảnh nền chất lượng cao kết hợp chuyển động CSS nhẹ.
+
+## SCENE 02 — A NEW MESSAGE
+
+Nhân vật đang ở căn hộ.
+
+Điện thoại phát thông báo.
+
+Người gửi: Nguyễn Minh Quân.
+
+Tin nhắn:
+
+"Chào cậu. Tôi nghe nói cậu đang muốn bắt đầu sự nghiệp kinh doanh. Nếu có thời gian, hãy gặp tôi tại quán cà phê sáng nay."
+
+Hai lựa chọn:
+
+A. Tôi sẽ đến.
+
+B. Ông có thể nói thêm về buổi gặp không?
+
+Nếu chọn B:
+
+Minh Quân trả lời:
+
+"Tôi không định bán cho cậu một khóa học hay hứa hẹn làm giàu. Tôi chỉ muốn giúp cậu tránh một số sai lầm mà tôi từng mắc phải."
+
+Sau đó mở nhiệm vụ gặp người cố vấn.
+
+## SCENE 03 — THE FIRST MEETING
+
+Bối cảnh quán cà phê tại TP.HCM.
+
+NPC Minh Quân xuất hiện cùng chân dung.
+
+Hội thoại:
+
+Minh Quân:
+
+"Trước khi bắt đầu, tôi muốn hỏi cậu một điều. Tại sao cậu muốn xây dựng một doanh nghiệp?"
+
+Người chơi lựa chọn:
+
+A. Tôi muốn trở nên giàu có.
+
+B. Tôi muốn tự quyết định tương lai.
+
+C. Tôi muốn xây dựng một thứ có giá trị.
+
+Mỗi lựa chọn có câu trả lời riêng.
+
+Nếu chọn A:
+
+"Tiền là một mục tiêu dễ hiểu. Nhưng nếu chỉ chạy theo tiền, cậu có thể quên mất điều gì khiến doanh nghiệp tồn tại."
+
+Nếu chọn B:
+
+"Tự do là điều đáng theo đuổi. Vậy hãy học cách xây dựng một doanh nghiệp không phụ thuộc quá nhiều vào người khác."
+
+Nếu chọn C:
+
+"Đó là một khởi đầu tốt. Nhưng ý tưởng chỉ có giá trị khi cậu biến được nó thành hiện thực."
+
+Lưu motivation flag.
+
+Động cơ ban đầu sẽ được nhắc lại trong đoạn kết.
+
+## SCENE 04 — YOUR FIRST CAPITAL
+
+Minh Quân:
+
+"Bây giờ hãy xem chúng ta có gì. Một khoản vốn nhỏ, một thành phố đầy cơ hội và rất nhiều quyết định phải đưa ra."
+
+Mở bảng vốn khởi đầu.
+
+Hiển thị số dư thật từ Career Wallet.
+
+Giới thiệu ngắn gọn:
+
+- Tiền khả dụng.
+- Vốn dự phòng.
+- Các cơ hội kinh doanh.
+
+Không hiển thị cả sàn giao dịch, hệ thống Futures, quỹ đầu tư và M&A cùng lúc.
+
+Giao nhiệm vụ:
+
+BẢN KẾ HOẠCH ĐẦU TIÊN.
+
+Nút chính:
+
+LẬP KẾ HOẠCH.
+
+Khi người chơi nhấn, chuyển trực tiếp tới module lựa chọn ngành nghề hoặc công cụ lập kế hoạch kinh doanh thực tế.
+
+## SCENE 05 — YOUR FIRST DECISION
+
+Cho phép lựa chọn:
+
+- Khởi nghiệp bằng vốn cá nhân.
+- Tìm đồng sáng lập.
+- Tìm hiểu thị trường và tích lũy thêm vốn.
+
+Nếu chọn đồng sáng lập, NPC Gia Hân xuất hiện trong một cảnh hội thoại riêng.
+
+Nếu chọn tự khởi nghiệp, mở quy trình tạo doanh nghiệp phù hợp với ngân sách.
+
+Nếu chọn tích lũy vốn, mở nhánh nhiệm vụ tài chính có mục tiêu hợp lý và đường quay lại khởi nghiệp.
+
+Không bắt buộc người chơi mua cổ phiếu, Crypto hoặc sử dụng Futures.
+
+Mục tiêu của năm phút đầu tiên:
+
+Người chơi hiểu mình là ai, đang làm gì, tại sao cần tiếp tục và nhân vật nào sẽ đồng hành cùng mình.
+
+# 09. CAMPAIGN — SÁU CHƯƠNG CỐT TRUYỆN
+
+Triển khai chiến dịch chính gồm sáu chương và 30 nhiệm vụ.
+
+Các chương phải có mở đầu, biến cố, quyết định, cao trào và chuyển tiếp.
+
+Không tạo sáu chương chỉ để trang trí timeline.
+
+## CHƯƠNG I — THE BEGINNING
+
+Khởi đầu.
+
+M01 — Một ngày mới.
+
+Tạo hoặc tải Career Save, giới thiệu hoàn cảnh nhân vật.
+
+M02 — Cuộc hẹn đầu tiên.
+
+Gặp Minh Quân và lựa chọn động cơ sự nghiệp.
+
+M03 — Bản kế hoạch đầu tiên.
+
+Xem vốn, khảo sát ngành nghề và lựa chọn hướng phát triển.
+
+M04 — Người đồng hành.
+
+Gặp Gia Hân và lựa chọn khởi nghiệp một mình hoặc cùng đối tác.
+
+M05 — Bước chân đầu tiên.
+
+Hoàn thành kế hoạch và thực hiện hành động kinh doanh đầu tiên phù hợp với ngân sách.
+
+Kết thúc chương:
+
+Minh Quân:
+
+"Tốt. Cậu đã thực hiện bước đầu tiên. Từ giờ, mọi quyết định đều có hậu quả thật. Hãy nhớ điều đó."
+
+## CHƯƠNG II — BUILDING THE DREAM
+
+Xây dựng giấc mơ.
+
+M06 — Ngày khai trương.
+
+Thành lập doanh nghiệp.
+
+M07 — Những người đồng hành.
+
+Xây dựng đội ngũ hoặc năng lực vận hành phù hợp ngành nghề.
+
+M08 — Khách hàng đầu tiên.
+
+Hoàn thành kỳ kinh doanh và đánh giá doanh thu, chi phí.
+
+M09 — Đối thủ xuất hiện.
+
+Gặp Đức Huy và đối diện tình huống cạnh tranh.
+
+M10 — Một nền móng vững chắc.
+
+Đạt mục tiêu ổn định dòng tiền theo ngành và độ khó.
+
+Cao trào:
+
+Đức Huy mở một doanh nghiệp cạnh tranh.
+
+Người chơi phải lựa chọn:
+
+- Cải thiện chất lượng.
+- Điều chỉnh giá.
+- Tăng marketing.
+- Tìm phân khúc khác.
+
+Mọi lựa chọn phải thực hiện qua Business Engine.
+
+Không bắt buộc chọn cùng một ngành kinh doanh cho mọi người chơi.
+
+## CHƯƠNG III — THE OFFER
+
+Lời đề nghị.
+
+M11 — Một lời mời bất ngờ.
+
+Nhận tin nhắn từ Hoàng Nam.
+
+M12 — Công ty đáng giá bao nhiêu?
+
+Đánh giá tình hình tài chính và định giá.
+
+M13 — Trên bàn đàm phán.
+
+Xem đề nghị góp vốn.
+
+M14 — Sự bất đồng.
+
+Thảo luận với Gia Hân hoặc cố vấn về quyền kiểm soát.
+
+M15 — Hướng đi mới.
+
+Thực hiện chiến lược mở rộng đã lựa chọn.
+
+Thương vụ minh họa:
+
+Hoàng Nam đề nghị góp 200.000 CR để nhận 25% cổ phần mới phát hành, tương đương mức định giá trước đầu tư 600.000 CR.
+
+Các con số phải điều chỉnh theo doanh nghiệp thực tế.
+
+Người chơi có thể:
+
+- Chấp nhận.
+- Đàm phán.
+- Từ chối.
+- Chọn phương án tài trợ khác nếu hệ thống hỗ trợ.
+
+Nếu chấp nhận, tiền chuyển vào tài khoản công ty và cổ phần thay đổi đúng nghiệp vụ.
+
+Không cộng tiền vào ví cá nhân từ việc nhấn đáp án hội thoại.
+
+## CHƯƠNG IV — THE COLLAPSE
+
+Cơn bão tài chính.
+
+M16 — Ngày thứ Hai đen tối.
+
+Nhận thông tin về suy thoái kinh tế.
+
+M17 — Những khoản nợ đến hạn.
+
+Kiểm tra dòng tiền và nghĩa vụ tài chính.
+
+M18 — Bí mật của Minh Quân.
+
+Khám phá nguyên nhân tập đoàn cũ sụp đổ.
+
+M19 — Quyết định đau đớn.
+
+Chọn tái cơ cấu, thu hẹp hoạt động, bán tài sản hoặc tìm nguồn vốn.
+
+M20 — Vượt qua cơn bão.
+
+Ổn định hoạt động hoặc hoàn thành bước đầu của kế hoạch phục hồi.
+
+Cảnh quan trọng:
+
+Minh Quân thừa nhận rằng Đức Huy từng cảnh báo ông về dòng tiền, nhưng ông không chịu dừng kế hoạch mở rộng.
+
+Minh Quân:
+
+"Tôi đã có văn phòng đẹp nhất, những chiếc xe đắt nhất và hàng trăm nhân viên. Nhưng cuối cùng, tôi không còn đủ tiền trả lương cho họ."
+
+"Đừng để những con số đẹp khiến cậu quên điều gì đang thực sự xảy ra."
+
+Không ép người chơi phá sản.
+
+Nếu người chơi quản trị tốt, họ có thể vượt qua suy thoái với tổn thất nhỏ.
+
+Nếu phá sản, mở nhánh THE COMEBACK để phục hồi.
+
+Không kết thúc Career chỉ vì thất bại tài chính.
+
+## CHƯƠNG V — WAR OF EMPIRES
+
+Cuộc chiến của những đế chế.
+
+M21 — Thị trường thức tỉnh.
+
+Tìm cơ hội sau suy thoái.
+
+M22 — Kẻ thù hay đồng minh.
+
+Đức Huy liên lạc đề nghị hợp tác.
+
+M23 — Thương vụ thế kỷ.
+
+Đánh giá phương án liên doanh, mua cổ phần, thâu tóm hoặc phát triển độc lập.
+
+M24 — Đế chế tài chính.
+
+Mở rộng sang quỹ đầu tư, doanh nghiệp khác hoặc lĩnh vực phù hợp.
+
+M25 — Quyền lực và trách nhiệm.
+
+Giải quyết quyết định quản trị, chiến lược hoặc biểu quyết cổ đông.
+
+Cao trào:
+
+Đức Huy:
+
+"Tôi từng nghĩ chúng ta chỉ có thể là đối thủ. Nhưng có lẽ cả hai đều có thể xây dựng một thứ lớn hơn nếu biết hợp tác."
+
+Các nhánh phải phụ thuộc vào quan hệ, tình trạng công ty và quyết định trước đó.
+
+Không tạo thương vụ nếu NPC hoặc người chơi không có khả năng tài chính hợp lệ.
+
+Không bắt buộc tất cả người chơi phải thực hiện IPO hoặc M&A để qua chương.
+
+## CHƯƠNG VI — THE LEGACY
+
+Di sản.
+
+M26 — Trở về nơi bắt đầu.
+
+Gặp lại Minh Quân tại quán cà phê đầu tiên.
+
+M27 — Nhìn lại hành trình.
+
+Xem các quyết định, biến cố và thành tựu.
+
+M28 — Tương lai của đế chế.
+
+Chọn định hướng dài hạn.
+
+M29 — Quyết định cuối cùng.
+
+Thực hiện một dự án hoặc chiến lược phù hợp với hướng phát triển.
+
+M30 — The Legacy.
+
+Xem đoạn kết và mở khóa Free Play.
+
+Minh Quân:
+
+"Cậu còn nhớ câu hỏi tôi đã hỏi trong lần đầu chúng ta gặp nhau không?"
+
+"Tại sao cậu muốn xây dựng một doanh nghiệp?"
+
+Hệ thống nhắc lại lựa chọn của người chơi trong Scene 03.
+
+Minh Quân:
+
+"Bây giờ, sau tất cả những gì đã trải qua, cậu có còn nghĩ như vậy không?"
+
+Người chơi chọn câu trả lời cuối cùng.
+
+Đoạn kết phải phản ánh hành trình thực tế, không sử dụng một kết thúc giống hệt nhau cho tất cả.
+
+# 10. NHIỀU KẾT THÚC
+
+Tạo năm hướng kết thúc.
+
+THE TYCOON:
+
+Xây dựng tập đoàn đa ngành, hoạt động ổn định và có khả năng phát triển.
+
+THE INVESTOR:
+
+Phát triển sự nghiệp đầu tư và quản lý danh mục hoặc quỹ hiệu quả.
+
+THE INNOVATOR:
+
+Tập trung nâng cao năng suất, công nghệ, chất lượng và khả năng cạnh tranh.
+
+THE LEGEND:
+
+Xây dựng uy tín lâu dài và quan hệ tốt với đối tác, nhân viên, cổ đông.
+
+THE COMEBACK:
+
+Vượt qua thất bại nghiêm trọng và xây dựng lại sự nghiệp.
+
+Đánh giá bằng trạng thái doanh nghiệp, mục tiêu, lựa chọn và dữ liệu thực tế.
+
+Không đánh giá chỉ dựa trên tổng tài sản.
+
+Cho phép người chơi có nhiều thành tựu nhưng lựa chọn một hướng kết thúc chính phù hợp.
+
+Sau khi hoàn thành:
+
+- Hiển thị cinematic ending.
+- Tổng kết những quyết định quan trọng.
+- Hiển thị danh hiệu.
+- Lưu kết quả vào Career Save.
+- Tiếp tục Free Play.
+
+Không reset tài sản.
+
+# 11. NARRATIVE PACING — NHỊP ĐỘ CỐT TRUYỆN
+
+Đừng để người chơi phải đọc quá nhiều.
+
+Mỗi cuộc hội thoại thông thường nên ngắn, tự nhiên và có mục đích.
+
+Sử dụng nhịp trải nghiệm:
+
+Cảnh cốt truyện → Lựa chọn → Hành động gameplay → Hệ quả → Cảnh tiếp theo.
+
+Không tạo chuỗi 20 đoạn hội thoại liên tục.
+
+Không tạo nhiệm vụ yêu cầu bấm nút vô nghĩa.
+
+Không liên tục yêu cầu đạt các mốc tài sản lớn.
+
+Không biến nhiệm vụ thành tutorial kéo dài.
+
+Khi người chơi hoàn thành hành động quan trọng, nhân vật phải phản ứng phù hợp.
+
+Ví dụ:
+
+Nếu doanh nghiệp có kỳ kinh doanh đầu tiên tốt, Gia Hân nhắn tin chúc mừng.
+
+Nếu kết quả kinh doanh kém, Gia Hân đề nghị họp bàn cách cải thiện.
+
+Nếu người chơi từ chối góp vốn, Hoàng Nam phản hồi bằng lời thoại khác.
+
+Không phát cùng một lời thoại bất kể kết quả thực tế.
+
+Các nhiệm vụ có thể cho người chơi một khoảng thời gian tự do phát triển doanh nghiệp trước khi diễn biến tiếp theo bắt đầu.
+
+Không ép chờ nhiều giờ ngoài đời thực để mở khóa câu chuyện.
+
+# 12. STORY DIRECTOR
+
+Tạo hoặc nâng cấp một Story Director chuyên điều phối cốt truyện.
+
+Nhiệm vụ:
+
+- Xác định chương hiện tại.
+- Xác định nhiệm vụ đang theo dõi.
+- Kiểm tra điều kiện mở khóa.
+- Lắng nghe game events.
+- Quyết định thời điểm NPC xuất hiện.
+- Điều phối hội thoại.
+- Đưa cảnh vào hàng đợi.
+- Lưu lựa chọn.
+- Kích hoạt nhánh cốt truyện.
+- Quản lý kết thúc.
+
+Tạo state machine rõ ràng.
+
+Ví dụ:
+
+NEW_CAREER
+
+OPENING_SCENE
+
+WAITING_FOR_DIALOGUE
+
+DIALOGUE_ACTIVE
+
+MISSION_AVAILABLE
+
+MISSION_IN_PROGRESS
+
+MISSION_COMPLETED
+
+CHAPTER_TRANSITION
+
+CAMPAIGN_COMPLETED
+
+FREE_PLAY
+
+Không trộn logic điều phối cốt truyện trực tiếp vào các component giao diện.
+
+Không tạo vòng lặp kích hoạt hội thoại khi re-render.
+
+Mỗi scene occurrence có ID duy nhất.
+
+Đảm bảo mở lại game giữa một cảnh hội thoại có thể tiếp tục hoặc mở lại đúng cảnh chưa hoàn thành, không cấp trùng phần thưởng.
+
+# 13. STORY CONTENT ARCHITECTURE
+
+Tách nội dung cốt truyện khỏi UI và financial engines.
+
+Có thể sử dụng cấu trúc thư mục tương đương:
+
+src/features/career/
+
+- layouts/
+- pages/
+- components/
+- scenes/
+- dialogue/
+- characters/
+- missions/
+- campaign/
+- phone/
+- services/
+- state/
+- hooks/
+- tests/
+
+Nội dung chương, nhân vật, hội thoại và nhiệm vụ có thể được quản lý bằng TypeScript hoặc JSON có schema validation.
+
+Mỗi Dialogue Node cần:
+
+- Node ID.
+- Speaker ID.
+- Text.
+- Background asset.
+- Portrait asset.
+- Choices.
+- Choice conditions.
+- Next node ID.
+- Story flags.
+- Mission unlocks.
+- Scene completion conditions.
+
+Mỗi Mission cần:
+
+- Mission ID.
+- Chapter ID.
+- Title.
+- Description.
+- Objectives.
+- Prerequisites.
+- Completion conditions.
+- Supported alternative objectives.
+- Relevant game events.
+- Target route.
+- Reward policy.
+- Failure or recovery branch.
+- Next mission.
+
+Không lưu nội dung nhiệm vụ rải rác trong nhiều file JSX khó quản lý.
+
+Không tạo thêm engine nếu repository đã có module đáp ứng yêu cầu.
+
+# 14. NHIỆM VỤ PHẢI KẾT NỐI GAMEPLAY THẬT
+
+Đây là tiêu chí phân biệt cốt truyện hoạt động thật với bản demo.
+
+Ví dụ:
+
+Nhiệm vụ thành lập doanh nghiệp:
+
+Chỉ hoàn thành khi server xác nhận doanh nghiệp đã được tạo hợp lệ.
+
+Nhiệm vụ gọi vốn:
+
+Chỉ hoàn thành nhánh chấp nhận khi thương vụ được thực hiện hợp lệ.
+
+Nếu từ chối, sử dụng điều kiện hoàn thành của nhánh phát triển độc lập.
+
+Nhiệm vụ vượt qua suy thoái:
+
+Dựa trên trạng thái dòng tiền, nghĩa vụ nợ, hoạt động kinh doanh hoặc kế hoạch phục hồi thực tế.
+
+Không đánh dấu hoàn thành vì người chơi mở một trang.
+
+Không tự cộng CR từ dialogue scripts.
+
+Không cấp phần thưởng nhiều lần khi reload hoặc reconnect.
+
+Mọi phần thưởng tài chính phải sử dụng cơ chế cấp phát đã được kiểm soát và ghi nhận qua Ledger.
+
+Ưu tiên phần thưởng mang tính tiến trình:
+
+- Mở khóa chương.
+- Danh hiệu.
+- Hình ảnh.
+- Mối quan hệ.
+- Cơ hội kinh doanh.
+- Nội dung cốt truyện mới.
+
+Nếu một engine cần thiết chưa tồn tại, báo cáo blocker và triển khai mục tiêu thay thế dựa trên chức năng đang hoạt động, hoặc để nhiệm vụ bị khóa rõ ràng.
+
+Không giả lập thành công bằng dữ liệu tĩnh.
+
+# 15. CAREER JOURNAL
+
+Tạo Nhật ký sự nghiệp với giao diện giống nhật ký hành trình trong game nhập vai.
+
+Không thiết kế như bảng quản lý dự án.
+
+Ba khu vực:
+
+- Câu chuyện chính.
+- Nhiệm vụ phụ.
+- Hành trình đã qua.
+
+Nhiệm vụ hiện tại phải có:
+
+- Hình ảnh hoặc nhân vật liên quan.
+- Đoạn mô tả.
+- Mục tiêu cụ thể.
+- Tiến độ.
+- Nút tiếp tục.
+
+Chỉ hiển thị một nhiệm vụ chính nổi bật.
+
+Nhiệm vụ phụ là tùy chọn.
+
+Tạo nhiệm vụ phụ gắn với các nhân vật:
+
+- Giúp Gia Hân hoàn thiện kế hoạch vận hành.
+- Cùng Minh Quân phân tích một doanh nghiệp thất bại.
+- Thảo luận với Thảo Linh về dòng tiền.
+- Đàm phán một thỏa thuận với Hoàng Nam.
+- Thử hợp tác với Đức Huy trong một dự án nhỏ.
+
+Không bắt buộc hoàn thành tất cả nhiệm vụ phụ mới được tiếp tục cốt truyện.
+
+# 16. GUIDED GAMEPLAY
+
+Khi người chơi nhận nhiệm vụ:
+
+Nút Tiếp tục nhiệm vụ phải dẫn đến đúng trang cần thiết.
+
+Ví dụ:
+
+Nhiệm vụ thành lập doanh nghiệp:
+
+Mở quy trình thành lập doanh nghiệp, không yêu cầu tự tìm qua sidebar.
+
+Nhiệm vụ xem tài chính:
+
+Mở trang báo cáo của đúng công ty.
+
+Nhiệm vụ gặp nhà đầu tư:
+
+Mở đúng cảnh hội thoại hoặc thương vụ.
+
+Khi cần hướng dẫn một thao tác, sử dụng contextual highlight hoặc tooltip.
+
+Chỉ hướng dẫn thành phần liên quan.
+
+Không tạo nhiều popup che màn hình.
+
+Sau khi hoàn thành hành động, cập nhật nhiệm vụ và đưa người chơi quay lại câu chuyện một cách tự nhiên.
+
+Có thể hiển thị một thông báo:
+
+"Nhiệm vụ hoàn thành — Gia Hân đang muốn nói chuyện với bạn."
+
+Nút:
+
+GẶP GIA HÂN.
+
+# 17. CAREER WORLD & GAME CLOCK
+
+Career là thế giới riêng của người chơi.
+
+Hỗ trợ các mức thời gian theo kiến trúc hiện có:
+
+- Pause.
+- 1x.
+- 2x.
+- 5x.
+- 10x.
+
+Khi mở những cảnh hội thoại quan trọng, có thể tạm dừng thời gian Career nếu phù hợp.
+
+Không làm thay đổi thời gian Online.
+
+Không tăng doanh thu mà bỏ qua chi phí, lương, khoản vay và nghĩa vụ thanh toán.
+
+NPC Career phải có tài sản, nguồn vốn và hành vi kinh tế hợp lệ.
+
+Không cho NPC tự tạo tiền vô hạn.
+
+Không trực tiếp chỉnh giá thị trường chỉ để ép người chơi thắng hoặc thua theo cốt truyện.
+
+Các sự kiện suy thoái phải sử dụng Economy Engine.
+
+Tạm dừng Career khi người chơi chuyển sang Online hoặc rời game theo cơ chế save hiện tại.
+
+# 18. WORLD ISOLATION
+
+Career và Online phải độc lập hoàn toàn về:
+
+- Wallet.
+- Ledger.
+- Tài sản.
+- Lệnh giao dịch.
+- Vị thế Futures.
+- Doanh nghiệp.
+- Cổ phần.
+- Quỹ đầu tư.
+- Bất động sản.
+- Khoản vay.
+- NPC.
+- Nhiệm vụ.
+- Đồng hồ kinh tế.
+
+Các API tài chính phải xác thực quyền sở hữu và World Context ở server.
+
+Không chỉ ẩn dữ liệu bằng frontend.
+
+Không cho chuyển CR từ Career sang Online.
+
+Không dùng chung cache tài chính giữa hai World.
+
+Không cấp vốn mới bằng cách chuyển mode nhiều lần.
+
+Các tài khoản có nhiều Career Save không được dùng chung tài sản giữa các save.
+
+Nếu persistence hiện tại chưa đáp ứng, báo cáo rõ giới hạn và ưu tiên hoàn thiện nền tảng lưu trữ.
+
+Không báo rằng đã lưu thành công nếu dữ liệu thực tế chỉ nằm trong RAM.
+
+# 19. HÌNH ẢNH, ÂM THANH VÀ CẢM GIÁC ĐIỆN ẢNH
+
+Tạo hệ thống visual storytelling cho Career.
+
+Danh mục hình ảnh cần có:
+
+- Thành phố TP.HCM lúc bình minh.
+- Căn hộ khởi nghiệp.
+- Quán cà phê.
+- Văn phòng doanh nghiệp đầu tiên.
+- Cửa hàng hoặc cơ sở sản xuất.
+- Phòng họp nhà đầu tư.
+- Khu tài chính Thủ Thiêm.
+- Văn phòng trong giai đoạn khủng hoảng.
+- Phòng họp tập đoàn.
+- Cảnh kết thúc nhìn ra thành phố.
+
+Chân dung năm NPC phải có nhận diện nhất quán trong mọi cảnh.
+
+Có thể sử dụng:
+
+- Ảnh nền cinematic.
+- Character portraits.
+- CSS parallax nhẹ.
+- Fade transition.
+- Hiệu ứng xuất hiện hội thoại.
+- Ánh sáng và thay đổi màu sắc theo chương.
+
+Không cần xây dựng thế giới 3D.
+
+Không yêu cầu tạo video cho mọi cảnh.
+
+Không sử dụng tài nguyên hình ảnh, âm nhạc hoặc giọng nói trái phép.
+
+Nếu thiếu asset, sử dụng placeholder có chủ đích và ghi rõ trong báo cáo.
+
+Âm thanh:
+
+- Career: ambient nhẹ, piano hoặc nhạc điện ảnh có quyền sử dụng.
+- Online: âm thanh trung tính, hiện đại.
+- Thông báo điện thoại có âm thanh ngắn.
+- Hiệu ứng hoàn thành chương.
+- Hiệu ứng chuyển mode.
+
+Tất cả âm thanh có thể tắt.
+
+Tôn trọng quy định autoplay của trình duyệt.
+
+Hỗ trợ reduced motion.
+
+Không để việc thiếu video, ảnh hoặc âm thanh ngăn cản cốt truyện hoạt động.
+
+# 20. THỨ TỰ TRIỂN KHAI BẮT BUỘC
+
+Không triển khai tất cả chức năng rời rạc cùng một lúc.
+
+## PHASE 1 — PLAYABLE FIRST EXPERIENCE
+
+Hoàn thành trước:
+
+1. Audit tính năng Career/Online đã tồn tại.
+2. Tài khoản mới tự động vào Career.
+3. Hai layout thực sự khác nhau.
+4. Nút chuyển chế độ.
+5. Ghi nhớ chế độ lần trước.
+6. World isolation.
+7. Cảnh mở đầu.
+8. NPC Minh Quân xuất hiện.
+9. Hội thoại có ba lựa chọn.
+10. Lưu lựa chọn.
+11. Nhiệm vụ đầu tiên kết nối gameplay thật.
+12. Save và reload không lặp mở đầu hoặc cấp vốn.
+
+Phải tạo được một trải nghiệm hoàn chỉnh từ đăng ký đến thực hiện nhiệm vụ đầu tiên.
+
+Không chuyển sang Phase 2 nếu trải nghiệm này chưa hoạt động.
+
+## PHASE 2 — STORY FOUNDATION
+
+- Story Director.
+- Mission Engine.
+- Dialogue Engine.
+- NPC Relationship System.
+- Điện thoại.
+- Nhật ký nhiệm vụ.
+- Save trạng thái cốt truyện.
+- Chương I và II hoàn chỉnh.
+
+## PHASE 3 — EMOTIONAL STORY
+
+- Chương III và IV.
+- Nhà đầu tư.
+- Mâu thuẫn đối tác.
+- Sự kiện suy thoái.
+- Bí mật của Minh Quân.
+- Nhánh phục hồi.
+- Hội thoại phản ánh lựa chọn trước đó.
+
+## PHASE 4 — COMPLETE CAMPAIGN
+
+- Chương V và VI.
+- Liên doanh và các thương vụ.
+- Năm hướng kết thúc.
+- Tổng kết hành trình.
+- Free Play.
+- Nhiệm vụ phụ.
+
+## PHASE 5 — POLISH & QA
+
+- Visual storytelling.
+- Character assets.
+- Sound design.
+- Responsive.
+- Performance.
+- Accessibility.
+- Regression testing.
+
+Nếu môi trường có giới hạn, ưu tiên hoàn thành Phase 1 và Chương I thực sự chơi được, thay vì xây dựng sáu chương chỉ có placeholder.
+
+# 21. ACCEPTANCE TESTS
+
+Bắt buộc kiểm tra bằng các luồng sử dụng thực tế.
+
+TEST 01:
+
+Đăng ký tài khoản mới.
+
+Kết quả mong đợi:
+
+Career tự động mở, không phải Online Dashboard.
+
+TEST 02:
+
+Bắt đầu Career.
+
+Kết quả:
+
+Cảnh mở đầu xuất hiện, NPC Minh Quân trò chuyện với người chơi và có lựa chọn phản hồi.
+
+TEST 03:
+
+Chọn ba đáp án khác nhau trên các save kiểm thử.
+
+Kết quả:
+
+Hội thoại phản hồi khác nhau và story flags được lưu chính xác.
+
+TEST 04:
+
+Hoàn thành nhiệm vụ đầu tiên.
+
+Kết quả:
+
+Nhiệm vụ được cập nhật từ game event thật.
+
+TEST 05:
+
+Reload giữa cuộc hội thoại.
+
+Kết quả:
+
+Không mất tiến trình, không cấp phần thưởng trùng.
+
+TEST 06:
+
+Thoát Career và đăng nhập lại.
+
+Kết quả:
+
+Tiếp tục Career Save gần nhất, không xem lại intro lần đầu.
+
+TEST 07:
+
+Chuyển Career sang Online.
+
+Kết quả:
+
+Không đăng xuất, giao diện thay đổi rõ ràng và dữ liệu đúng World.
+
+TEST 08:
+
+Đăng nhập lại sau khi chơi Online.
+
+Kết quả:
+
+Tự động mở Online.
+
+TEST 09:
+
+Chuyển về Career.
+
+Kết quả:
+
+Khôi phục đúng chương, nhiệm vụ và các lựa chọn trước đó.
+
+TEST 10:
+
+Thử chuyển mode nhiều lần.
+
+Kết quả:
+
+Không nhân đôi ví, vốn khởi đầu, doanh nghiệp hoặc phần thưởng.
+
+TEST 11:
+
+So sánh giao diện Career và Online.
+
+Kết quả:
+
+Có bố cục, navigation, trang chủ và trọng tâm tương tác khác biệt.
+
+TEST 12:
+
+NPC gửi tin nhắn.
+
+Kết quả:
+
+Tin nhắn dẫn tới hội thoại hoặc nhiệm vụ hợp lệ.
+
+TEST 13:
+
+NPC phản ứng với quyết định cũ.
+
+Kết quả:
+
+Lời thoại thay đổi đúng story flags.
+
+TEST 14:
+
+Mở Online khi Career chưa hoàn thành.
+
+Kết quả:
+
+Người chơi vẫn có thể chơi Online bình thường.
+
+TEST 15:
+
+Kiểm tra mobile.
+
+Kết quả:
+
+Hội thoại, nhiệm vụ, điện thoại và chuyển chế độ đều sử dụng thuận tiện.
+
+TEST 16:
+
+Kiểm tra toàn bộ tính năng tài chính hiện có.
+
+Kết quả:
+
+Không phát sinh lỗi do thay đổi layout hoặc World Context.
+
+Chạy typecheck, automated tests và production build nếu môi trường hỗ trợ.
+
+Không tuyên bố PASS khi chưa thực hiện kiểm thử.
+
+# 22. DEFINITION OF DONE
+
+Tính năng chưa được coi là hoàn thành nếu:
+
+- Chỉ thêm nút Career vào sidebar.
+- Chỉ đổi màu giao diện.
+- Chỉ tạo ảnh NPC mà không có hội thoại.
+- Chỉ tạo danh sách nhiệm vụ tĩnh.
+- Chỉ viết cốt truyện vào file Markdown.
+- Không lưu lựa chọn của người chơi.
+- Không thể chuyển đổi chế độ.
+- Tài khoản mới vẫn vào Online mặc định.
+- Nhiệm vụ không liên kết gameplay.
+- Hai chế độ dùng chung dữ liệu tài chính.
+
+Trước khi kết thúc công việc, cung cấp báo cáo gồm:
+
+1. Các file đã chỉnh sửa.
+2. Tính năng đã triển khai.
+3. Tính năng cũ đã được tái sử dụng.
+4. Số cảnh hội thoại thực sự hoạt động.
+5. Số nhiệm vụ hoàn thành có thể chơi.
+6. Kết quả kiểm thử đăng ký tài khoản mới.
+7. Kết quả kiểm thử chuyển mode.
+8. Kết quả lưu và tải Career.
+9. Ảnh chụp Career Home và Online Home nếu môi trường có thể render.
+10. Ảnh chụp hội thoại NPC và nhiệm vụ đầu tiên.
+11. Những blocker và tính năng chưa hoàn thành.
+12. Kết quả typecheck, tests và build.
+
+Nếu có thể kiểm thử bằng tài khoản thử nghiệm, sử dụng dữ liệu kiểm thử riêng, không sửa dữ liệu người chơi thật.
+
+# FINAL DIRECTIVE
+
+Trading Empire Career Mode phải trở thành một chiến dịch cốt truyện có cảm xúc, nhân vật, lựa chọn và hệ quả.
+
+Người chơi không chỉ mở công ty để kiếm CR.
+
+Họ phải cảm nhận được rằng mình đang xây dựng một sự nghiệp, phát triển các mối quan hệ, trải qua thử thách và tạo nên một di sản riêng.
+
+Online Mode là một trải nghiệm multiplayer độc lập, có bản sắc riêng.
+
+Người chơi mới mặc định bắt đầu Career.
+
+Người chơi cũ tiếp tục chế độ lần trước.
+
+Chuyển đổi chế độ đơn giản, linh hoạt và an toàn.
+
+Không tạo thêm sự phức tạp không cần thiết.
+
+Không chỉ đề xuất giải pháp.
+
+HÃY KIỂM TRA REPOSITORY HIỆN TẠI VÀ BẮT ĐẦU TRIỂN KHAI PHASE 1 BẰNG MÃ NGUỒN THỰC TẾ.

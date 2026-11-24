@@ -88,8 +88,10 @@ import type {
 // Auth tokens live strictly in JS memory (NEVER persisted to localStorage)
 let liveAuthTokenMemory: string | null = null;
 let practiceAuthTokenMemory: string | null = null;
-let adminAuthTokenMemory: string | null = null;
+let careerAuthTokenMemory: string | null = null;
 let activeWorldMode: WorldMode = 'LIVE';
+let activePlayMode: 'CAREER' | 'ONLINE' = 'ONLINE';
+let activeCareerSaveIdMemory: string | null = null;
 
 export function setApiWorldMode(mode: WorldMode): void {
   activeWorldMode = mode;
@@ -97,6 +99,30 @@ export function setApiWorldMode(mode: WorldMode): void {
 
 export function getApiWorldMode(): WorldMode {
   return activeWorldMode;
+}
+
+export function setApiPlayContext(mode: 'CAREER' | 'ONLINE', careerSaveId: string | null): void {
+  activePlayMode = mode;
+  activeCareerSaveIdMemory = careerSaveId;
+}
+
+export function getApiPlayContext(): { mode: 'CAREER' | 'ONLINE'; careerSaveId: string | null } {
+  return { mode: activePlayMode, careerSaveId: activeCareerSaveIdMemory };
+}
+
+export function setCareerAuthToken(token: string | null): void {
+  careerAuthTokenMemory = token;
+}
+
+export function getCareerAuthToken(): string | null {
+  return careerAuthTokenMemory;
+}
+
+export function getAccountAuthToken(): string | null {
+  if (activePlayMode === 'CAREER' && careerAuthTokenMemory) {
+    return careerAuthTokenMemory;
+  }
+  return liveAuthTokenMemory ?? careerAuthTokenMemory;
 }
 
 export function setAuthToken(token: string | null, mode: WorldMode = activeWorldMode): void {
@@ -108,15 +134,10 @@ export function setAuthToken(token: string | null, mode: WorldMode = activeWorld
 }
 
 export function getAuthToken(mode: WorldMode = activeWorldMode): string | null {
+  if (activePlayMode === 'CAREER' && mode !== 'PRACTICE') {
+    return careerAuthTokenMemory;
+  }
   return mode === 'PRACTICE' ? practiceAuthTokenMemory : liveAuthTokenMemory;
-}
-
-export function setAdminToken(token: string | null): void {
-  adminAuthTokenMemory = token;
-}
-
-export function getAdminToken(): string | null {
-  return adminAuthTokenMemory;
 }
 
 export class ApiClientError extends Error {
@@ -131,7 +152,17 @@ export class ApiClientError extends Error {
   }
 }
 
-function resolveApiPath(path: string, mode: WorldMode = activeWorldMode): string {
+export function resolveApiPath(path: string, mode: WorldMode = activeWorldMode): string {
+  if (
+    path.startsWith('/api/account/') ||
+    path.startsWith('/api/career/') ||
+    path.startsWith('/api/career-world/')
+  ) {
+    return path;
+  }
+  if (activePlayMode === 'CAREER' && mode !== 'PRACTICE' && activeCareerSaveIdMemory && path.startsWith('/api/')) {
+    return `/api/career-world/${encodeURIComponent(activeCareerSaveIdMemory)}/${path.slice('/api/'.length)}`;
+  }
   if (mode === 'PRACTICE' && path.startsWith('/api/') && !path.startsWith('/api/practice/')) {
     return `/api/practice/${path.slice('/api/'.length)}`;
   }
@@ -149,9 +180,6 @@ async function request<T>(path: string, init: RequestInit = {}, modeOverride?: W
   }
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);
-  }
-  if (adminAuthTokenMemory) {
-    headers.set('X-Admin-Token', adminAuthTokenMemory);
   }
 
   let res: Response;
@@ -202,30 +230,6 @@ export const WorldService = {
       method: 'POST',
       body: JSON.stringify({ symbol }),
     }),
-};
-
-export const AdminService = {
-  getStatus: () =>
-    request<{
-      devToolsEnabled: boolean;
-      authorized: boolean;
-      configuredViaEnv: boolean;
-      claimed: boolean;
-      requiresSetup: boolean;
-    }>('/api/admin/status', {}, 'LIVE'),
-  claim: (passcode: string) =>
-    request<{ token: string; expiresAt: string }>(
-      '/api/admin/claim',
-      { method: 'POST', body: JSON.stringify({ passcode }) },
-      'LIVE',
-    ),
-  login: (passcode: string) =>
-    request<{ token: string; expiresAt: string }>(
-      '/api/admin/login',
-      { method: 'POST', body: JSON.stringify({ passcode }) },
-      'LIVE',
-    ),
-  logout: () => request<{ loggedOut: boolean }>('/api/admin/logout', { method: 'POST' }, 'LIVE'),
 };
 
 export const TradingService = {
