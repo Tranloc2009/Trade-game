@@ -9,7 +9,14 @@ export type MarketStatus = 'OPEN' | 'CLOSED' | 'HALTED';
 export type OrderSide = 'BUY' | 'SELL';
 export type OrderType = 'MARKET' | 'LIMIT';
 export type TimeInForce = 'GTC' | 'IOC';
-export type OrderStatus = 'OPEN' | 'PARTIALLY_FILLED' | 'FILLED' | 'CANCELLED' | 'REJECTED';
+export type OrderStatus =
+  | 'PENDING'
+  | 'OPEN'
+  | 'PARTIALLY_FILLED'
+  | 'FILLED'
+  | 'CANCELLED'
+  | 'EXPIRED'
+  | 'REJECTED';
 
 export type VolatilityRegime =
   | 'LOW_VOLATILITY'
@@ -157,6 +164,7 @@ export interface Asset {
   symbol: string;
   name: string;
   marketClass: MarketClass;
+  subCategory?: 'BLUECHIP' | 'DEFI' | 'MEME' | 'MAJOR_FX';
   exchange: 'ECX' | 'ESE' | 'EFX';
   description: string;
   baseCurrency?: CurrencyCode;
@@ -204,6 +212,8 @@ export interface Order {
   status: OrderStatus;
   idempotencyKey?: string;
   maxSlippageBps?: number;
+  expiresAt?: string | null;
+  version?: number;
   createdSeq: number;
   createdAt: string;
   updatedAt: string;
@@ -655,11 +665,13 @@ export type RealtimeEventType =
   | 'market.quote.updated'
   | 'market.orderbook.updated'
   | 'market.trade.executed'
+  | 'trade.executed'
   | 'market.candle.updated'
   | 'order.created'
   | 'order.partially_filled'
   | 'order.filled'
   | 'order.cancelled'
+  | 'order.expired'
   | 'portfolio.updated'
   | 'balance.updated'
   | 'property.listed'
@@ -673,6 +685,11 @@ export type RealtimeEventType =
   | 'futures.orderbook.updated'
   | 'futures.trade.executed'
   | 'futures.candle.updated'
+  | 'futures.order.created'
+  | 'futures.order.partially_filled'
+  | 'futures.order.filled'
+  | 'futures.order.cancelled'
+  | 'futures.order.expired'
   | 'futures.position.updated'
   | 'futures.funding.settled'
   | 'futures.liquidation.executed'

@@ -1,10 +1,14 @@
 import { useEffect, useState } from 'react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
+import type { WorldMode } from '../shared/contracts/beginner';
+import { GlossaryDrawer } from './components/beginner/GlossaryTerm';
+import { TutorialOverlay } from './components/beginner/TutorialOverlay';
 import { AppShell } from './components/layout/AppShell';
 import { GuestLoginModal } from './features/auth/GuestLoginModal';
 import { BankingPage } from './features/banking/BankingPage';
 import { BusinessPage } from './features/business/BusinessPage';
 import { OverviewPage } from './features/dashboard/OverviewPage';
+import { AssetDiscoveryPage } from './features/discover/AssetDiscoveryPage';
 import { EntertainmentPage } from './features/entertainment/EntertainmentPage';
 import { ExchangePage } from './features/exchange/ExchangePage';
 import { ForexPage } from './features/forex/ForexPage';
@@ -15,31 +19,33 @@ import { PortfolioPage } from './features/portfolio/PortfolioPage';
 import { PropertyPage } from './features/property/PropertyPage';
 import { SettingsPage } from './features/settings/SettingsPage';
 import { SocialPage } from './features/social/SocialPage';
-import { WorldService, setAuthToken } from './services/api';
+import { queryClient } from './lib/queryClient';
+import {
+  PracticeService,
+  WorldService,
+  getAuthToken,
+  setApiWorldMode,
+  setAuthToken,
+} from './services/api';
 import { realtimeClient } from './services/realtime';
 import { useAppStore } from './store/useAppStore';
-
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 4_000,
-      retry: 1,
-    },
-  },
-});
 
 function TradingEmpireWorkspace() {
   const {
     activePage,
     theme,
     player,
+    worldMode,
+    setWorldMode,
     setSession,
+    setPlayer,
     applyWorldSnapshot,
     pushToast,
   } = useAppStore();
 
   const [loginModalOpen, setLoginModalOpen] = useState(true);
   const [booting, setBooting] = useState(true);
+  const [practiceBusy, setPracticeBusy] = useState(false);
 
   // Sync Tailwind v4 .dark class on <html>
   useEffect(() => {
@@ -56,6 +62,7 @@ function TradingEmpireWorkspace() {
     let mounted = true;
     const init = async () => {
       try {
+        setApiWorldMode('LIVE');
         const snap = await WorldService.getSnapshot();
         if (!mounted) return;
         applyWorldSnapshot(snap);
@@ -65,6 +72,7 @@ function TradingEmpireWorkspace() {
         const autostart = params.get('autostart') === '1';
         const pageParam = params.get('page');
         if (
+          pageParam === 'discover' ||
           pageParam === 'forex' ||
           pageParam === 'exchange' ||
           pageParam === 'futures' ||
@@ -85,7 +93,7 @@ function TradingEmpireWorkspace() {
                 : guestParam || 'Trader Alice';
           const res = await WorldService.loginGuest(name, preset);
           if (!mounted) return;
-          setAuthToken(res.token);
+          setAuthToken(res.token, 'LIVE');
           setSession(res.token, res.profile);
           setLoginModalOpen(false);
           realtimeClient.connect(res.token);
@@ -107,14 +115,35 @@ function TradingEmpireWorkspace() {
     };
   }, []);
 
+  // Poll isolated WORLD-PRACTICE snapshot while in Practice Mode (Socket.IO streams WORLD-01 only)
+  useEffect(() => {
+    if (worldMode !== 'PRACTICE') return;
+    let active = true;
+    const timer = window.setInterval(async () => {
+      try {
+        const snap = await PracticeService.getPracticeSnapshot();
+        if (!active || useAppStore.getState().worldMode !== 'PRACTICE') return;
+        applyWorldSnapshot(snap);
+      } catch {
+        // Ignore transient network errors
+      }
+    }, 3_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [worldMode, applyWorldSnapshot]);
+
   const handleGuestLogin = async (username: string, preset: 'ALICE' | 'BOB' | 'CUSTOM') => {
+    setApiWorldMode('LIVE');
+    setWorldMode('LIVE');
     const res = await WorldService.loginGuest(username, preset);
-    setAuthToken(res.token);
+    setAuthToken(res.token, 'LIVE');
     setSession(res.token, res.profile);
     realtimeClient.identify(res.token);
     const freshSnap = await WorldService.getSnapshot();
     applyWorldSnapshot(freshSnap);
-    queryClient.invalidateQueries();
+    queryClient.clear();
     setLoginModalOpen(false);
     pushToast({
       tone: 'success',
@@ -123,19 +152,114 @@ function TradingEmpireWorkspace() {
     });
   };
 
+  const handleSwitchWorldMode = async (targetMode: WorldMode) => {
+    if (targetMode === worldMode || practiceBusy) return;
+    setPracticeBusy(true);
+    try {
+      if (targetMode === 'PRACTICE') {
+        setApiWorldMode('PRACTICE');
+        let practiceToken = getAuthToken('PRACTICE');
+        let practiceProfile = null;
+        if (!practiceToken) {
+          const guestName = player?.username ? `${player.username} (Luyện tập)` : 'Practice Trader';
+          const loginRes = await PracticeService.loginPracticeGuest(guestName.slice(0, 24));
+          practiceToken = loginRes.token;
+          practiceProfile = loginRes.profile;
+          setAuthToken(practiceToken, 'PRACTICE');
+        } else {
+          practiceProfile = await WorldService.getMe();
+        }
+        const snap = await PracticeService.getPracticeSnapshot();
+        queryClient.clear();
+        setWorldMode('PRACTICE');
+        applyWorldSnapshot(snap);
+        setSession(practiceToken, practiceProfile);
+        setLoginModalOpen(false);
+        pushToast({
+          tone: 'info',
+          title: 'Đã vào Phòng Luyện Tập (100,000 CR)',
+          description: 'Mọi lệnh và số dư tại đây tách biệt hoàn toàn với Thế giới chính WORLD-01.',
+        });
+      } else {
+        setApiWorldMode('LIVE');
+        const liveToken = getAuthToken('LIVE');
+        const snap = await WorldService.getSnapshot();
+        queryClient.clear();
+        setWorldMode('LIVE');
+        applyWorldSnapshot(snap);
+        if (liveToken) {
+          const liveProfile = await WorldService.getMe();
+          setSession(liveToken, liveProfile);
+          realtimeClient.identify(liveToken);
+          realtimeClient.requestSnapshot();
+        } else {
+          setSession(null, null);
+          setLoginModalOpen(true);
+        }
+        pushToast({
+          tone: 'success',
+          title: 'Đã quay lại Thế giới chính WORLD-01',
+          description: 'Số dư và vị thế trên WORLD-01 vẫn được giữ nguyên vẹn.',
+        });
+      }
+    } catch (err) {
+      pushToast({
+        tone: 'error',
+        title: 'Không thể chuyển thế giới',
+        description: err instanceof Error ? err.message : 'Vui lòng thử lại sau giây lát.',
+      });
+      // Revert API mode cleanly on failure
+      setApiWorldMode(worldMode);
+    } finally {
+      setPracticeBusy(false);
+    }
+  };
+
+  const handleResetPracticeAccount = async () => {
+    if (worldMode !== 'PRACTICE' || practiceBusy) return;
+    setPracticeBusy(true);
+    try {
+      const res = await PracticeService.resetAccount();
+      queryClient.clear();
+      const snap = await PracticeService.getPracticeSnapshot();
+      applyWorldSnapshot(snap);
+      setPlayer(res.profile);
+      pushToast({
+        tone: 'success',
+        title: 'Đã đặt lại Phòng Luyện Tập về 100,000 CR',
+        description: 'Toàn bộ lệnh chờ, vị thế và danh mục luyện tập đã được làm mới.',
+      });
+    } catch (err) {
+      pushToast({
+        tone: 'error',
+        title: 'Không thể đặt lại tài khoản luyện tập',
+        description: err instanceof Error ? err.message : 'Vui lòng thử lại.',
+      });
+    } finally {
+      setPracticeBusy(false);
+    }
+  };
+
   const handleLogout = async () => {
     try {
       await WorldService.logout();
     } catch {
       // ignore
     }
-    setAuthToken(null);
+    setAuthToken(null, 'LIVE');
+    setAuthToken(null, 'PRACTICE');
+    setApiWorldMode('LIVE');
+    setWorldMode('LIVE');
     setSession(null, null);
+    queryClient.clear();
     setLoginModalOpen(true);
   };
 
   const handleWorldReset = () => {
-    setAuthToken(null);
+    setAuthToken(null, 'LIVE');
+    setAuthToken(null, 'PRACTICE');
+    setApiWorldMode('LIVE');
+    setWorldMode('LIVE');
     setSession(null, null);
     queryClient.clear();
     setLoginModalOpen(true);
@@ -145,7 +269,9 @@ function TradingEmpireWorkspace() {
   const renderPage = () => {
     switch (activePage) {
       case 'overview':
-        return <OverviewPage />;
+        return <OverviewPage onEnterPracticeMode={() => handleSwitchWorldMode('PRACTICE')} />;
+      case 'discover':
+        return <AssetDiscoveryPage />;
       case 'exchange':
         return <ExchangePage />;
       case 'futures':
@@ -171,13 +297,19 @@ function TradingEmpireWorkspace() {
       case 'settings':
         return <SettingsPage onWorldReset={handleWorldReset} />;
       default:
-        return <OverviewPage />;
+        return <OverviewPage onEnterPracticeMode={() => handleSwitchWorldMode('PRACTICE')} />;
     }
   };
 
   return (
     <>
-      <AppShell onSwitchAccount={() => setLoginModalOpen(true)} onLogout={handleLogout}>
+      <AppShell
+        onSwitchAccount={() => setLoginModalOpen(true)}
+        onLogout={handleLogout}
+        onSwitchWorldMode={handleSwitchWorldMode}
+        onResetPractice={handleResetPracticeAccount}
+        practiceBusy={practiceBusy}
+      >
         {booting ? (
           <div className="p-12 text-center text-xs text-[var(--text-secondary)]">
             Đang kết nối tới máy chủ WORLD-01: GLOBAL ECONOMY...
@@ -186,6 +318,9 @@ function TradingEmpireWorkspace() {
           renderPage()
         )}
       </AppShell>
+
+      <GlossaryDrawer />
+      <TutorialOverlay />
 
       {loginModalOpen && !booting && (
         <GuestLoginModal

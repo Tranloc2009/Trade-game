@@ -23,6 +23,8 @@ import {
   PlaceAuctionBidSchema,
   PlaceFuturesOrderSchema,
   PlaceOrderSchema,
+  PreviewFuturesOrderSchema,
+  PreviewOrderSchema,
 } from '../../shared/schemas/validation';
 import { z } from 'zod';
 import { ALL_CURRENCIES } from '../../shared/contracts/money';
@@ -219,6 +221,30 @@ export function createApiRouter(world: WorldEngine): Router {
     }
   });
 
+  router.post('/futures/preview', (req, res, next) => {
+    try {
+      const playerId = requirePlayerId(req);
+      const parsed = PreviewFuturesOrderSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return fail(res, 'VALIDATION_ERROR', parsed.error.issues[0]?.message, 400, parsed.error.flatten());
+      }
+      const preview = world.futures.previewOrder({
+        playerId,
+        symbol: parsed.data.symbol.toUpperCase(),
+        side: parsed.data.side,
+        type: parsed.data.type,
+        leverage: parsed.data.leverage,
+        marginCR: parsed.data.marginCR,
+        quantity: parsed.data.quantity,
+        priceCR: parsed.data.priceCR,
+        maxSlippageBps: parsed.data.maxSlippageBps,
+      });
+      ok(res, preview);
+    } catch (err) {
+      next(err);
+    }
+  });
+
   router.post('/futures/orders', (req, res, next) => {
     try {
       const playerId = requirePlayerId(req);
@@ -243,6 +269,8 @@ export function createApiRouter(world: WorldEngine): Router {
         stopLossCR: parsed.data.stopLossCR,
         takeProfitCR: parsed.data.takeProfitCR,
         maxSlippageBps: parsed.data.maxSlippageBps,
+        expiresAt: parsed.data.expiresAt,
+        ttlSeconds: parsed.data.ttlSeconds,
         idempotencyKey: headerIdem,
       });
       ok(
@@ -254,6 +282,16 @@ export function createApiRouter(world: WorldEngine): Router {
         },
         201,
       );
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get('/futures/orders/open', (req, res, next) => {
+    try {
+      const playerId = requirePlayerId(req);
+      const symbol = typeof req.query.symbol === 'string' ? req.query.symbol.toUpperCase() : undefined;
+      ok(res, world.futures.listPlayerOpenOrders(playerId, symbol));
     } catch (err) {
       next(err);
     }
@@ -383,6 +421,39 @@ export function createApiRouter(world: WorldEngine): Router {
   });
 
   // Orders (Authoritative Matching Engine)
+  router.post('/orders/preview', (req, res, next) => {
+    try {
+      const playerId = requirePlayerId(req);
+      const parsed = PreviewOrderSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return fail(res, 'VALIDATION_ERROR', parsed.error.issues[0]?.message, 400, parsed.error.flatten());
+      }
+      const preview = world.matching.previewOrder({
+        playerId,
+        symbol: parsed.data.symbol.toUpperCase(),
+        side: parsed.data.side,
+        type: parsed.data.type,
+        priceCR: parsed.data.priceCR,
+        quantity: parsed.data.quantity,
+        amountQuote: parsed.data.amountQuote,
+        maxSlippageBps: parsed.data.maxSlippageBps,
+      });
+      ok(res, preview);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/reset-account', (req, res, next) => {
+    try {
+      const playerId = requirePlayerId(req);
+      const profile = world.resetPracticePlayer(playerId);
+      ok(res, { reset: true, profile, account: world.getFuturesAccount(playerId) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   router.post('/orders', (req, res, next) => {
     try {
       const playerId = requirePlayerId(req);
@@ -399,9 +470,21 @@ export function createApiRouter(world: WorldEngine): Router {
         priceCR: parsed.data.priceCR,
         quantity: parsed.data.quantity,
         maxSlippageBps: parsed.data.maxSlippageBps,
+        expiresAt: parsed.data.expiresAt,
+        ttlSeconds: parsed.data.ttlSeconds,
         idempotencyKey: headerIdem,
       });
       ok(res, { ...result, profile: world.getPlayerProfile(playerId) }, 201);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get('/orders/open', (req, res, next) => {
+    try {
+      const playerId = requirePlayerId(req);
+      const symbol = typeof req.query.symbol === 'string' ? req.query.symbol.toUpperCase() : undefined;
+      ok(res, world.matching.listPlayerOpenOrders(playerId, symbol));
     } catch (err) {
       next(err);
     }
@@ -411,6 +494,11 @@ export function createApiRouter(world: WorldEngine): Router {
     try {
       const playerId = requirePlayerId(req);
       const symbol = typeof req.query.symbol === 'string' ? req.query.symbol.toUpperCase() : undefined;
+      const statusFilter = typeof req.query.status === 'string' ? req.query.status.toLowerCase() : undefined;
+      if (statusFilter === 'open') {
+        ok(res, world.matching.listPlayerOpenOrders(playerId, symbol));
+        return;
+      }
       ok(res, world.matching.listPlayerOrders(playerId, symbol));
     } catch (err) {
       next(err);
@@ -762,14 +850,7 @@ export function createApiRouter(world: WorldEngine): Router {
     try {
       if (!world.devToolsEnabled) throw new DomainError('FORBIDDEN_IN_PRODUCTION', undefined, 403);
       const symbol = typeof req.body?.symbol === 'string' ? req.body.symbol.toUpperCase() : undefined;
-      const result = world.marketMakers.runSimulationTick(world.economy.state, symbol);
-      for (const sym of result.affectedSymbols) {
-        const asset = world.matching.getAsset(sym);
-        if (asset) {
-          world.eventBus.publish('market.quote.updated', asset);
-          world.eventBus.publish('market.orderbook.updated', world.matching.getOrderBook(sym), `market:${sym}`);
-        }
-      }
+      const result = world.devSimulateBotTick(symbol);
       ok(res, { tradesExecuted: result.trades.length, affectedSymbols: result.affectedSymbols });
     } catch (err) {
       next(err);

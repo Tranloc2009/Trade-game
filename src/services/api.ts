@@ -1,4 +1,11 @@
 import type {
+  FuturesPreviewRequest,
+  FuturesPreviewResponse,
+  OrderPreviewRequest,
+  OrderPreviewResponse,
+  WorldMode,
+} from '../../shared/contracts/beginner';
+import type {
   FuturesAccountSummary,
   FuturesFundingSettlementEvent,
   FuturesMarginMode,
@@ -43,14 +50,29 @@ import type {
   WorldSnapshot,
 } from '../../shared/contracts/types';
 
-let authTokenMemory: string | null = null;
+// Auth tokens live strictly in JS memory (NEVER persisted to localStorage)
+let liveAuthTokenMemory: string | null = null;
+let practiceAuthTokenMemory: string | null = null;
+let activeWorldMode: WorldMode = 'LIVE';
 
-export function setAuthToken(token: string | null): void {
-  authTokenMemory = token;
+export function setApiWorldMode(mode: WorldMode): void {
+  activeWorldMode = mode;
 }
 
-export function getAuthToken(): string | null {
-  return authTokenMemory;
+export function getApiWorldMode(): WorldMode {
+  return activeWorldMode;
+}
+
+export function setAuthToken(token: string | null, mode: WorldMode = activeWorldMode): void {
+  if (mode === 'PRACTICE') {
+    practiceAuthTokenMemory = token;
+  } else {
+    liveAuthTokenMemory = token;
+  }
+}
+
+export function getAuthToken(mode: WorldMode = activeWorldMode): string | null {
+  return mode === 'PRACTICE' ? practiceAuthTokenMemory : liveAuthTokenMemory;
 }
 
 export class ApiClientError extends Error {
@@ -65,19 +87,35 @@ export class ApiClientError extends Error {
   }
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+function resolveApiPath(path: string, mode: WorldMode = activeWorldMode): string {
+  if (mode === 'PRACTICE' && path.startsWith('/api/') && !path.startsWith('/api/practice/')) {
+    return `/api/practice/${path.slice('/api/'.length)}`;
+  }
+  return path;
+}
+
+async function request<T>(path: string, init: RequestInit = {}, modeOverride?: WorldMode): Promise<T> {
+  const effectiveMode = modeOverride ?? activeWorldMode;
+  const targetPath = resolveApiPath(path, effectiveMode);
+  const token = getAuthToken(effectiveMode);
+
   const headers = new Headers(init.headers);
   if (!headers.has('Content-Type') && init.body) {
     headers.set('Content-Type', 'application/json');
   }
-  if (authTokenMemory) {
-    headers.set('Authorization', `Bearer ${authTokenMemory}`);
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`);
   }
 
-  const res = await fetch(path, {
-    ...init,
-    headers,
-  });
+  let res: Response;
+  try {
+    res = await fetch(targetPath, {
+      ...init,
+      headers,
+    });
+  } catch {
+    throw new ApiClientError('DISCONNECTED', 'Mất kết nối tạm thời với máy chủ.', 0);
+  }
 
   let payload: ApiResponse<T>;
   try {
@@ -131,6 +169,13 @@ export const TradingService = {
     ),
   getOrders: (symbol?: string) =>
     request<Order[]>(symbol ? `/api/orders?symbol=${encodeURIComponent(symbol)}` : '/api/orders'),
+  getOpenOrders: (symbol?: string) =>
+    request<Order[]>(symbol ? `/api/orders/open?symbol=${encodeURIComponent(symbol)}` : '/api/orders/open'),
+  previewOrder: (params: OrderPreviewRequest) =>
+    request<OrderPreviewResponse>('/api/orders/preview', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }),
   placeOrder: (params: {
     symbol: string;
     side: OrderSide;
@@ -162,6 +207,25 @@ export const TradingService = {
     }>(`/api/orders/${encodeURIComponent(orderId)}`, {
       method: 'DELETE',
     }),
+};
+
+export const PracticeService = {
+  loginPracticeGuest: (username: string) =>
+    request<{ token: string; isDemoGuest: boolean; profile: PlayerProfile }>(
+      '/api/auth/guest',
+      {
+        method: 'POST',
+        body: JSON.stringify({ username }),
+      },
+      'PRACTICE',
+    ),
+  getPracticeSnapshot: () => request<WorldSnapshot>('/api/world/snapshot', {}, 'PRACTICE'),
+  resetAccount: () =>
+    request<{ reset: true; profile: PlayerProfile; account: FuturesAccountSummary }>(
+      '/api/reset-account',
+      { method: 'POST' },
+      'PRACTICE',
+    ),
 };
 
 export const PortfolioService = {
@@ -325,6 +389,10 @@ export const FuturesService = {
       `/api/futures/contracts/${encodeURIComponent(symbol)}/candles?timeframe=${timeframe}&limit=${limit}`,
     ),
   getAccount: () => request<FuturesAccountSummary>('/api/futures/account'),
+  getOpenOrders: (symbol?: string) =>
+    request<FuturesOrder[]>(
+      symbol ? `/api/futures/orders/open?symbol=${encodeURIComponent(symbol)}` : '/api/futures/orders/open',
+    ),
   acknowledgeRisk: () =>
     request<{ acknowledged: true; acknowledgedAt: string; account: FuturesAccountSummary }>(
       '/api/futures/acknowledge-risk',
@@ -333,6 +401,11 @@ export const FuturesService = {
         body: JSON.stringify({ acknowledged: true }),
       },
     ),
+  previewOrder: (params: FuturesPreviewRequest) =>
+    request<FuturesPreviewResponse>('/api/futures/preview', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }),
   placeOrder: (params: {
     symbol: string;
     side: FuturesOrderSide;

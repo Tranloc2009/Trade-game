@@ -50,10 +50,22 @@ async function startServer() {
     providers,
   });
 
-  // Attach authoritative Socket.IO gateway on same HTTP server/port
+  // Boot strictly isolated WORLD-PRACTICE simulation engine (100,000 CR practice sandbox)
+  // Separate Ledger, MatchingEngine, FuturesEngine, and sessions — NEVER shares order books or balances with WORLD-01
+  const practiceWorld = new WorldEngine({
+    worldId: 'WORLD-PRACTICE',
+    worldName: 'PHÒNG LUYỆN TẬP (100,000 CR)',
+    calendarMode: env.calendarMode,
+    enableBackgroundLoops: true,
+    devToolsEnabled: true,
+    providers,
+  });
+
+  // Attach authoritative Socket.IO gateway on same HTTP server/port for WORLD-01
   new SocketGateway(httpServer, world);
 
-  // Mount REST API
+  // Mount REST APIs (WORLD-01 & strictly isolated WORLD-PRACTICE)
+  app.use('/api/practice', createApiRouter(practiceWorld));
   app.use('/api', createApiRouter(world));
 
   // Mount Vite middleware in development, or serve built dist/ in production

@@ -19,6 +19,8 @@ export const PlaceOrderSchema = z
     priceCR: z.number().positive('Giá phải lớn hơn 0').max(10_000_000).optional(),
     quantity: z.number().positive('Khối lượng phải lớn hơn 0').max(10_000_000),
     maxSlippageBps: z.number().int().min(10).max(5000).optional().default(500), // default 5%
+    expiresAt: z.string().datetime().optional(),
+    ttlSeconds: z.number().int().min(1).max(86_400 * 30).optional(),
     idempotencyKey: z.string().trim().min(4).max(128).optional(),
   })
   .refine((data) => data.type === 'MARKET' || (data.priceCR !== undefined && data.priceCR > 0), {
@@ -106,6 +108,8 @@ export const PlaceFuturesOrderSchema = z
     stopLossCR: z.number().positive('Giá Stop Loss phải lớn hơn 0').max(10_000_000).optional(),
     takeProfitCR: z.number().positive('Giá Take Profit phải lớn hơn 0').max(10_000_000).optional(),
     maxSlippageBps: z.number().int().min(10).max(5000).optional().default(500),
+    expiresAt: z.string().datetime().optional(),
+    ttlSeconds: z.number().int().min(1).max(86_400 * 30).optional(),
     idempotencyKey: z.string().trim().min(4).max(128).optional(),
   })
   .refine(
@@ -144,4 +148,38 @@ export const FuturesClosePositionSchema = z.object({
 export const FuturesAcknowledgeRiskSchema = z.object({
   acknowledged: z.literal(true),
 });
+
+export const PreviewOrderSchema = z
+  .object({
+    symbol: z.string().trim().min(2).max(24),
+    side: z.enum(['BUY', 'SELL']),
+    type: z.enum(['MARKET', 'LIMIT']).optional().default('MARKET'),
+    priceCR: z.number().positive('Giá phải lớn hơn 0').max(10_000_000).optional(),
+    quantity: z.number().positive('Khối lượng phải lớn hơn 0').max(10_000_000).optional(),
+    amountQuote: z.number().positive('Số tiền phải lớn hơn 0').max(100_000_000).optional(),
+    maxSlippageBps: z.number().int().min(10).max(5000).optional().default(500),
+  })
+  .refine((d) => d.quantity !== undefined || d.amountQuote !== undefined, {
+    message: 'Vui lòng nhập số tiền hoặc khối lượng muốn giao dịch.',
+    path: ['amountQuote'],
+  });
+
+export const PreviewFuturesOrderSchema = z
+  .object({
+    symbol: z.string().trim().min(4).max(24),
+    side: z.enum(['BUY', 'SELL']),
+    type: z.enum(['MARKET', 'LIMIT']).optional().default('MARKET'),
+    leverage: z.number().int().min(1).max(20).optional().default(1),
+    marginCR: z.number().positive('Ký quỹ phải lớn hơn 0').max(50_000_000).optional(),
+    quantity: z.number().positive('Khối lượng phải lớn hơn 0').max(10_000_000).optional(),
+    priceCR: z.number().positive('Giá đặt phải lớn hơn 0').max(10_000_000).optional(),
+    stopLossCR: z.number().positive().max(10_000_000).optional(),
+    takeProfitCR: z.number().positive().max(10_000_000).optional(),
+    maxSlippageBps: z.number().int().min(10).max(5000).optional().default(500),
+  })
+  .refine((d) => d.marginCR !== undefined || d.quantity !== undefined, {
+    message: 'Vui lòng nhập số tiền ký quỹ (CR) hoặc khối lượng hợp đồng.',
+    path: ['marginCR'],
+  });
+
 

@@ -538,7 +538,36 @@ export function buildSeedAssets(): Asset[] {
     },
   ];
 
-  return [...cryptoAssets, ...stockAssets];
+  const memeCoinAssets: Asset[] = [
+    {
+      symbol: 'DOGX-SIM',
+      name: 'DogeX Community Simulated',
+      marketClass: 'CRYPTO',
+      subCategory: 'MEME',
+      exchange: 'ECX',
+      description: 'Meme Coin cộng đồng mô phỏng có biên độ biến động giá cao trên sàn ECX (không đại diện tài sản thật).',
+      priceTickMinor: 1, // 0.01 CR
+      qtyStep: 10,
+      minQty: 10,
+      maxOrderQty: 500_000,
+      circulatingSupply: 140_000_000_000,
+      referencePriceMinor: toMinor(0.45),
+      lastPriceMinor: toMinor(0.45),
+      open24hMinor: toMinor(0.42),
+      high24hMinor: toMinor(0.49),
+      low24hMinor: toMinor(0.39),
+      volume24h: 820_000,
+      turnover24hMinor: toMinor(369_000),
+      priceChange24hMinor: toMinor(0.03),
+      priceChange24hPct: 7.14,
+      marketCapMinor: toMinor(0.45) * 140_000_000_000,
+      status: 'OPEN',
+      sentimentScore: 15,
+      liquidityScore: 68,
+    },
+  ];
+
+  return [...cryptoAssets, ...stockAssets, ...memeCoinAssets];
 }
 
 export function buildSeedProperties(worldId: string, developerNpcId: string, developerNpcName: string): {

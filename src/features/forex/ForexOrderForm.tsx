@@ -11,7 +11,7 @@ import {
   fromCurrencyMinor,
   toScaledInt,
 } from '../../../shared/contracts/money';
-import type { Asset, OrderBookSnapshot, OrderSide, OrderType, PlayerProfile, TimeInForce } from '../../../shared/contracts/types';
+import type { Asset, Order, OrderBookSnapshot, OrderSide, OrderType, PlayerProfile, TimeInForce } from '../../../shared/contracts/types';
 import { ApiClientError, TradingService } from '../../services/api';
 
 interface ForexOrderFormProps {
@@ -21,6 +21,7 @@ interface ForexOrderFormProps {
   prefilledPrice: number | null;
   onSelectPair: (symbol: string) => void;
   onOrderPlaced: (result: {
+    order: Order;
     profile: PlayerProfile;
     orderBook: OrderBookSnapshot;
     tradesCount: number;
@@ -143,6 +144,7 @@ export function ForexOrderForm({
       });
 
       onOrderPlaced({
+        order: res.order,
         profile: res.profile,
         orderBook: res.orderBook,
         tradesCount: res.trades.length,

@@ -9,7 +9,7 @@ import {
   fromMinor,
   toMinor,
 } from '../../../shared/contracts/money';
-import type { Asset, OrderBookSnapshot, OrderSide, OrderType, TimeInForce } from '../../../shared/contracts/types';
+import type { Asset, Order, OrderBookSnapshot, OrderSide, OrderType, TimeInForce } from '../../../shared/contracts/types';
 import { ApiClientError, TradingService } from '../../services/api';
 import { useAppStore } from '../../store/useAppStore';
 
@@ -17,7 +17,7 @@ interface OrderPlacementPanelProps {
   asset: Asset;
   orderBook: OrderBookSnapshot | undefined;
   prefilledPrice: number | null;
-  onOrderSubmitted: () => void;
+  onOrderSubmitted: (order: Order) => void;
 }
 
 export function OrderPlacementPanel({
@@ -152,7 +152,7 @@ export function OrderPlacementPanel({
         title: `${side === 'BUY' ? 'Đặt lệnh Mua' : 'Đặt lệnh Bán'} ${asset.symbol} thành công`,
         description: filledInfo,
       });
-      onOrderSubmitted();
+      onOrderSubmitted(res.order);
     } catch (err) {
       const message =
         err instanceof ApiClientError

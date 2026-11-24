@@ -989,4 +989,112 @@ export class LedgerService {
       description: `Gửi tiết kiệm kỳ hạn đến Ngày ${maturityGameDay}`,
     });
   }
+
+  /**
+   * Resets a player's balances and holdings back to clean starting capital STRICTLY inside WORLD-PRACTICE.
+   * Preserves exact double-entry conservation across CR and all simulated currencies.
+   */
+  resetPracticePlayerBalances(playerId: string, targetCRMinor: number): Wallet {
+    if (this.worldId !== 'WORLD-PRACTICE') {
+      throw new DomainError('FORBIDDEN_IN_PRODUCTION', 'Chỉ hỗ trợ đặt lại tài khoản trong Phòng Luyện Tập.', 403);
+    }
+    const wallet = this.requireWallet(playerId);
+
+    // 1. Return any savings & term deposits back to available CR
+    if (wallet.savingsMinor > 0) {
+      this.withdrawFromSavings(playerId, wallet.savingsMinor);
+    }
+    if (wallet.termDepositMinor > 0) {
+      const amt = wallet.termDepositMinor;
+      wallet.termDepositMinor = 0;
+      wallet.termDepositMaturityGameDay = null;
+      wallet.availableMinor += amt;
+      this.syncCRMirror(wallet);
+      this.recordEntry({
+        transactionId: `tx_${crypto.randomBytes(6).toString('hex')}`,
+        currency: 'CR',
+        debitAccount: `TERM_${playerId}`,
+        creditAccount: playerId,
+        amountMinor: amt,
+        category: 'BANK_WITHDRAW',
+        referenceId: `PRACTICE-RESET-${Date.now()}`,
+        description: 'Giải phóng tiền gửi kỳ hạn khi đặt lại tài khoản Luyện tập',
+      });
+    }
+
+    // 2. Release any residual locked funds (caller must have already cancelled open orders)
+    if (wallet.lockedMinor > 0) {
+      wallet.availableMinor += wallet.lockedMinor;
+      wallet.lockedMinor = 0;
+      this.syncCRMirror(wallet);
+    }
+
+    // 3. Zero non-CR currency balances back to FX issuance contra-account
+    for (const c of ALL_CURRENCIES) {
+      if (c === 'CR') continue;
+      const bal = wallet.currencyBalances[c];
+      if (!bal) continue;
+      const totalForeign = bal.availableMinor + bal.lockedMinor;
+      if (totalForeign > 0) {
+        bal.availableMinor = 0;
+        bal.lockedMinor = 0;
+        const fxIssuance = `${SYSTEM_ACCOUNTS.FX_ISSUANCE_PREFIX}${c}`;
+        const prev = this.fxSystemBalances.get(`${c}:${fxIssuance}`) ?? 0;
+        this.fxSystemBalances.set(`${c}:${fxIssuance}`, prev + totalForeign);
+        this.recordEntry({
+          transactionId: `tx_${crypto.randomBytes(6).toString('hex')}`,
+          currency: c,
+          debitAccount: playerId,
+          creditAccount: fxIssuance,
+          amountMinor: totalForeign,
+          category: 'SYSTEM_ISSUANCE',
+          referenceId: `PRACTICE-RESET-${c}-${Date.now()}`,
+          description: `Thu hồi ${c} khi đặt lại tài khoản Phòng Luyện Tập`,
+        });
+      }
+    }
+
+    // 4. Clear spot/crypto holdings for this practice player
+    const holdings = this.wallets.listHoldings(playerId);
+    for (const h of holdings) {
+      this.wallets.saveHolding(playerId, {
+        ...h,
+        availableQty: 0,
+        lockedQty: 0,
+        avgCostMinor: 0,
+        realizedPnlMinor: 0,
+      });
+    }
+
+    // 5. Reconcile CR balance to exact targetCRMinor (100,000 CR) via TREASURY_ISSUANCE
+    const delta = targetCRMinor - wallet.availableMinor;
+    if (delta > 0) {
+      this.issueFunds(
+        playerId,
+        delta,
+        'SYSTEM_ISSUANCE',
+        `PRACTICE-TOPUP-${Date.now()}`,
+        'Bổ sung vốn luyện tập về mốc 100,000 CR',
+      );
+    } else if (delta < 0) {
+      const burn = Math.abs(delta);
+      wallet.availableMinor -= burn;
+      this.syncCRMirror(wallet);
+      const prevIssuance = this.systemBalances.get(SYSTEM_ACCOUNTS.TREASURY_ISSUANCE) ?? 0;
+      this.systemBalances.set(SYSTEM_ACCOUNTS.TREASURY_ISSUANCE, prevIssuance + burn);
+      this.recordEntry({
+        transactionId: `tx_${crypto.randomBytes(6).toString('hex')}`,
+        currency: 'CR',
+        debitAccount: playerId,
+        creditAccount: SYSTEM_ACCOUNTS.TREASURY_ISSUANCE,
+        amountMinor: burn,
+        category: 'SYSTEM_ISSUANCE',
+        referenceId: `PRACTICE-BURN-${Date.now()}`,
+        description: 'Điều chỉnh vốn luyện tập về mốc 100,000 CR',
+      });
+    }
+
+    return cloneWallet(wallet);
+  }
 }
+

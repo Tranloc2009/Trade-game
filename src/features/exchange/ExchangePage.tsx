@@ -1,9 +1,27 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Search, Star, XCircle } from 'lucide-react';
-import { formatCR, formatCompactCR, formatQty } from '../../../shared/contracts/money';
+import {
+  ArrowDownRight,
+  ArrowUpRight,
+  ChevronDown,
+  ChevronUp,
+  Compass,
+  Info,
+  Search,
+  Star,
+  X,
+  XCircle,
+} from 'lucide-react';
+import { classifyVolatility } from '../../../shared/contracts/beginner';
+import { calcNotionalMinor, formatCR, formatCompactCR, formatQty } from '../../../shared/contracts/money';
+import { calcOrderFillProgressPct, filterOpenOrders } from '../../../shared/contracts/orderLifecycle';
+import { GlossaryTerm } from '../../components/beginner/GlossaryTerm';
+import { SimplePriceChart } from '../../components/beginner/SimplePriceChart';
+import { SimpleTradeFlow } from '../../components/beginner/SimpleTradeFlow';
+import { TradingModeToggle } from '../../components/beginner/TradingModeToggle';
 import { CandlestickChart } from '../../components/charts/CandlestickChart';
 import { formatTimeShort } from '../../lib/indicators';
+import { applySpotOrderToQueryCache } from '../../lib/queryClient';
 import { ApiClientError, TradingService } from '../../services/api';
 import { realtimeClient } from '../../services/realtime';
 import { useAppStore } from '../../store/useAppStore';
@@ -31,11 +49,13 @@ export function ExchangePage() {
     recentTradesBySymbol,
     setRecentTrades,
     liveCandleTick,
-    lastRealtimeTradeSeq,
     player,
     setPlayer,
     economy,
     pushToast,
+    tradingMode,
+    setTradingMode,
+    setActivePage,
   } = useAppStore();
 
   const [search, setSearch] = useState('');
@@ -44,6 +64,9 @@ export function ExchangePage() {
   const [mobileTab, setMobileTab] = useState<MobileTab>('CHART');
   const [prefilledPrice, setPrefilledPrice] = useState<number | null>(null);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [showAdvancedDrawer, setShowAdvancedDrawer] = useState(false);
+  const [mobileSheetSide, setMobileSheetSide] = useState<'BUY' | 'SELL' | null>(null);
+  const [beginnerBottomTab, setBeginnerBottomTab] = useState<'HOLDINGS' | 'OPEN_ORDERS' | 'HISTORY'>('OPEN_ORDERS');
 
   const nonForexAssets = useMemo(() => assets.filter((a) => a.marketClass !== 'FOREX'), [assets]);
 
@@ -86,9 +109,11 @@ export function ExchangePage() {
   });
 
   const { data: playerOrders = [], refetch: refetchOrders } = useQuery({
-    queryKey: ['playerOrders', player?.id, lastRealtimeTradeSeq],
+    queryKey: ['playerOrders', player?.id],
     queryFn: () => TradingService.getOrders(),
     enabled: Boolean(player),
+    staleTime: 0,
+    refetchOnReconnect: true,
   });
 
   const filteredAssets = useMemo(() => {
@@ -105,7 +130,7 @@ export function ExchangePage() {
 
   const activeOrderBook = orderBooks[activeSymbol];
   const recentTrades = recentTradesBySymbol[activeSymbol] ?? [];
-  const openOrders = playerOrders.filter((o) => o.status === 'OPEN' || o.status === 'PARTIALLY_FILLED');
+  const openOrders = useMemo(() => filterOpenOrders(playerOrders), [playerOrders]);
   const liveCandle =
     liveCandleTick && liveCandleTick.symbol === activeSymbol ? liveCandleTick.candles[timeframe] ?? null : null;
 
@@ -115,7 +140,10 @@ export function ExchangePage() {
       const res = await TradingService.cancelOrder(orderId);
       setPlayer(res.profile);
       setOrderBook(res.orderBook);
-      await refetchOrders();
+      if (player) {
+        applySpotOrderToQueryCache(player.id, res.order);
+      }
+      void refetchOrders();
       pushToast({
         tone: 'info',
         title: 'Đã hủy lệnh thành công',
@@ -137,9 +165,492 @@ export function ExchangePage() {
   }
 
   const isPositive = selectedAsset.priceChange24hMinor >= 0;
+  const selectedHolding = player?.holdings.find((h) => h.symbol === selectedAsset.symbol);
+  const ownedTotalQty = selectedHolding ? selectedHolding.availableQty + selectedHolding.lockedQty : 0;
+  const holdingMarketValMinor = calcNotionalMinor(selectedAsset.lastPriceMinor, ownedTotalQty);
+  const holdingCostMinor = selectedHolding ? calcNotionalMinor(selectedHolding.avgCostMinor, ownedTotalQty) : 0;
+  const holdingUnrealizedPnlMinor = holdingMarketValMinor - holdingCostMinor;
+  const holdingPnlPct = holdingCostMinor > 0 ? (holdingUnrealizedPnlMinor / holdingCostMinor) * 100 : 0;
+  const assetVolatility = classifyVolatility({
+    marketClass: selectedAsset.marketClass,
+    priceChange24hPct: selectedAsset.priceChange24hPct,
+    liquidityScore: selectedAsset.liquidityScore,
+    subCategory: selectedAsset.subCategory,
+  });
+
+  if (tradingMode === 'BEGINNER') {
+    return (
+      <div className="max-w-[1440px] mx-auto space-y-4 pb-20 lg:pb-6" data-testid="exchange-beginner-view">
+        <TradingModeToggle />
+
+        {/* Beginner Asset Header */}
+        <div className="rounded-xl border border-slate-800/90 bg-slate-900/75 p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <button
+              type="button"
+              onClick={() => toggleWatchlist(selectedAsset.symbol)}
+              aria-label="Theo dõi mã tài sản"
+              className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-800 bg-slate-950 text-slate-400 hover:text-amber-300"
+            >
+              <Star
+                className={`h-4 w-4 ${
+                  watchlist.includes(selectedAsset.symbol) ? 'fill-amber-400 text-amber-400' : ''
+                }`}
+              />
+            </button>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-lg font-bold text-white">{selectedAsset.name}</h1>
+                <span className="font-mono text-xs font-semibold text-cyan-300">{selectedAsset.symbol}</span>
+                <span className="text-xs text-slate-500">· {assetVolatility.labelVi}</span>
+              </div>
+              <div className="mt-1 flex flex-wrap items-baseline gap-2.5">
+                <span
+                  className="font-mono text-2xl font-bold tabular-nums text-white"
+                  data-testid="header-last-price"
+                >
+                  {formatCR(selectedAsset.lastPriceMinor)} CR
+                </span>
+                <span
+                  className={`inline-flex items-center gap-0.5 font-mono text-xs font-semibold tabular-nums ${
+                    isPositive ? 'text-emerald-400' : 'text-rose-400'
+                  }`}
+                >
+                  {isPositive ? <ArrowUpRight className="h-3.5 w-3.5" /> : <ArrowDownRight className="h-3.5 w-3.5" />}
+                  {isPositive ? 'Tăng +' : 'Giảm '}
+                  {selectedAsset.priceChange24hPct.toFixed(2)}% (24h)
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              aria-label="Đổi nhanh tài sản"
+              value={activeSymbol}
+              onChange={(e) => setSelectedSymbol(e.target.value)}
+              className="min-h-[40px] rounded-lg border border-slate-700 bg-slate-950 px-3 text-xs font-mono font-semibold text-white focus:border-cyan-500 focus:outline-none"
+            >
+              {nonForexAssets.map((a) => (
+                <option key={a.symbol} value={a.symbol}>
+                  {a.symbol} — {a.name}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => setActivePage('discover')}
+              className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-950 px-3 text-xs font-medium text-cyan-300 hover:border-cyan-500/50 hover:bg-slate-900"
+            >
+              <Compass className="h-3.5 w-3.5" />
+              Khám phá mã khác
+            </button>
+          </div>
+        </div>
+
+        {/* Main Beginner 2-Column Layout */}
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-12 items-start">
+          {/* Left: Simple Chart + Asset Context + Holdings/Open Orders */}
+          <div className="lg:col-span-7 xl:col-span-8 space-y-4">
+            <SimplePriceChart
+              symbol={activeSymbol}
+              candles={candleResp?.candles ?? []}
+              timeframe={timeframe}
+              onTimeframeChange={setTimeframe}
+              positive={isPositive}
+              priceDecimals={selectedAsset.priceDecimals ?? 2}
+              height={280}
+              theme={theme}
+            />
+
+            {/* Stock or Crypto Friendly Context Card */}
+            <div className="rounded-xl border border-slate-800/80 bg-slate-900/60 p-4 space-y-3">
+              <div className="flex items-start gap-2.5">
+                <Info className="mt-0.5 h-4 w-4 shrink-0 text-cyan-400" />
+                <div className="text-xs leading-relaxed text-slate-300">
+                  {selectedAsset.marketClass === 'STOCK' ? (
+                    <>
+                      <strong className="text-white">Mua cổ phiếu nghĩa là bạn sở hữu một phần doanh nghiệp trong game.</strong>{' '}
+                      {selectedAsset.description}
+                    </>
+                  ) : (
+                    <>
+                      <strong className="text-white">
+                        Spot là mua và sở hữu tài sản mô phỏng. Futures là giao dịch hợp đồng theo biến động giá và có rủi ro ký quỹ.
+                      </strong>{' '}
+                      {selectedAsset.description}
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* Owned position summary for this asset */}
+              <div className="grid grid-cols-2 gap-3 rounded-lg border border-slate-800 bg-slate-950/60 p-3 text-xs sm:grid-cols-4">
+                <div>
+                  <div className="text-[11px] text-slate-400">Số dư khả dụng</div>
+                  <div className="mt-0.5 font-mono font-semibold tabular-nums text-white">
+                    {player ? formatCR(player.wallet.availableMinor) : '0.00'} CR
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[11px] text-slate-400">Bạn đang sở hữu</div>
+                  <div className="mt-0.5 font-mono font-semibold tabular-nums text-white">
+                    {formatQty(ownedTotalQty)} {selectedAsset.symbol}
+                  </div>
+                </div>
+                <div>
+                  <div className="inline-flex items-center gap-1 text-[11px] text-slate-400">
+                    Giá vốn TB
+                    <GlossaryTerm termKey="average_entry_price" />
+                  </div>
+                  <div className="mt-0.5 font-mono font-semibold tabular-nums text-slate-200">
+                    {selectedHolding ? `${formatCR(selectedHolding.avgCostMinor)} CR` : '—'}
+                  </div>
+                </div>
+                <div>
+                  <div className="inline-flex items-center gap-1 text-[11px] text-slate-400">
+                    Lời/Lỗ tạm tính
+                    <GlossaryTerm termKey="unrealized_pnl" />
+                  </div>
+                  <div
+                    className={`mt-0.5 font-mono font-semibold tabular-nums ${
+                      ownedTotalQty === 0
+                        ? 'text-slate-400'
+                        : holdingUnrealizedPnlMinor >= 0
+                          ? 'text-emerald-400'
+                          : 'text-rose-400'
+                    }`}
+                  >
+                    {ownedTotalQty === 0
+                      ? 'Chưa sở hữu'
+                      : `${holdingUnrealizedPnlMinor >= 0 ? 'Lời +' : 'Lỗ '}${formatCR(holdingUnrealizedPnlMinor)} CR (${holdingPnlPct >= 0 ? '+' : ''}${holdingPnlPct.toFixed(2)}%)`}
+                  </div>
+                </div>
+              </div>
+
+              {/* Stock Fundamentals & Dividend note */}
+              {selectedAsset.marketClass === 'STOCK' && selectedAsset.fundamentals && (
+                <div className="grid grid-cols-2 gap-3 border-t border-slate-800/80 pt-3 text-xs sm:grid-cols-4">
+                  <div>
+                    <div className="text-[11px] text-slate-400">Ngành hoạt động</div>
+                    <div className="mt-0.5 font-medium text-white">{selectedAsset.fundamentals.sector}</div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] text-slate-400">Doanh thu / Lãi ròng</div>
+                    <div className="mt-0.5 font-mono text-slate-200">
+                      {formatCompactCR(selectedAsset.fundamentals.revenueMinor)} /{' '}
+                      {formatCompactCR(selectedAsset.fundamentals.netProfitMinor)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="inline-flex items-center gap-1 text-[11px] text-slate-400">
+                      Cổ tức mô phỏng
+                      <GlossaryTerm termKey="dividend" />
+                    </div>
+                    <div className="mt-0.5 font-mono text-slate-200">
+                      {selectedAsset.fundamentals.dividendPerShareMinor > 0
+                        ? `${formatCR(selectedAsset.fundamentals.dividendPerShareMinor)} CR/cp (${selectedAsset.fundamentals.dividendYieldPct}%)`
+                        : 'Không chia cổ tức kỳ này'}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] text-slate-400">Trạng thái phiên ESE</div>
+                    <div
+                      className={`mt-0.5 font-medium ${
+                        selectedAsset.status === 'OPEN' ? 'text-emerald-400' : 'text-amber-300'
+                      }`}
+                    >
+                      {selectedAsset.status === 'OPEN' ? 'Đang mở giao dịch' : 'Đã đóng phiên (chờ phiên kế)'}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Holdings, Open Orders & History (Preserves Order Lifecycle fix!) */}
+            <div className="rounded-xl border border-slate-800/80 bg-slate-900/60 overflow-hidden">
+              <div className="flex items-center gap-1 border-b border-slate-800 px-3 py-2 overflow-x-auto">
+                {(
+                  [
+                    { id: 'OPEN_ORDERS', label: `Lệnh đang mở (${openOrders.length})` },
+                    { id: 'HOLDINGS', label: `Tài sản đang sở hữu (${player?.holdings.length ?? 0})` },
+                    { id: 'HISTORY', label: `Lịch sử lệnh (${playerOrders.length})` },
+                  ] as const
+                ).map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => setBeginnerBottomTab(t.id)}
+                    data-testid={`beginner-tab-${t.id.toLowerCase()}`}
+                    className={`min-h-[34px] rounded-md px-3 text-xs font-medium whitespace-nowrap transition-colors ${
+                      beginnerBottomTab === t.id
+                        ? 'bg-slate-800 text-cyan-300'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="max-h-72 overflow-x-auto overflow-y-auto">
+                {beginnerBottomTab === 'OPEN_ORDERS' && (
+                  <table className="w-full text-xs" data-testid="beginner-open-orders-table">
+                    <thead className="bg-slate-950/60 text-[11px] text-slate-400">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-medium">Mã</th>
+                        <th className="px-3 py-2 text-left font-medium">Lệnh</th>
+                        <th className="px-3 py-2 text-right font-medium">Giá đặt</th>
+                        <th className="px-3 py-2 text-right font-medium">Khớp / Tổng</th>
+                        <th className="px-3 py-2 text-right font-medium">Thao tác</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 font-mono">
+                      {openOrders.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="px-4 py-6 text-center font-sans text-slate-400">
+                            Hiện không có lệnh đang chờ khớp. Các lệnh đã khớp xong sẽ tự động chuyển sang Lịch sử lệnh.
+                          </td>
+                        </tr>
+                      ) : (
+                        openOrders.map((o) => (
+                          <tr key={o.id}>
+                            <td className="px-3 py-2.5 font-semibold text-white">{o.symbol}</td>
+                            <td className="px-3 py-2.5 font-sans">
+                              <span className={o.side === 'BUY' ? 'text-emerald-400' : 'text-rose-400'}>
+                                {o.side === 'BUY' ? 'Mua' : 'Bán'}
+                              </span>{' '}
+                              · {o.type === 'LIMIT' ? 'Đặt giá' : 'Thị trường'}
+                            </td>
+                            <td className="px-3 py-2.5 text-right text-slate-200">{formatCR(o.priceMinor)} CR</td>
+                            <td className="px-3 py-2.5 text-right text-slate-200">
+                              {formatQty(o.filledQuantity)} / {formatQty(o.quantity)}
+                              {o.status === 'PARTIALLY_FILLED' && (
+                                <div className="text-[10px] text-amber-300">
+                                  Đã khớp {calcOrderFillProgressPct(o.filledQuantity, o.quantity)}%
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-3 py-2.5 text-right">
+                              <button
+                                type="button"
+                                disabled={cancellingId === o.id}
+                                onClick={() => handleCancelOrder(o.id)}
+                                className="inline-flex items-center gap-1 rounded px-2 py-1 font-sans text-[11px] font-medium text-rose-300 hover:bg-rose-500/15 disabled:opacity-50"
+                              >
+                                <XCircle className="h-3.5 w-3.5" />
+                                Hủy
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                )}
+
+                {beginnerBottomTab === 'HOLDINGS' && (
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-950/60 text-[11px] text-slate-400">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-medium">Tài sản</th>
+                        <th className="px-3 py-2 text-right font-medium">Số lượng</th>
+                        <th className="px-3 py-2 text-right font-medium">Giá vốn TB</th>
+                        <th className="px-3 py-2 text-right font-medium">Giá hiện tại</th>
+                        <th className="px-3 py-2 text-right font-medium">Lời / Lỗ</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 font-mono">
+                      {!player || player.holdings.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="px-4 py-6 text-center font-sans text-slate-400">
+                            Bạn chưa sở hữu cổ phiếu hoặc crypto nào. Hãy thực hiện lệnh mua đầu tiên ở bảng bên phải.
+                          </td>
+                        </tr>
+                      ) : (
+                        player.holdings.map((h) => {
+                          const a = assets.find((x) => x.symbol === h.symbol);
+                          const qty = h.availableQty + h.lockedQty;
+                          const val = a ? calcNotionalMinor(a.lastPriceMinor, qty) : 0;
+                          const cost = calcNotionalMinor(h.avgCostMinor, qty);
+                          const pnl = val - cost;
+                          return (
+                            <tr
+                              key={h.symbol}
+                              onClick={() => setSelectedSymbol(h.symbol)}
+                              className="cursor-pointer hover:bg-slate-800/40"
+                            >
+                              <td className="px-3 py-2.5 font-semibold text-white">{h.symbol}</td>
+                              <td className="px-3 py-2.5 text-right text-slate-200">{formatQty(qty)}</td>
+                              <td className="px-3 py-2.5 text-right text-slate-400">{formatCR(h.avgCostMinor)}</td>
+                              <td className="px-3 py-2.5 text-right text-white">
+                                {a ? formatCR(a.lastPriceMinor) : '--'}
+                              </td>
+                              <td
+                                className={`px-3 py-2.5 text-right ${
+                                  pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                                }`}
+                              >
+                                {pnl >= 0 ? 'Lời +' : 'Lỗ '}
+                                {formatCR(pnl)} CR
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                )}
+
+                {beginnerBottomTab === 'HISTORY' && (
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-950/60 text-[11px] text-slate-400">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-medium">Thời gian</th>
+                        <th className="px-3 py-2 text-left font-medium">Mã</th>
+                        <th className="px-3 py-2 text-left font-medium">Chiều</th>
+                        <th className="px-3 py-2 text-right font-medium">Đã khớp</th>
+                        <th className="px-3 py-2 text-right font-medium">Trạng thái</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 font-mono">
+                      {playerOrders.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="px-4 py-6 text-center font-sans text-slate-400">
+                            Chưa có lịch sử giao dịch.
+                          </td>
+                        </tr>
+                      ) : (
+                        playerOrders.slice(0, 25).map((o) => (
+                          <tr key={o.id}>
+                            <td className="px-3 py-2 text-slate-400">{formatTimeShort(o.createdAt)}</td>
+                            <td className="px-3 py-2 font-semibold text-white">{o.symbol}</td>
+                            <td className={`px-3 py-2 font-sans ${o.side === 'BUY' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {o.side === 'BUY' ? 'Mua' : 'Bán'}
+                            </td>
+                            <td className="px-3 py-2 text-right text-slate-200">
+                              {formatQty(o.filledQuantity)} / {formatQty(o.quantity)}
+                            </td>
+                            <td className="px-3 py-2 text-right text-slate-300">{o.status}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+
+            {/* Expandable Advanced Tools Disclosure */}
+            <div className="rounded-xl border border-slate-800/80 bg-slate-900/50">
+              <button
+                type="button"
+                onClick={() => setShowAdvancedDrawer((v) => !v)}
+                className="flex min-h-[44px] w-full items-center justify-between px-4 py-2.5 text-xs font-medium text-slate-300 hover:text-white"
+              >
+                <span>Mở rộng công cụ nâng cao (Sổ lệnh trực tiếp & chuyển chế độ Chuyên nghiệp)</span>
+                {showAdvancedDrawer ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </button>
+              {showAdvancedDrawer && (
+                <div className="border-t border-slate-800 p-4 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
+                    <span>Sổ lệnh thời gian thực cho {selectedAsset.symbol} (cùng dữ liệu với chế độ Chuyên nghiệp)</span>
+                    <button
+                      type="button"
+                      onClick={() => setTradingMode('PRO')}
+                      className="font-semibold text-cyan-400 hover:text-cyan-300"
+                    >
+                      Mở toàn bộ giao diện Chuyên nghiệp →
+                    </button>
+                  </div>
+                  <div className="rounded-lg border border-slate-800 bg-slate-950/60 overflow-hidden">
+                    <OrderBookPanel orderBook={activeOrderBook} loading={bookLoading} />
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Right: Desktop 3-Step Simple Trade Flow */}
+          <div className="hidden lg:block lg:col-span-5 xl:col-span-4 lg:sticky lg:top-4">
+            <SimpleTradeFlow
+              asset={selectedAsset}
+              onOrderCompleted={() => {
+                void refetchOrders();
+                queryClient.invalidateQueries({ queryKey: ['candles', activeSymbol, timeframe] });
+                queryClient.invalidateQueries({ queryKey: ['recentTrades', activeSymbol] });
+              }}
+            />
+          </div>
+        </div>
+
+        {/* Mobile Sticky Action Bar (<= 15% viewport height, touch targets >= 44px) */}
+        <div
+          data-testid="mobile-trade-bar"
+          className="fixed bottom-0 left-0 right-0 z-30 flex items-center gap-2.5 border-t border-slate-800 bg-slate-950/95 px-4 py-2.5 backdrop-blur lg:hidden"
+        >
+          <button
+            type="button"
+            onClick={() => setMobileSheetSide('BUY')}
+            data-testid="mobile-buy-cta"
+            className="min-h-[46px] flex-1 rounded-lg bg-emerald-600 text-sm font-semibold text-white active:bg-emerald-700"
+          >
+            Mua {selectedAsset.symbol}
+          </button>
+          <button
+            type="button"
+            onClick={() => setMobileSheetSide('SELL')}
+            data-testid="mobile-sell-cta"
+            className="min-h-[46px] flex-1 rounded-lg bg-rose-600 text-sm font-semibold text-white active:bg-rose-700"
+          >
+            Bán {selectedAsset.symbol}
+          </button>
+        </div>
+
+        {/* Mobile Bottom Sheet Order Flow */}
+        {mobileSheetSide && (
+          <div
+            className="fixed inset-0 z-50 flex items-end bg-black/65 lg:hidden"
+            onClick={() => setMobileSheetSide(null)}
+            data-testid="mobile-trade-sheet"
+          >
+            <div
+              className="max-h-[88vh] w-full overflow-y-auto rounded-t-2xl border-t border-slate-700 bg-slate-950 p-4 pb-6 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mb-3 flex items-center justify-between">
+                <div className="text-sm font-semibold text-white">
+                  {mobileSheetSide === 'BUY' ? 'Mua' : 'Bán'} {selectedAsset.name} ({selectedAsset.symbol})
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMobileSheetSide(null)}
+                  aria-label="Đóng bảng đặt lệnh"
+                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-800 text-slate-400 hover:text-white"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <SimpleTradeFlow
+                asset={selectedAsset}
+                initialSide={mobileSheetSide}
+                compactHeader
+                onOrderCompleted={() => {
+                  void refetchOrders();
+                  queryClient.invalidateQueries({ queryKey: ['candles', activeSymbol, timeframe] });
+                  queryClient.invalidateQueries({ queryKey: ['recentTrades', activeSymbol] });
+                }}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
-    <div className="max-w-[1600px] mx-auto space-y-3">
+    <div className="max-w-[1600px] mx-auto space-y-3" data-testid="exchange-pro-view">
+      <TradingModeToggle compact />
       {/* Top Instrument Header Bar */}
       <div className="rounded-lg bg-[var(--bg-panel)] border border-[var(--border-subtle)] px-4 py-3 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -405,7 +916,14 @@ export function ExchangePage() {
                           </td>
                           <td className="px-3 py-2 text-right">{formatCR(o.priceMinor)}</td>
                           <td className="px-3 py-2 text-right">
-                            {formatQty(o.filledQuantity)} / {formatQty(o.quantity)}
+                            <div>
+                              {formatQty(o.filledQuantity)} / {formatQty(o.quantity)}
+                            </div>
+                            {o.status === 'PARTIALLY_FILLED' && (
+                              <div className="text-[10px] text-[var(--text-muted)]">
+                                Còn {formatQty(o.remainingQuantity)} ({calcOrderFillProgressPct(o.filledQuantity, o.quantity)}%)
+                              </div>
+                            )}
                           </td>
                           <td className="px-3 py-2 text-right text-[var(--warning)]">{o.status}</td>
                           <td className="px-3 py-2 text-right">
@@ -629,8 +1147,11 @@ export function ExchangePage() {
               asset={selectedAsset}
               orderBook={activeOrderBook}
               prefilledPrice={prefilledPrice}
-              onOrderSubmitted={() => {
-                refetchOrders();
+              onOrderSubmitted={(order) => {
+                if (player) {
+                  applySpotOrderToQueryCache(player.id, order);
+                }
+                void refetchOrders();
                 queryClient.invalidateQueries({ queryKey: ['candles', activeSymbol, timeframe] });
                 queryClient.invalidateQueries({ queryKey: ['recentTrades', activeSymbol] });
               }}

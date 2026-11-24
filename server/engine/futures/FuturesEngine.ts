@@ -36,8 +36,19 @@ import {
   type FuturesTriggerSource,
   type UnresolvedDeficitRecord,
 } from '../../../shared/contracts/futures';
-import { formatRate } from '../../../shared/contracts/money';
-import type { Candle, Timeframe, Trade } from '../../../shared/contracts/types';
+import { formatRate, toMinor } from '../../../shared/contracts/money';
+import {
+  calculateFuturesRiskScenarios,
+  type FuturesPreviewResponse,
+} from '../../../shared/contracts/beginner';
+import { isFuturesOrderOpen } from '../../../shared/contracts/orderLifecycle';
+import {
+  ERROR_MESSAGES_VI,
+  type Candle,
+  type ErrorCode,
+  type Timeframe,
+  type Trade,
+} from '../../../shared/contracts/types';
 import { DomainError } from '../../domain/DomainError';
 import {
   INITIAL_FUTURES_INSURANCE_RESERVE_MINOR,
@@ -68,6 +79,8 @@ export interface PlaceFuturesOrderCommand {
   stopLossCR?: number;
   takeProfitCR?: number;
   maxSlippageBps?: number;
+  expiresAt?: string | null;
+  ttlSeconds?: number;
   idempotencyKey?: string;
   isLiquidationOrder?: boolean;
   skipRiskAckCheck?: boolean;
@@ -96,7 +109,10 @@ export interface LiquidationCycleResult {
   affectedPlayers: string[];
 }
 
+export type FuturesOrderLifecycleEventKind = 'created' | 'partially_filled' | 'filled' | 'cancelled' | 'expired';
+
 export interface FuturesHooks {
+  onOrder?: (order: FuturesOrder, eventKind: FuturesOrderLifecycleEventKind) => void;
   onTrade?: (trade: FuturesTrade) => void;
   onOrderBook?: (book: FuturesOrderBookSnapshot) => void;
   onQuote?: (contract: FuturesContract) => void;
@@ -364,6 +380,25 @@ export class FuturesEngine {
     return out.sort((a, b) => b.createdSeq - a.createdSeq);
   }
 
+  listPlayerOpenOrders(playerId: string, symbol?: string): FuturesOrder[] {
+    const out: FuturesOrder[] = [];
+    for (const o of this.ordersById.values()) {
+      if (o.playerId !== playerId) continue;
+      if (symbol && o.symbol !== symbol) continue;
+      if (!isFuturesOrderOpen(o)) continue;
+      out.push({ ...o });
+    }
+    return out.sort((a, b) => b.createdSeq - a.createdSeq);
+  }
+
+  getOpenOrdersCount(): number {
+    let count = 0;
+    for (const o of this.ordersById.values()) {
+      if (isFuturesOrderOpen(o)) count++;
+    }
+    return count;
+  }
+
   getPlayerFuturesValuation(playerId: string): {
     isolatedMarginMinor: number;
     openOrderMarginMinor: number;
@@ -385,7 +420,7 @@ export class FuturesEngine {
     let openOrderMarginMinor = 0;
     for (const ord of this.ordersById.values()) {
       if (ord.playerId !== playerId) continue;
-      if (ord.status === 'OPEN' || ord.status === 'PARTIALLY_FILLED' || ord.status === 'PENDING_TRIGGER') {
+      if (isFuturesOrderOpen(ord)) {
         openOrderMarginMinor += ord.lockedMarginMinor + ord.lockedFeeReserveMinor;
       }
     }
@@ -402,9 +437,7 @@ export class FuturesEngine {
     const wallet = this.ledger.requireWallet(playerId);
     const val = this.getPlayerFuturesValuation(playerId);
     const allOrders = this.listPlayerOrders(playerId);
-    const openOrders = allOrders.filter(
-      (o) => o.status === 'OPEN' || o.status === 'PARTIALLY_FILLED' || o.status === 'PENDING_TRIGGER',
-    );
+    const openOrders = allOrders.filter((o) => isFuturesOrderOpen(o));
     const playerTrades = this.allTrades
       .filter((t) => t.buyerId === playerId || t.sellerId === playerId)
       .slice(-80)
@@ -737,7 +770,13 @@ export class FuturesEngine {
     }
 
     // 12. Create Authoritative FuturesOrder
-    const nowIso = new Date().toISOString();
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
+    const resolvedExpiresAt =
+      cmd.expiresAt ??
+      (typeof cmd.ttlSeconds === 'number' && cmd.ttlSeconds > 0
+        ? new Date(nowMs + cmd.ttlSeconds * 1000).toISOString()
+        : null);
     this.orderSeq += 1;
     const timeInForce: FuturesTimeInForce = isMarketLike ? 'IOC' : (cmd.timeInForce ?? 'GTC');
 
@@ -776,6 +815,8 @@ export class FuturesEngine {
       status: isConditional ? 'PENDING_TRIGGER' : 'OPEN',
       rejectReason: null,
       idempotencyKey: cmd.idempotencyKey,
+      expiresAt: resolvedExpiresAt,
+      version: 1,
       createdSeq: this.orderSeq,
       createdAt: nowIso,
       updatedAt: nowIso,
@@ -789,8 +830,10 @@ export class FuturesEngine {
     // 13. If Conditional Order, store in conditional trigger book and return immediately
     if (isConditional) {
       this.conditionalOrders.get(contract.symbol)!.push(order);
+      const condSnap = { ...order };
+      this.hooks.onOrder?.(condSnap, 'created');
       return {
-        order: { ...order },
+        order: condSnap,
         trades: [],
         position: this.getPosition(cmd.playerId, contract.symbol),
         orderBook: this.getOrderBook(contract.symbol),
@@ -821,13 +864,14 @@ export class FuturesEngine {
         : null;
 
     const trades: FuturesTrade[] = [];
+    const affectedRestingMap = new Map<string, FuturesOrder>();
     let updatedCandles: Record<Timeframe, Candle> | null = null;
     let weightedPriceSum = 0n;
 
     let idx = 0;
     while (order.remainingQtyInt > 0 && idx < oppositeBook.length) {
       const resting = oppositeBook[idx];
-      if (resting.remainingQtyInt <= 0 || resting.playerId === order.playerId) {
+      if (!isFuturesOrderOpen(resting) || resting.playerId === order.playerId) {
         idx++;
         continue;
       }
@@ -935,11 +979,15 @@ export class FuturesEngine {
 
       // Finalize resting order if filled
       if (resting.remainingQtyInt <= 0) {
+        resting.remainingQtyInt = 0;
+        resting.remainingQuantity = 0;
         resting.status = 'FILLED';
         this.refundUnusedOrderLock(resting, `Hoàn phần ký quỹ/phí dư sau khi khớp lệnh ${resting.id}`);
       } else {
         resting.status = 'PARTIALLY_FILLED';
       }
+      resting.version = (resting.version ?? 0) + 1;
+      affectedRestingMap.set(resting.id, { ...resting });
 
       const trade: FuturesTrade = {
         id: tradeId,
@@ -1016,19 +1064,51 @@ export class FuturesEngine {
 
     // Finalize incoming order status & refund unused locked CR
     if (order.remainingQtyInt <= 0) {
+      order.remainingQtyInt = 0;
+      order.remainingQuantity = 0;
       order.status = 'FILLED';
       this.refundUnusedOrderLock(order, `Hoàn ký quỹ/phí dư sau khi khớp toàn bộ ${order.id}`);
     } else if (isMarket || order.timeInForce === 'IOC') {
+      order.remainingQtyInt = 0;
+      order.remainingQuantity = 0;
       order.status = 'CANCELLED';
       this.refundUnusedOrderLock(order, `Hoàn ký quỹ/phí phần chưa khớp của lệnh ${order.type} ${order.id}`);
+    } else if (order.expiresAt && Date.parse(order.expiresAt) <= Date.now()) {
+      order.remainingQtyInt = 0;
+      order.remainingQuantity = 0;
+      order.status = 'EXPIRED';
+      this.refundUnusedOrderLock(order, `Hoàn ký quỹ/phí lệnh hết hạn ${order.id}`);
     } else {
       order.status = order.filledQtyInt > 0 ? 'PARTIALLY_FILLED' : 'OPEN';
       this.insertRestingOrder(order);
     }
 
+    order.version = (order.version ?? 0) + 1;
+    order.updatedAt = new Date().toISOString();
+
     // Recompute exact Open Interest for symbol
     this.recomputeOpenInterest(contract);
     this.bookSeq += 1;
+
+    // Emit authoritative order lifecycle notifications for affected resting orders & incoming order
+    for (const affected of affectedRestingMap.values()) {
+      this.hooks.onOrder?.(
+        affected,
+        affected.status === 'FILLED' ? 'filled' : 'partially_filled',
+      );
+    }
+    const finalOrderSnap = { ...order };
+    const incomingKind: FuturesOrderLifecycleEventKind =
+      finalOrderSnap.status === 'FILLED'
+        ? 'filled'
+        : finalOrderSnap.status === 'PARTIALLY_FILLED'
+          ? 'partially_filled'
+          : finalOrderSnap.status === 'CANCELLED'
+            ? 'cancelled'
+            : finalOrderSnap.status === 'EXPIRED'
+              ? 'expired'
+              : 'created';
+    this.hooks.onOrder?.(finalOrderSnap, incomingKind);
 
     // Spawn attached Reduce-Only SL/TP conditional orders if opening order filled
     const attachedConditionalOrders: FuturesOrder[] = [];
@@ -1075,7 +1155,7 @@ export class FuturesEngine {
     }
 
     return {
-      order: { ...order },
+      order: finalOrderSnap,
       trades,
       position: this.getPosition(order.playerId, contract.symbol),
       orderBook: book,
@@ -1486,23 +1566,77 @@ export class FuturesEngine {
     order.remainingQtyInt = 0;
     order.remainingQuantity = 0;
     order.status = 'CANCELLED';
+    order.version = (order.version ?? 0) + 1;
     order.updatedAt = new Date().toISOString();
     this.bookSeq += 1;
 
+    const cancelledSnap = { ...order };
     const book = this.getOrderBook(order.symbol);
+    this.hooks.onOrder?.(cancelledSnap, 'cancelled');
     this.hooks.onOrderBook?.(book);
 
     return {
-      order: { ...order },
+      order: cancelledSnap,
       orderBook: book,
       refundedMarginMinor,
     };
   }
 
+  /**
+   * Expires all resting/conditional Futures orders whose `expiresAt` timestamp has elapsed,
+   * removes them from book/conditional queues, refunds locked margin & fee reserves,
+   * sets remainingQtyInt = 0 & status = 'EXPIRED', and emits `onOrder(..., 'expired')`.
+   */
+  expireOrders(nowMs = Date.now()): FuturesOrder[] {
+    const expired: FuturesOrder[] = [];
+    const affectedSymbols = new Set<string>();
+    const nowIso = new Date(nowMs).toISOString();
+
+    for (const order of this.ordersById.values()) {
+      if (!isFuturesOrderOpen(order)) continue;
+      if (!order.expiresAt) continue;
+      const expMs = Date.parse(order.expiresAt);
+      if (!Number.isFinite(expMs) || expMs > nowMs) continue;
+
+      if (order.status === 'PENDING_TRIGGER') {
+        const conds = this.conditionalOrders.get(order.symbol);
+        if (conds) {
+          const idx = conds.findIndex((o) => o.id === order.id);
+          if (idx !== -1) conds.splice(idx, 1);
+        }
+      } else {
+        const book = order.side === 'BUY' ? this.bids.get(order.symbol) : this.asks.get(order.symbol);
+        if (book) {
+          const idx = book.findIndex((o) => o.id === order.id);
+          if (idx !== -1) book.splice(idx, 1);
+        }
+      }
+
+      this.refundUnusedOrderLock(order, `Hoàn ký quỹ lệnh Futures hết hạn ${order.symbol}`);
+      order.remainingQtyInt = 0;
+      order.remainingQuantity = 0;
+      order.status = 'EXPIRED';
+      order.version = (order.version ?? 0) + 1;
+      order.updatedAt = nowIso;
+      affectedSymbols.add(order.symbol);
+
+      const snap = { ...order };
+      expired.push(snap);
+      this.hooks.onOrder?.(snap, 'expired');
+    }
+
+    if (affectedSymbols.size > 0) {
+      this.bookSeq += 1;
+      for (const sym of affectedSymbols) {
+        this.hooks.onOrderBook?.(this.getOrderBook(sym));
+      }
+    }
+
+    return expired;
+  }
+
   cancelAllPlayerOrdersForSymbol(playerId: string, symbol: string): void {
-    const open = this.listPlayerOrders(playerId, symbol).filter(
-      (o) => o.status === 'OPEN' || o.status === 'PARTIALLY_FILLED' || o.status === 'PENDING_TRIGGER',
-    );
+    const open = this.listPlayerOpenOrders(playerId, symbol);
     for (const o of open) {
       this.cancelOrder(o.id, playerId);
     }
@@ -1608,8 +1742,13 @@ export class FuturesEngine {
           ((pos.side === 'LONG' && ord.side === 'SELL') || (pos.side === 'SHORT' && ord.side === 'BUY'));
         if (!validOpp) {
           ord.status = 'CANCELLED';
+          ord.remainingQtyInt = 0;
+          ord.remainingQuantity = 0;
+          ord.version = (ord.version ?? 0) + 1;
+          ord.updatedAt = new Date().toISOString();
           ord.rejectReason = 'Vị thế đã đóng trước khi lệnh điều kiện kích hoạt.';
           this.refundUnusedOrderLock(ord, `Hoàn ký quỹ lệnh điều kiện ${ord.id}`);
+          this.hooks.onOrder?.({ ...ord }, 'cancelled');
           continue;
         }
         ord.qtyInt = Math.min(ord.qtyInt, pos!.qtyInt);
@@ -1619,13 +1758,19 @@ export class FuturesEngine {
       }
 
       ord.status = 'OPEN';
+      ord.version = (ord.version ?? 0) + 1;
       ord.updatedAt = new Date().toISOString();
       try {
         this.executeActiveOrder(ord, contract, 800);
       } catch (err) {
         ord.status = 'CANCELLED';
+        ord.remainingQtyInt = 0;
+        ord.remainingQuantity = 0;
+        ord.version = (ord.version ?? 0) + 1;
+        ord.updatedAt = new Date().toISOString();
         ord.rejectReason = err instanceof Error ? err.message : 'Không đủ thanh khoản khi kích hoạt lệnh điều kiện.';
         this.refundUnusedOrderLock(ord, `Hoàn ký quỹ lệnh điều kiện thất bại ${ord.id}`);
+        this.hooks.onOrder?.({ ...ord }, 'cancelled');
       }
     }
 
@@ -2292,6 +2437,8 @@ export class FuturesEngine {
       parentOrderId: params.parentOrder.id,
       status: 'PENDING_TRIGGER',
       rejectReason: null,
+      expiresAt: null,
+      version: 1,
       createdSeq: this.orderSeq,
       createdAt: nowIso,
       updatedAt: nowIso,
@@ -2299,7 +2446,9 @@ export class FuturesEngine {
 
     this.ordersById.set(ord.id, ord);
     this.conditionalOrders.get(params.contract.symbol)!.push(ord);
-    return { ...ord };
+    const snap = { ...ord };
+    this.hooks.onOrder?.(snap, 'created');
+    return snap;
   }
 
   private cancelReduceOnlyConditionals(playerId: string, symbol: string): void {
@@ -2311,11 +2460,279 @@ export class FuturesEngine {
         c.status = 'CANCELLED';
         c.remainingQtyInt = 0;
         c.remainingQuantity = 0;
+        c.version = (c.version ?? 0) + 1;
         c.updatedAt = new Date().toISOString();
+        this.hooks.onOrder?.({ ...c }, 'cancelled');
       } else {
         kept.push(c);
       }
     }
     this.conditionalOrders.set(symbol, kept);
   }
+
+  /**
+   * Side-effect-free Futures Order Preview & Risk Simulation (+1%, -1%, +5%, -5%).
+   * Supports specifying either `marginCR` (Beginner Mode) or `quantity` (Pro Mode),
+   * using the exact same BigInt margin, risk-tier, fee, and isolated liquidation math as `placeOrder()`.
+   */
+  public previewOrder(params: {
+    playerId: string;
+    symbol: string;
+    side: FuturesOrderSide;
+    type: 'MARKET' | 'LIMIT';
+    leverage: number;
+    marginCR?: number;
+    quantity?: number;
+    priceCR?: number;
+    maxSlippageBps?: number;
+  }): FuturesPreviewResponse {
+    const contract = this.contracts.get(params.symbol);
+    if (!contract) {
+      throw new DomainError('ASSET_NOT_FOUND', undefined, 404);
+    }
+
+    const wallet = this.ledger.requireWallet(params.playerId);
+    const availableCRBeforeMinor = wallet.availableMinor;
+    const positionSide: FuturesPositionSide = params.side === 'BUY' ? 'LONG' : 'SHORT';
+    const leverage = Math.max(1, Math.round(params.leverage || 1));
+
+    const book = this.getOrderBook(contract.symbol, 25);
+    const oppositeBook = (params.side === 'BUY' ? this.asks.get(contract.symbol) : this.bids.get(contract.symbol)) ?? [];
+    const matchableOpposite = oppositeBook.filter((o) => isFuturesOrderOpen(o) && o.playerId !== params.playerId);
+
+    let blockingCode: ErrorCode | null = null;
+    let blockingMessage: string | null = null;
+
+    if (contract.status === 'EMERGENCY_HALTED') {
+      blockingCode = 'FUTURES_EMERGENCY_HALTED';
+      blockingMessage = ERROR_MESSAGES_VI.FUTURES_EMERGENCY_HALTED;
+    } else if (contract.status === 'DEGRADED') {
+      blockingCode = 'FUTURES_MARKET_DEGRADED';
+      blockingMessage = ERROR_MESSAGES_VI.FUTURES_MARKET_DEGRADED;
+    }
+
+    if (!(FUTURES_ALLOWED_LEVERAGES as readonly number[]).includes(leverage) || leverage > contract.maxLeverage) {
+      blockingCode = blockingCode ?? 'FUTURES_LEVERAGE_EXCEEDED';
+      blockingMessage =
+        blockingMessage ?? `Đòn bẩy cho phép cho ${contract.symbol} là ${FUTURES_ALLOWED_LEVERAGES.filter((l) => l <= contract.maxLeverage).join('x, ')}x.`;
+    }
+
+    let expectedEntryPriceInt =
+      params.side === 'BUY'
+        ? (book.bestAskInt ?? contract.markPriceInt)
+        : (book.bestBidInt ?? contract.markPriceInt);
+
+    if (params.type === 'LIMIT') {
+      if (params.priceCR === undefined || !Number.isFinite(params.priceCR) || params.priceCR <= 0) {
+        blockingCode = blockingCode ?? 'INVALID_PRICE';
+        blockingMessage = blockingMessage ?? ERROR_MESSAGES_VI.INVALID_PRICE;
+      } else {
+        const limitInt = toPriceInt(params.priceCR, contract.priceScale);
+        if (limitInt <= 0 || limitInt % contract.priceTickInt !== 0) {
+          blockingCode = blockingCode ?? 'INVALID_PRICE';
+          blockingMessage =
+            blockingMessage ??
+            `Giá đặt phải là bội số của bước giá ${(contract.priceTickInt / contract.priceScale).toFixed(contract.priceDecimals)} CR.`;
+        } else {
+          expectedEntryPriceInt = limitInt;
+        }
+      }
+    }
+
+    const snapQtyIntDown = (rawQtyInt: number): number => {
+      if (!Number.isFinite(rawQtyInt) || rawQtyInt <= 0) return 0;
+      return Math.floor(rawQtyInt / contract.qtyStepInt) * contract.qtyStepInt;
+    };
+
+    let qtyInt = 0;
+    if (params.quantity !== undefined && Number.isFinite(params.quantity) && params.quantity > 0) {
+      qtyInt = toQtyInt(params.quantity);
+    } else if (params.marginCR !== undefined && Number.isFinite(params.marginCR) && params.marginCR > 0 && expectedEntryPriceInt > 0) {
+      const targetMarginMinor = toMinor(params.marginCR);
+      const targetNotionalMinor = targetMarginMinor * leverage;
+      const rawQty =
+        (targetNotionalMinor / 100) /
+        ((expectedEntryPriceInt / contract.priceScale) * contract.contractMultiplier);
+      qtyInt = snapQtyIntDown(toQtyInt(rawQty));
+      // Ensure initialMarginMinor <= targetMarginMinor
+      let guard = 0;
+      while (qtyInt >= contract.qtyStepInt && guard < 100) {
+        const n = calcFuturesNotionalMinor(expectedEntryPriceInt, qtyInt, contract.priceScale, contract.contractMultiplier);
+        if (calcInitialMarginMinor(n, leverage) <= targetMarginMinor) break;
+        qtyInt -= contract.qtyStepInt;
+        guard++;
+      }
+    }
+
+    if (qtyInt < contract.minQtyInt) {
+      blockingCode = blockingCode ?? 'INVALID_ORDER';
+      blockingMessage =
+        blockingMessage ??
+        `Ký quỹ hoặc khối lượng chưa đạt mức tối thiểu ${contract.minQty} hợp đồng cho ${contract.symbol}.`;
+    } else if (qtyInt > contract.maxOrderQtyInt) {
+      blockingCode = blockingCode ?? 'INVALID_ORDER';
+      blockingMessage =
+        blockingMessage ?? `Khối lượng vượt quá giới hạn tối đa ${contract.maxOrderQty} hợp đồng mỗi lệnh.`;
+    } else if (qtyInt % contract.qtyStepInt !== 0) {
+      blockingCode = blockingCode ?? 'INVALID_ORDER';
+      blockingMessage = blockingMessage ?? `Khối lượng phải là bội số của bước ${contract.qtyStep}.`;
+    }
+
+    // Refine expected fill price against live opposite order book for MARKET orders
+    let fillableQtyInt = qtyInt;
+    if (params.type === 'MARKET' && qtyInt > 0) {
+      if (matchableOpposite.length === 0) {
+        blockingCode = blockingCode ?? 'INSUFFICIENT_LIQUIDITY';
+        blockingMessage = blockingMessage ?? ERROR_MESSAGES_VI.INSUFFICIENT_LIQUIDITY;
+        fillableQtyInt = 0;
+      } else {
+        let rem = qtyInt;
+        let weightedPrice = 0;
+        let filled = 0;
+        for (const opp of matchableOpposite) {
+          if (rem <= 0) break;
+          const take = Math.min(rem, opp.remainingQtyInt);
+          filled += take;
+          weightedPrice += opp.priceInt * take;
+          rem -= take;
+        }
+        fillableQtyInt = filled;
+        if (filled > 0) {
+          expectedEntryPriceInt = Math.round(weightedPrice / filled);
+        }
+      }
+    }
+
+    const positionNotionalMinor =
+      qtyInt > 0
+        ? calcFuturesNotionalMinor(expectedEntryPriceInt, qtyInt, contract.priceScale, contract.contractMultiplier)
+        : 0;
+    const tier = resolveRiskTier(positionNotionalMinor);
+    const maxAllowedLeverage = Math.min(contract.maxLeverage, tier.maxLeverage);
+    if (leverage > maxAllowedLeverage) {
+      blockingCode = blockingCode ?? 'FUTURES_LEVERAGE_EXCEEDED';
+      blockingMessage =
+        blockingMessage ?? `Quy mô vị thế này thuộc Tầng ${tier.tier}, tối đa ${maxAllowedLeverage}x.`;
+    }
+
+    const initialMarginMinor = calcInitialMarginMinor(positionNotionalMinor, leverage);
+    const maintenanceMarginMinor = calcMaintenanceMarginMinor(positionNotionalMinor, tier.maintenanceMarginBps);
+    const feeBps = params.type === 'MARKET' ? contract.takerFeeBps : contract.makerFeeBps;
+    const estimatedFeeMinor = calcFuturesFeeMinor(positionNotionalMinor, feeBps, positionNotionalMinor > 0);
+    const totalRequiredCRMinor = initialMarginMinor + estimatedFeeMinor;
+
+    if (availableCRBeforeMinor < totalRequiredCRMinor) {
+      blockingCode = blockingCode ?? 'INSUFFICIENT_FUNDS';
+      blockingMessage = blockingMessage ?? ERROR_MESSAGES_VI.INSUFFICIENT_FUNDS;
+    }
+
+    const { liquidationPriceInt, bankruptcyPriceInt } = calcIsolatedLiquidationPrices({
+      side: positionSide,
+      entryPriceInt: expectedEntryPriceInt,
+      qtyInt,
+      marginMinor: initialMarginMinor,
+      priceScale: contract.priceScale,
+      contractMultiplier: contract.contractMultiplier,
+      mmrBps: tier.maintenanceMarginBps,
+      liqFeeBps: contract.liquidationFeeBps,
+    });
+
+    const liquidationDistancePct =
+      expectedEntryPriceInt > 0 && liquidationPriceInt > 0
+        ? Number(((Math.abs(expectedEntryPriceInt - liquidationPriceInt) / expectedEntryPriceInt) * 100).toFixed(2))
+        : 0;
+
+    const scenarios =
+      qtyInt > 0 && initialMarginMinor > 0
+        ? calculateFuturesRiskScenarios({
+            side: positionSide,
+            entryPriceInt: expectedEntryPriceInt,
+            qtyInt,
+            initialMarginMinor,
+            liquidationPriceInt,
+            priceScale: contract.priceScale,
+            contractMultiplier: contract.contractMultiplier,
+            movesPct: [1, -1, 5, -5],
+          })
+        : [];
+
+    const lowLiquidityWarning =
+      (params.type === 'MARKET' && fillableQtyInt < qtyInt) ||
+      (book.spreadPct !== null && book.spreadPct >= 1.2);
+
+    return {
+      symbol: contract.symbol,
+      contractName: contract.name,
+      side: params.side,
+      positionSide,
+      type: params.type,
+      marginMode: 'ISOLATED',
+      leverage,
+      maxAllowedLeverage,
+      priceScale: contract.priceScale,
+      priceDecimals: contract.priceDecimals,
+      estimatedQuantity: fromQtyInt(qtyInt),
+      expectedEntryPriceInt,
+      markPriceInt: contract.markPriceInt,
+      positionNotionalMinor,
+      initialMarginMinor,
+      maintenanceMarginMinor,
+      estimatedFeeMinor,
+      totalRequiredCRMinor,
+      availableCRBeforeMinor,
+      remainingCRMinor: Math.max(0, availableCRBeforeMinor - totalRequiredCRMinor),
+      liquidationPriceInt,
+      bankruptcyPriceInt,
+      liquidationDistancePct,
+      riskTier: tier.tier,
+      lowLiquidityWarning,
+      contractStatus: contract.status,
+      canExecute: blockingCode === null && qtyInt >= contract.minQtyInt && (params.type === 'LIMIT' || fillableQtyInt > 0),
+      blockingCode,
+      blockingMessage,
+      scenarios,
+      disclaimerVi:
+        'Bảng mô phỏng chỉ nhằm minh họa mức độ nhạy cảm với biến động giá, KHÔNG phải dự đoán giá. Nếu giá chạm mức thanh lý, vị thế có thể bị đóng cưỡng bức và mất phần ký quỹ.',
+    };
+  }
+
+  /**
+   * Cancels all open/conditional Futures orders and closes/clears open positions for a player
+   * STRICTLY inside WORLD-PRACTICE so the player can reset cleanly to 100,000 CR.
+   */
+  public resetPlayerPracticeState(playerId: string): void {
+    if (this.worldId !== 'WORLD-PRACTICE') {
+      throw new DomainError('FORBIDDEN_IN_PRODUCTION', 'Chỉ hỗ trợ đặt lại tài khoản trong Phòng Luyện Tập.', 403);
+    }
+    // 1. Cancel all open and conditional orders
+    const openOrders = this.listPlayerOpenOrders(playerId);
+    for (const ord of openOrders) {
+      try {
+        this.cancelOrder(ord.id, playerId);
+      } catch {
+        // Ignore already closed/cancelled
+      }
+    }
+    // 2. Release any open isolated positions cleanly back to the practice player wallet
+    for (const pos of this.listPlayerPositions(playerId)) {
+      if (pos.marginMinor > 0) {
+        this.ledger.releaseFuturesMargin(
+          playerId,
+          pos.marginMinor,
+          pos.id,
+          `Giải phóng ký quỹ Futures khi đặt lại Phòng Luyện Tập (${pos.symbol})`,
+        );
+      }
+      pos.quantity = 0;
+      pos.qtyInt = 0;
+      pos.marginMinor = 0;
+      pos.initialMarginMinor = 0;
+      pos.unrealizedPnlMinor = 0;
+      pos.status = 'CLOSED';
+      pos.updatedAt = new Date().toISOString();
+      this.positions.delete(`${playerId}:${pos.symbol}`);
+      this.hooks.onPosition?.(playerId, null, pos.symbol);
+    }
+  }
 }
+

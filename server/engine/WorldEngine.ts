@@ -177,6 +177,7 @@ export class WorldEngine {
     this.business = new BusinessEngine(this.worldId, this.ledger);
     this.banking = new BankingEngine(this.ledger);
 
+    this.bindMatchingHooks();
     this.bindFuturesHooks();
     this.bootstrapWorld();
 
@@ -185,8 +186,43 @@ export class WorldEngine {
     }
   }
 
+  private bindMatchingHooks(): void {
+    this.matching.setHooks({
+      onOrderUpdated: (order, eventKind) => {
+        const rec = this.players.get(order.playerId);
+        if (rec?.role !== 'PLAYER') return;
+        const eventType: RealtimeEventType =
+          eventKind === 'filled'
+            ? 'order.filled'
+            : eventKind === 'partially_filled'
+              ? 'order.partially_filled'
+              : eventKind === 'cancelled'
+                ? 'order.cancelled'
+                : eventKind === 'expired'
+                  ? 'order.expired'
+                  : 'order.created';
+        this.eventBus.publish(eventType, order, `player:${order.playerId}`);
+      },
+    });
+  }
+
   private bindFuturesHooks(): void {
     this.futures.setHooks({
+      onOrder: (order, eventKind) => {
+        const rec = this.players.get(order.playerId);
+        if (rec?.role !== 'PLAYER') return;
+        const eventType: RealtimeEventType =
+          eventKind === 'filled'
+            ? 'futures.order.filled'
+            : eventKind === 'partially_filled'
+              ? 'futures.order.partially_filled'
+              : eventKind === 'cancelled'
+                ? 'futures.order.cancelled'
+                : eventKind === 'expired'
+                  ? 'futures.order.expired'
+                  : 'futures.order.created';
+        this.eventBus.publish(eventType, order, `player:${order.playerId}`);
+      },
       onQuote: (contract) => {
         this.eventBus.publish('futures.quote.updated', contract);
       },
@@ -199,6 +235,12 @@ export class WorldEngine {
         if (buyer) buyer.tradingVolumeMinor += trade.notionalMinor;
         if (seller) seller.tradingVolumeMinor += trade.notionalMinor;
         this.eventBus.publish('futures.trade.executed', trade, `futures:${trade.symbol}`);
+        if (buyer?.role === 'PLAYER') {
+          this.eventBus.publish('futures.trade.executed', trade, `player:${trade.buyerId}`);
+        }
+        if (seller?.role === 'PLAYER' && trade.sellerId !== trade.buyerId) {
+          this.eventBus.publish('futures.trade.executed', trade, `player:${trade.sellerId}`);
+        }
         this.emitPlayerFinancialSync(trade.buyerId);
         this.emitPlayerFinancialSync(trade.sellerId);
       },
@@ -417,6 +459,9 @@ export class WorldEngine {
           }
         }
 
+        // Expire any stale orders across Spot/Crypto/Forex and Futures
+        this.expireStaleOrders();
+
         // Empire Futures Exchange tick: AI bot liquidity & orders -> Mark Price refresh -> Liquidation Engine -> Due Funding
         this.futuresBots.runFuturesTick(this.economy.state);
         this.futures.refreshAllMarkPrices();
@@ -570,6 +615,44 @@ export class WorldEngine {
       session,
       profile,
     };
+  }
+
+  /**
+   * Resets a player's isolated Practice account back to 100,000 CR without affecting WORLD-01 or other players.
+   */
+  public resetPracticePlayer(playerId: string): PlayerProfile {
+    if (this.worldId !== 'WORLD-PRACTICE') {
+      throw new DomainError('FORBIDDEN_IN_PRODUCTION', 'Chức năng đặt lại tài khoản chỉ khả dụng trong Phòng Luyện Tập.', 403);
+    }
+    const record = this.players.get(playerId);
+    if (!record) {
+      throw new DomainError('UNAUTHORIZED', undefined, 401);
+    }
+
+    this.matching.cancelAllPlayerOrders(playerId);
+    this.futures.resetPlayerPracticeState(playerId);
+    this.ledger.resetPracticePlayerBalances(playerId, STARTING_CAPITAL_MINOR);
+
+    record.tradingVolumeMinor = 0;
+    const nowIso = new Date().toISOString();
+    record.netWorthHistory = [
+      {
+        timestamp: new Date(Date.now() - 3 * 3600 * 1000).toISOString(),
+        netWorthMinor: STARTING_CAPITAL_MINOR,
+        cashMinor: STARTING_CAPITAL_MINOR,
+        isDemoSeed: true,
+      },
+      {
+        timestamp: nowIso,
+        netWorthMinor: STARTING_CAPITAL_MINOR,
+        cashMinor: STARTING_CAPITAL_MINOR,
+        isDemoSeed: false,
+      },
+    ];
+
+    this.economy.syncLedgerMetrics(this.ledger);
+    this.emitPlayerFinancialSync(playerId);
+    return this.getPlayerProfile(playerId)!;
   }
 
   /**
@@ -885,14 +968,8 @@ export class WorldEngine {
       return result;
     }
 
-    // Broadcast order lifecycle event
-    const eventType: RealtimeEventType =
-      result.order.status === 'FILLED'
-        ? 'order.filled'
-        : result.order.status === 'PARTIALLY_FILLED'
-          ? 'order.partially_filled'
-          : 'order.created';
-    this.eventBus.publish(eventType, result.order);
+    // Order lifecycle events for both resting counterparties and the incoming order
+    // are emitted authoritatively by MatchingEngine's bound `onOrderUpdated` hook.
 
     // Broadcast trades, updated candles, order book, and affected player balances
     for (const trade of result.trades) {
@@ -926,9 +1003,58 @@ export class WorldEngine {
 
   public cancelOrder(playerId: string, orderId: string) {
     const result = this.matching.cancelOrder(orderId, playerId);
-    this.eventBus.publish('order.cancelled', result.order);
+    // `order.cancelled` is emitted authoritatively via MatchingEngine's `onOrderUpdated` hook
     this.eventBus.publish('market.orderbook.updated', result.orderBook, `market:${result.order.symbol}`);
     this.emitPlayerFinancialSync(playerId);
+    return result;
+  }
+
+  public expireStaleOrders(nowMs = Date.now()) {
+    const expiredSpot = this.matching.expireOrders(nowMs);
+    const expiredFutures = this.futures.expireOrders(nowMs);
+
+    const affectedSpotSymbols = new Set<string>();
+    const affectedPlayers = new Set<string>();
+
+    for (const ord of expiredSpot) {
+      affectedSpotSymbols.add(ord.symbol);
+      affectedPlayers.add(ord.playerId);
+    }
+    for (const ord of expiredFutures) {
+      affectedPlayers.add(ord.playerId);
+    }
+
+    for (const sym of affectedSpotSymbols) {
+      const asset = this.matching.getAsset(sym);
+      if (asset) {
+        this.eventBus.publish('market.quote.updated', asset);
+        this.eventBus.publish('market.orderbook.updated', this.matching.getOrderBook(sym), `market:${sym}`);
+      }
+    }
+
+    for (const pid of affectedPlayers) {
+      this.emitPlayerFinancialSync(pid);
+    }
+
+    return {
+      expiredSpot,
+      expiredFutures,
+    };
+  }
+
+  public devSimulateBotTick(symbol?: string) {
+    this.expireStaleOrders();
+    const result = this.marketMakers.runSimulationTick(this.economy.state, symbol);
+    for (const trade of result.trades) {
+      this.onTradeExecuted(trade);
+    }
+    for (const sym of result.affectedSymbols) {
+      const asset = this.matching.getAsset(sym);
+      if (asset) {
+        this.eventBus.publish('market.quote.updated', asset);
+        this.eventBus.publish('market.orderbook.updated', this.matching.getOrderBook(sym), `market:${sym}`);
+      }
+    }
     return result;
   }
 
@@ -953,6 +1079,12 @@ export class WorldEngine {
     if (seller) seller.tradingVolumeMinor += volumeCrMinor;
 
     this.eventBus.publish('market.trade.executed', trade, `market:${trade.symbol}`);
+    if (buyer?.role === 'PLAYER') {
+      this.eventBus.publish('trade.executed', trade, `player:${trade.buyerId}`);
+    }
+    if (seller?.role === 'PLAYER' && trade.sellerId !== trade.buyerId) {
+      this.eventBus.publish('trade.executed', trade, `player:${trade.sellerId}`);
+    }
     this.emitPlayerFinancialSync(trade.buyerId);
     this.emitPlayerFinancialSync(trade.sellerId);
   }
@@ -1145,7 +1277,7 @@ export class WorldEngine {
       simulatedAgentsCount: SIMULATED_AGENTS.length + FOREX_AI_AGENTS.length + FUTURES_AI_BOTS.length,
       matchingEngineHealth: 'OPERATIONAL',
       totalOrders: this.matching.getTotalOrdersCount() + this.futures.getTotalOrdersCount(),
-      openOrdersCount: this.matching.getOpenOrdersCount(),
+      openOrdersCount: this.matching.getOpenOrdersCount() + this.futures.getOpenOrdersCount(),
       totalTrades: this.matching.getTotalTradesCount() + this.futures.getTotalTradesCount(),
       totalLedgerEntries: this.ledger.ledger.count(),
       economyPhase: this.economy.state.phase,

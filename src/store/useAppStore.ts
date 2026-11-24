@@ -1,8 +1,14 @@
 import { create } from 'zustand';
 import type {
+  GlossaryLanguage,
+  TradingExperienceMode,
+  WorldMode,
+} from '../../shared/contracts/beginner';
+import type {
   FuturesContract,
   FuturesFundingSettlementEvent,
   FuturesLiquidationEvent,
+  FuturesOrder,
   FuturesOrderBookSnapshot,
   FuturesOverviewSnapshot,
   FuturesPosition,
@@ -16,6 +22,7 @@ import type {
   ForexOverviewSnapshot,
   GameClock,
   NewsItem,
+  Order,
   OrderBookSnapshot,
   PlayerProfile,
   RealtimeEnvelope,
@@ -23,9 +30,36 @@ import type {
   Trade,
   WorldSnapshot,
 } from '../../shared/contracts/types';
+import {
+  applyFuturesOrderToQueryCache,
+  applyFuturesPositionToQueryCache,
+  applyFuturesTradeToQueryCache,
+  applySpotOrderToQueryCache,
+  queryClient,
+} from '../lib/queryClient';
+
+// Bounded deduplication set for incoming realtime event IDs (prevents duplicate mutations on redelivery)
+const MAX_SEEN_EVENT_IDS = 600;
+const seenEventIds = new Set<string>();
+
+function markEventSeen(eventId: string | undefined): boolean {
+  if (!eventId) return false;
+  if (seenEventIds.has(eventId)) return true;
+  seenEventIds.add(eventId);
+  if (seenEventIds.size > MAX_SEEN_EVENT_IDS) {
+    const oldest = seenEventIds.values().next().value;
+    if (oldest !== undefined) seenEventIds.delete(oldest);
+  }
+  return false;
+}
+
+export function resetSeenRealtimeEvents(): void {
+  seenEventIds.clear();
+}
 
 export type NavPage =
   | 'overview'
+  | 'discover'
   | 'exchange'
   | 'forex'
   | 'futures'
@@ -56,27 +90,61 @@ export interface NotificationItem {
   read: boolean;
 }
 
-// Non-sensitive UI preferences ONLY (financial state is NEVER stored in localStorage)
-const UI_PREFS_KEY = 'trading_empire_ui_prefs_v1';
+// Non-sensitive UI preferences ONLY (financial state & auth tokens are NEVER stored in localStorage)
+const UI_PREFS_KEY = 'trading_empire_ui_prefs_v2';
 
 interface UiPrefs {
   theme: 'dark' | 'light';
   sidebarCollapsed: boolean;
   watchlist: string[];
+  tradingMode: TradingExperienceMode;
+  glossaryLang: GlossaryLanguage;
+  tutorialCompletedIds: string[];
+  futuresIntroSeen: boolean;
+}
+
+const DEFAULT_UI_PREFS: UiPrefs = {
+  theme: 'dark',
+  sidebarCollapsed: false,
+  watchlist: ['NOVA', 'BTC-SIM', 'ETH-SIM', 'DOGX-SIM'],
+  tradingMode: 'BEGINNER',
+  glossaryLang: 'vi',
+  tutorialCompletedIds: [],
+  futuresIntroSeen: false,
+};
+
+function resolveInitialTradingModeFromUrl(): TradingExperienceMode | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const modeParam = new URLSearchParams(window.location.search).get('mode')?.toLowerCase();
+    if (modeParam === 'pro') return 'PRO';
+    if (modeParam === 'beginner') return 'BEGINNER';
+  } catch {
+    // ignore
+  }
+  return null;
 }
 
 function loadUiPrefs(): UiPrefs {
+  const urlMode = resolveInitialTradingModeFromUrl();
   try {
-    const raw = window.localStorage.getItem(UI_PREFS_KEY);
-    if (!raw) return { theme: 'dark', sidebarCollapsed: false, watchlist: ['NOVA', 'BTC-SIM', 'ETH-SIM', 'NEXB'] };
+    const raw = window.localStorage.getItem(UI_PREFS_KEY) ?? window.localStorage.getItem('trading_empire_ui_prefs_v1');
+    if (!raw) {
+      return { ...DEFAULT_UI_PREFS, tradingMode: urlMode ?? DEFAULT_UI_PREFS.tradingMode };
+    }
     const parsed = JSON.parse(raw) as Partial<UiPrefs>;
     return {
       theme: parsed.theme === 'light' ? 'light' : 'dark',
       sidebarCollapsed: Boolean(parsed.sidebarCollapsed),
-      watchlist: Array.isArray(parsed.watchlist) ? parsed.watchlist : ['NOVA', 'BTC-SIM', 'ETH-SIM', 'NEXB'],
+      watchlist: Array.isArray(parsed.watchlist) ? parsed.watchlist : DEFAULT_UI_PREFS.watchlist,
+      tradingMode:
+        urlMode ?? (parsed.tradingMode === 'PRO' || parsed.tradingMode === 'BEGINNER' ? parsed.tradingMode : 'BEGINNER'),
+      glossaryLang: parsed.glossaryLang === 'en' ? 'en' : 'vi',
+      tutorialCompletedIds: Array.isArray(parsed.tutorialCompletedIds) ? parsed.tutorialCompletedIds : [],
+      futuresIntroSeen: Boolean(parsed.futuresIntroSeen),
     };
   } catch {
-    return { theme: 'dark', sidebarCollapsed: false, watchlist: ['NOVA', 'BTC-SIM', 'ETH-SIM', 'NEXB'] };
+    return { ...DEFAULT_UI_PREFS, tradingMode: urlMode ?? DEFAULT_UI_PREFS.tradingMode };
   }
 }
 
@@ -99,6 +167,14 @@ interface AppState {
   theme: 'dark' | 'light';
   sidebarCollapsed: boolean;
   watchlist: string[];
+  tradingMode: TradingExperienceMode;
+  worldMode: WorldMode;
+  glossaryLang: GlossaryLanguage;
+  glossaryDrawerOpen: boolean;
+  tutorialOpen: boolean;
+  tutorialActiveLessonId: string;
+  tutorialCompletedIds: string[];
+  futuresIntroSeen: boolean;
 
   // Session & Connection (in-memory only)
   token: string | null;
@@ -129,6 +205,7 @@ interface AppState {
   notifications: NotificationItem[];
   toasts: ToastItem[];
   lastRealtimeTradeSeq: number;
+  orderSyncSeq: number;
 
   // Actions
   setActivePage: (page: NavPage) => void;
@@ -147,6 +224,14 @@ interface AppState {
   toggleTheme: () => void;
   toggleSidebar: () => void;
   toggleWatchlist: (symbol: string) => void;
+  setTradingMode: (mode: TradingExperienceMode) => void;
+  setWorldMode: (mode: WorldMode) => void;
+  setGlossaryLang: (lang: GlossaryLanguage) => void;
+  setGlossaryDrawerOpen: (open: boolean) => void;
+  setTutorialOpen: (open: boolean) => void;
+  setTutorialActiveLessonId: (lessonId: string) => void;
+  completeTutorialLesson: (lessonId: string) => void;
+  markFuturesIntroSeen: () => void;
   setSession: (token: string | null, player: PlayerProfile | null) => void;
   setPlayer: (player: PlayerProfile | null) => void;
   setConnectionState: (state: ConnectionState) => void;
@@ -160,7 +245,19 @@ interface AppState {
   markNotificationsRead: () => void;
 }
 
-const initialPrefs = typeof window !== 'undefined' ? loadUiPrefs() : { theme: 'dark' as const, sidebarCollapsed: false, watchlist: ['NOVA', 'BTC-SIM', 'ETH-SIM', 'NEXB'] };
+const initialPrefs: UiPrefs = typeof window !== 'undefined' ? loadUiPrefs() : DEFAULT_UI_PREFS;
+
+function persistFromState(s: AppState, overrides: Partial<UiPrefs> = {}): void {
+  saveUiPrefs({
+    theme: overrides.theme ?? s.theme,
+    sidebarCollapsed: overrides.sidebarCollapsed ?? s.sidebarCollapsed,
+    watchlist: overrides.watchlist ?? s.watchlist,
+    tradingMode: overrides.tradingMode ?? s.tradingMode,
+    glossaryLang: overrides.glossaryLang ?? s.glossaryLang,
+    tutorialCompletedIds: overrides.tutorialCompletedIds ?? s.tutorialCompletedIds,
+    futuresIntroSeen: overrides.futuresIntroSeen ?? s.futuresIntroSeen,
+  });
+}
 
 export const useAppStore = create<AppState>((set, get) => ({
   activePage: 'overview',
@@ -172,6 +269,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   theme: initialPrefs.theme,
   sidebarCollapsed: initialPrefs.sidebarCollapsed,
   watchlist: initialPrefs.watchlist,
+  tradingMode: initialPrefs.tradingMode,
+  worldMode: 'LIVE',
+  glossaryLang: initialPrefs.glossaryLang,
+  glossaryDrawerOpen: false,
+  tutorialOpen: false,
+  tutorialActiveLessonId: 'lesson_1_cr_wallet',
+  tutorialCompletedIds: initialPrefs.tutorialCompletedIds,
+  futuresIntroSeen: initialPrefs.futuresIntroSeen,
 
   token: null,
   player: null,
@@ -200,6 +305,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   notifications: [],
   toasts: [],
   lastRealtimeTradeSeq: 0,
+  orderSyncSeq: 0,
 
   setActivePage: (page) => set({ activePage: page }),
 
@@ -241,14 +347,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   toggleTheme: () =>
     set((state) => {
       const next = state.theme === 'dark' ? 'light' : 'dark';
-      saveUiPrefs({ theme: next, sidebarCollapsed: state.sidebarCollapsed, watchlist: state.watchlist });
+      persistFromState(state, { theme: next });
       return { theme: next };
     }),
 
   toggleSidebar: () =>
     set((state) => {
       const next = !state.sidebarCollapsed;
-      saveUiPrefs({ theme: state.theme, sidebarCollapsed: next, watchlist: state.watchlist });
+      persistFromState(state, { sidebarCollapsed: next });
       return { sidebarCollapsed: next };
     }),
 
@@ -256,11 +362,57 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => {
       const exists = state.watchlist.includes(symbol);
       const next = exists ? state.watchlist.filter((s) => s !== symbol) : [...state.watchlist, symbol];
-      saveUiPrefs({ theme: state.theme, sidebarCollapsed: state.sidebarCollapsed, watchlist: next });
+      persistFromState(state, { watchlist: next });
       return { watchlist: next };
     }),
 
-  setSession: (token, player) => set({ token, player }),
+  setTradingMode: (tradingMode) =>
+    set((state) => {
+      persistFromState(state, { tradingMode });
+      return { tradingMode };
+    }),
+
+  setWorldMode: (worldMode) =>
+    set({
+      worldMode,
+      orderBooks: {},
+      recentTradesBySymbol: {},
+      futuresOrderBooks: {},
+      futuresRecentTradesBySymbol: {},
+      forexOverview: null,
+      futuresOverview: null,
+      liveCandleTick: null,
+      futuresLiveCandleTick: null,
+    }),
+
+  setGlossaryLang: (glossaryLang) =>
+    set((state) => {
+      persistFromState(state, { glossaryLang });
+      return { glossaryLang };
+    }),
+
+  setGlossaryDrawerOpen: (glossaryDrawerOpen) => set({ glossaryDrawerOpen }),
+  setTutorialOpen: (tutorialOpen) => set({ tutorialOpen }),
+  setTutorialActiveLessonId: (tutorialActiveLessonId) => set({ tutorialActiveLessonId }),
+
+  completeTutorialLesson: (lessonId) =>
+    set((state) => {
+      if (state.tutorialCompletedIds.includes(lessonId)) return state;
+      const next = [...state.tutorialCompletedIds, lessonId];
+      persistFromState(state, { tutorialCompletedIds: next });
+      return { tutorialCompletedIds: next };
+    }),
+
+  markFuturesIntroSeen: () =>
+    set((state) => {
+      persistFromState(state, { futuresIntroSeen: true });
+      return { futuresIntroSeen: true };
+    }),
+
+  setSession: (token, player) => {
+    resetSeenRealtimeEvents();
+    set({ token, player });
+  },
   setPlayer: (player) => set({ player }),
   setConnectionState: (connectionState) => set({ connectionState }),
 
@@ -293,6 +445,16 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   applyRealtimeEnvelope: (envelope) => {
     const state = get();
+    // Strict World isolation: NEVER apply WORLD-01 Socket.IO events while user is inside WORLD-PRACTICE!
+    if (state.worldMode === 'PRACTICE' || (envelope.worldId && envelope.worldId !== state.worldId && envelope.eventType !== 'world.snapshot')) {
+      return false;
+    }
+
+    // Idempotency guard: ignore duplicate event deliveries cleanly
+    if (envelope.eventType !== 'world.snapshot' && markEventSeen(envelope.eventId)) {
+      return false;
+    }
+
     const gapDetected =
       state.lastSequenceNumber > 0 &&
       envelope.sequenceNumber > state.lastSequenceNumber + 25 &&
@@ -348,23 +510,52 @@ export const useAppStore = create<AppState>((set, get) => ({
         break;
       }
 
-      case 'market.trade.executed': {
+      case 'market.trade.executed':
+      case 'trade.executed': {
         const trade = envelope.payload as Trade;
+        const involvesSelf = Boolean(
+          state.player && (trade.buyerId === state.player.id || trade.sellerId === state.player.id),
+        );
         set((s) => {
           const existing = s.recentTradesBySymbol[trade.symbol] ?? [];
           if (existing.some((t) => t.id === trade.id)) {
-            return { lastSequenceNumber: nextSeq };
+            return {
+              lastSequenceNumber: nextSeq,
+              orderSyncSeq: involvesSelf ? s.orderSyncSeq + 1 : s.orderSyncSeq,
+            };
           }
           const updatedList = [trade, ...existing].slice(0, 60);
           return {
             lastSequenceNumber: nextSeq,
             lastRealtimeTradeSeq: s.lastRealtimeTradeSeq + 1,
+            orderSyncSeq: involvesSelf ? s.orderSyncSeq + 1 : s.orderSyncSeq,
             recentTradesBySymbol: {
               ...s.recentTradesBySymbol,
               [trade.symbol]: updatedList,
             },
           };
         });
+        if (involvesSelf && state.player) {
+          void queryClient.invalidateQueries({ queryKey: ['playerOrders', state.player.id] });
+        }
+        break;
+      }
+
+      case 'order.created':
+      case 'order.partially_filled':
+      case 'order.filled':
+      case 'order.cancelled':
+      case 'order.expired': {
+        const order = envelope.payload as Order;
+        if (state.player && order && order.playerId === state.player.id) {
+          applySpotOrderToQueryCache(state.player.id, order);
+          set((s) => ({
+            lastSequenceNumber: nextSeq,
+            orderSyncSeq: s.orderSyncSeq + 1,
+          }));
+        } else {
+          set({ lastSequenceNumber: nextSeq });
+        }
         break;
       }
 
@@ -461,10 +652,16 @@ export const useAppStore = create<AppState>((set, get) => ({
         const involvesSelf = Boolean(
           state.player && (trade.buyerId === state.player.id || trade.sellerId === state.player.id),
         );
+        if (involvesSelf && state.player) {
+          applyFuturesTradeToQueryCache(state.player.id, trade);
+        }
         set((s) => {
           const existing = s.futuresRecentTradesBySymbol[trade.symbol] ?? [];
           if (existing.some((t) => t.id === trade.id)) {
-            return { lastSequenceNumber: nextSeq };
+            return {
+              lastSequenceNumber: nextSeq,
+              futuresSyncSeq: involvesSelf ? s.futuresSyncSeq + 1 : s.futuresSyncSeq,
+            };
           }
           return {
             lastSequenceNumber: nextSeq,
@@ -478,6 +675,24 @@ export const useAppStore = create<AppState>((set, get) => ({
         break;
       }
 
+      case 'futures.order.created':
+      case 'futures.order.partially_filled':
+      case 'futures.order.filled':
+      case 'futures.order.cancelled':
+      case 'futures.order.expired': {
+        const fOrder = envelope.payload as FuturesOrder;
+        if (state.player && fOrder && fOrder.playerId === state.player.id) {
+          applyFuturesOrderToQueryCache(state.player.id, fOrder);
+          set((s) => ({
+            lastSequenceNumber: nextSeq,
+            futuresSyncSeq: s.futuresSyncSeq + 1,
+          }));
+        } else {
+          set({ lastSequenceNumber: nextSeq });
+        }
+        break;
+      }
+
       case 'futures.candle.updated': {
         const payload = envelope.payload as { symbol: string; candles: Record<Timeframe, Candle> };
         set({ lastSequenceNumber: nextSeq, futuresLiveCandleTick: payload });
@@ -485,8 +700,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
 
       case 'futures.position.updated': {
-        const posPayload = envelope.payload as { playerId?: string } | null;
+        const posPayload = envelope.payload as {
+          playerId?: string;
+          symbol?: string;
+          position?: FuturesPosition | null;
+        } | null;
         const isSelf = Boolean(state.player && posPayload?.playerId === state.player.id);
+        if (isSelf && state.player && posPayload?.symbol) {
+          applyFuturesPositionToQueryCache(state.player.id, posPayload.symbol, posPayload.position ?? null);
+        }
         set((s) => ({
           lastSequenceNumber: nextSeq,
           futuresSyncSeq: isSelf ? s.futuresSyncSeq + 1 : s.futuresSyncSeq,

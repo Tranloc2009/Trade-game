@@ -2,12 +2,16 @@ import { useState, type ReactNode } from 'react';
 import {
   ArrowLeftRight,
   Bell,
+  BookOpen,
   Building2,
   CandlestickChart as ChartIcon,
   ChevronLeft,
   ChevronRight,
   Clock,
+  Compass,
   Dice5,
+  FlaskConical,
+  HelpCircle,
   Landmark,
   LayoutDashboard,
   LogOut,
@@ -16,6 +20,7 @@ import {
   Moon,
   Newspaper,
   PieChart,
+  RotateCcw,
   Settings,
   Sun,
   TrendingUp,
@@ -24,6 +29,7 @@ import {
   Warehouse,
   X,
 } from 'lucide-react';
+import type { WorldMode } from '../../../shared/contracts/beginner';
 import { formatCR } from '../../../shared/contracts/money';
 import { useAppStore, type NavPage } from '../../store/useAppStore';
 
@@ -31,6 +37,9 @@ interface AppShellProps {
   children: ReactNode;
   onSwitchAccount: () => void;
   onLogout: () => void;
+  onSwitchWorldMode: (mode: WorldMode) => void;
+  onResetPractice: () => void;
+  practiceBusy?: boolean;
 }
 
 interface NavItem {
@@ -42,6 +51,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { id: 'overview', label: 'Tổng quan', icon: LayoutDashboard, group: 'CORE' },
+  { id: 'discover', label: 'Khám phá', icon: Compass, group: 'CORE' },
   { id: 'exchange', label: 'Sàn giao dịch', icon: ChartIcon, group: 'CORE' },
   { id: 'futures', label: 'Sàn Futures (PERP)', icon: TrendingUp, group: 'CORE' },
   { id: 'forex', label: 'Sàn Forex (EFX)', icon: ArrowLeftRight, group: 'CORE' },
@@ -56,7 +66,14 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'settings', label: 'Cài đặt & Chẩn đoán', icon: Settings, group: 'SYSTEM' },
 ];
 
-export function AppShell({ children, onSwitchAccount, onLogout }: AppShellProps) {
+export function AppShell({
+  children,
+  onSwitchAccount,
+  onLogout,
+  onSwitchWorldMode,
+  onResetPractice,
+  practiceBusy = false,
+}: AppShellProps) {
   const {
     activePage,
     setActivePage,
@@ -65,6 +82,7 @@ export function AppShell({ children, onSwitchAccount, onLogout }: AppShellProps)
     theme,
     toggleTheme,
     worldId,
+    worldMode,
     isDemoTemporaryServer,
     connectionState,
     onlineHumanPlayers,
@@ -75,6 +93,8 @@ export function AppShell({ children, onSwitchAccount, onLogout }: AppShellProps)
     markNotificationsRead,
     toasts,
     dismissToast,
+    setGlossaryDrawerOpen,
+    setTutorialOpen,
   } = useAppStore();
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -83,13 +103,15 @@ export function AppShell({ children, onSwitchAccount, onLogout }: AppShellProps)
   const unreadCount = notifications.filter((n) => !n.read).length;
 
   const connLabel =
-    connectionState === 'connected'
-      ? 'Realtime'
-      : connectionState === 'reconnecting'
-        ? 'Đang kết nối lại'
-        : connectionState === 'polling'
-          ? 'Đồng bộ HTTP'
-          : 'Đang kết nối';
+    worldMode === 'PRACTICE'
+      ? 'Luyện tập độc lập'
+      : connectionState === 'connected'
+        ? 'Realtime'
+        : connectionState === 'reconnecting'
+          ? 'Đang kết nối lại'
+          : connectionState === 'polling'
+            ? 'Đồng bộ HTTP'
+            : 'Đang kết nối';
 
   const handleNav = (page: NavPage) => {
     setActivePage(page);
@@ -155,7 +177,11 @@ export function AppShell({ children, onSwitchAccount, onLogout }: AppShellProps)
         {!sidebarCollapsed && (
           <div className="p-3 border-t border-[var(--border-subtle)] text-[11px] text-[var(--text-muted)] space-y-1">
             <div className="font-medium text-[var(--warning)]">
-              {isDemoTemporaryServer ? 'DEMO — TEMPORARY SERVER' : worldId}
+              {worldMode === 'PRACTICE'
+                ? 'PHÒNG LUYỆN TẬP · 100K CR'
+                : isDemoTemporaryServer
+                  ? 'DEMO — TEMPORARY SERVER'
+                  : worldId}
             </div>
             <div>Tài sản mô phỏng · Không giá trị quy đổi tiền thật</div>
           </div>
@@ -165,8 +191,8 @@ export function AppShell({ children, onSwitchAccount, onLogout }: AppShellProps)
       {/* Main Column */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Compact Institutional Top Bar */}
-        <header className="h-13 shrink-0 px-3 lg:px-5 border-b border-[var(--border-subtle)] bg-[var(--bg-sidebar)] flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0">
+        <header className="h-13 shrink-0 px-3 lg:px-5 border-b border-[var(--border-subtle)] bg-[var(--bg-sidebar)] flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5 min-w-0">
             <button
               type="button"
               onClick={() => setMobileMenuOpen(true)}
@@ -178,28 +204,44 @@ export function AppShell({ children, onSwitchAccount, onLogout }: AppShellProps)
 
             <span className="lg:hidden text-sm font-bold tracking-tight whitespace-nowrap">TRADING EMPIRE</span>
 
-            <div className="hidden md:flex items-center gap-2.5 text-xs text-[var(--text-secondary)] min-w-0">
-              <span className="font-mono font-semibold text-[var(--text-primary)] whitespace-nowrap">{worldId}</span>
-              <span aria-hidden="true">·</span>
-              <span className="text-[var(--warning)] font-medium whitespace-nowrap">DEMO SERVER</span>
+            <div className="hidden md:flex items-center gap-2 text-xs text-[var(--text-secondary)] min-w-0">
+              <span
+                className={`font-mono font-semibold whitespace-nowrap ${
+                  worldMode === 'PRACTICE' ? 'text-[var(--warning)]' : 'text-[var(--text-primary)]'
+                }`}
+              >
+                {worldMode === 'PRACTICE' ? 'WORLD-PRACTICE' : worldId}
+              </span>
               <span aria-hidden="true">·</span>
               <span
                 className={`inline-flex items-center gap-1.5 whitespace-nowrap ${
-                  connectionState === 'connected' ? 'text-[var(--positive)]' : 'text-[var(--warning)]'
+                  worldMode === 'PRACTICE'
+                    ? 'text-[var(--warning)]'
+                    : connectionState === 'connected'
+                      ? 'text-[var(--positive)]'
+                      : 'text-[var(--warning)]'
                 }`}
               >
                 <span
                   className={`w-1.5 h-1.5 rounded-full ${
-                    connectionState === 'connected' ? 'bg-[var(--positive)]' : 'bg-[var(--warning)]'
+                    worldMode === 'PRACTICE'
+                      ? 'bg-[var(--warning)]'
+                      : connectionState === 'connected'
+                        ? 'bg-[var(--positive)]'
+                        : 'bg-[var(--warning)]'
                   }`}
                 />
                 {connLabel}
               </span>
-              <span aria-hidden="true" className="hidden xl:inline">·</span>
-              <span className="hidden xl:inline-flex items-center gap-1 whitespace-nowrap font-mono" title="Số kết nối thực trên máy chủ">
-                <Users className="w-3.5 h-3.5 text-[var(--text-muted)]" />
-                {onlineHumanPlayers} người chơi · {simulatedAgentsCount} NPC
-              </span>
+              {worldMode === 'LIVE' && (
+                <>
+                  <span aria-hidden="true" className="hidden xl:inline">·</span>
+                  <span className="hidden xl:inline-flex items-center gap-1 whitespace-nowrap font-mono" title="Số kết nối thực trên máy chủ">
+                    <Users className="w-3.5 h-3.5 text-[var(--text-muted)]" />
+                    {onlineHumanPlayers} người chơi · {simulatedAgentsCount} NPC
+                  </span>
+                </>
+              )}
               {gameClock && (
                 <>
                   <span aria-hidden="true" className="hidden xl:inline">·</span>
@@ -218,9 +260,52 @@ export function AppShell({ children, onSwitchAccount, onLogout }: AppShellProps)
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* Practice Mode Switcher */}
+            <button
+              type="button"
+              disabled={practiceBusy}
+              onClick={() => onSwitchWorldMode(worldMode === 'PRACTICE' ? 'LIVE' : 'PRACTICE')}
+              data-testid="practice-mode-toggle"
+              className={`px-2.5 py-1.5 rounded-md text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap disabled:opacity-50 ${
+                worldMode === 'PRACTICE'
+                  ? 'bg-[var(--warning)] text-[#0B0F17]'
+                  : 'border border-[var(--warning)]/50 bg-[var(--bg-panel)] text-[var(--warning)] hover:bg-[var(--bg-surface)]'
+              }`}
+              title={
+                worldMode === 'PRACTICE'
+                  ? 'Quay về Thế giới chính WORLD-01'
+                  : 'Vào Phòng Luyện Tập tách biệt với 100,000 CR'
+              }
+            >
+              <FlaskConical className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">
+                {worldMode === 'PRACTICE' ? 'Về WORLD-01' : 'Luyện tập'}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setTutorialOpen(true)}
+              aria-label="Mở hướng dẫn giao dịch 10 bài"
+              title="Hướng dẫn 10 bài"
+              className="hidden sm:inline-flex p-2 rounded text-[var(--text-secondary)] hover:text-[var(--accent)] hover:bg-[var(--bg-surface)] transition-colors cursor-pointer"
+            >
+              <BookOpen className="w-4 h-4" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setGlossaryDrawerOpen(true)}
+              aria-label="Mở từ điển thuật ngữ tài chính"
+              title="Từ điển thuật ngữ"
+              className="p-2 rounded text-[var(--text-secondary)] hover:text-[var(--accent)] hover:bg-[var(--bg-surface)] transition-colors cursor-pointer"
+            >
+              <HelpCircle className="w-4 h-4" />
+            </button>
+
             {player && (
-              <div className="hidden sm:flex items-center gap-3 mr-1 text-xs font-mono">
+              <div className="hidden sm:flex items-center gap-3 mx-1 text-xs font-mono">
                 <div className="text-right">
                   <div className="text-[10px] text-[var(--text-muted)]">Khả dụng</div>
                   <div className="font-semibold text-[var(--text-primary)]">
@@ -271,7 +356,7 @@ export function AppShell({ children, onSwitchAccount, onLogout }: AppShellProps)
                   <div className="max-h-72 overflow-y-auto divide-y divide-[var(--border-subtle)]/60">
                     {notifications.length === 0 ? (
                       <div className="p-4 text-xs text-[var(--text-muted)] text-center">
-                        Chưa có sự kiện mới từ máy chủ WORLD-01.
+                        Chưa có sự kiện mới từ máy chủ {worldId}.
                       </div>
                     ) : (
                       notifications.map((n) => (
@@ -302,7 +387,7 @@ export function AppShell({ children, onSwitchAccount, onLogout }: AppShellProps)
                       {player.username}
                     </div>
                     <div className="text-[10px] text-[var(--text-muted)] whitespace-nowrap">
-                      Lv.{player.level} · Guest
+                      Lv.{player.level} · {worldMode === 'PRACTICE' ? 'Practice' : 'Guest'}
                     </div>
                   </div>
                 </button>
@@ -328,8 +413,43 @@ export function AppShell({ children, onSwitchAccount, onLogout }: AppShellProps)
           </div>
         </header>
 
+        {/* Isolated Practice Mode Banner */}
+        {worldMode === 'PRACTICE' && (
+          <div
+            data-testid="practice-mode-banner"
+            className="px-3 lg:px-5 py-2 bg-[var(--warning)]/15 border-b border-[var(--warning)]/40 flex flex-wrap items-center justify-between gap-2 text-xs"
+          >
+            <div className="flex items-center gap-2 text-[var(--text-primary)]">
+              <FlaskConical className="w-4 h-4 text-[var(--warning)] shrink-0" />
+              <span>
+                <strong className="text-[var(--warning)]">PHÒNG LUYỆN TẬP (100,000 CR)</strong> — Tách biệt hoàn toàn khỏi Thế giới chính WORLD-01. Mọi lệnh giao dịch tại đây không ảnh hưởng số dư chính.
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={practiceBusy}
+                onClick={onResetPractice}
+                data-testid="practice-reset-btn"
+                className="px-2.5 py-1 rounded-md font-semibold bg-[var(--bg-panel)] border border-[var(--warning)]/60 text-[var(--warning)] hover:bg-[var(--bg-surface)] inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Đặt lại 100,000 CR
+              </button>
+              <button
+                type="button"
+                disabled={practiceBusy}
+                onClick={() => onSwitchWorldMode('LIVE')}
+                className="px-2.5 py-1 rounded-md font-semibold bg-[var(--accent)] text-[#0B0F17] hover:bg-[var(--accent-hover)] cursor-pointer disabled:opacity-50"
+              >
+                Quay về WORLD-01
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Main Scrollable Viewport */}
-        <main className="flex-1 overflow-y-auto p-3 lg:p-5 pb-20 lg:pb-6">{children}</main>
+        <main className="flex-1 overflow-y-auto p-3 lg:p-5 pb-24 lg:pb-6">{children}</main>
       </div>
 
       {/* Mobile Navigation Drawer */}
@@ -369,6 +489,19 @@ export function AppShell({ children, onSwitchAccount, onLogout }: AppShellProps)
                 );
               })}
             </nav>
+            <div className="p-3 border-t border-[var(--border-subtle)] space-y-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  setTutorialOpen(true);
+                }}
+                className="w-full py-2 px-3 rounded-md text-xs font-medium bg-[var(--bg-surface)] text-[var(--text-primary)] inline-flex items-center gap-2 cursor-pointer"
+              >
+                <BookOpen className="w-4 h-4 text-[var(--accent)]" />
+                Hướng dẫn 10 bài
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -381,9 +514,9 @@ export function AppShell({ children, onSwitchAccount, onLogout }: AppShellProps)
         {(
           [
             { id: 'overview', label: 'Tổng quan', icon: LayoutDashboard },
+            { id: 'discover', label: 'Khám phá', icon: Compass },
             { id: 'exchange', label: 'Sàn Spot', icon: ChartIcon },
             { id: 'futures', label: 'Futures', icon: TrendingUp },
-            { id: 'forex', label: 'Forex', icon: ArrowLeftRight },
             { id: 'portfolio', label: 'Danh mục', icon: PieChart },
           ] as const
         ).map((tab) => {

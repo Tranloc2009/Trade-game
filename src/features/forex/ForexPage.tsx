@@ -9,8 +9,14 @@ import {
   formatQty,
   formatRate,
 } from '../../../shared/contracts/money';
+import { calcOrderFillProgressPct, filterOpenOrders } from '../../../shared/contracts/orderLifecycle';
+import { GlossaryTerm } from '../../components/beginner/GlossaryTerm';
+import { SimplePriceChart } from '../../components/beginner/SimplePriceChart';
+import { SimpleTradeFlow } from '../../components/beginner/SimpleTradeFlow';
+import { TradingModeToggle } from '../../components/beginner/TradingModeToggle';
 import { CandlestickChart } from '../../components/charts/CandlestickChart';
 import { formatDateTimeShort, formatTimeShort } from '../../lib/indicators';
+import { applySpotOrderToQueryCache } from '../../lib/queryClient';
 import { ApiClientError, ForexService, TradingService } from '../../services/api';
 import { realtimeClient } from '../../services/realtime';
 import { useAppStore } from '../../store/useAppStore';
@@ -44,11 +50,11 @@ export function ForexPage() {
     recentTradesBySymbol,
     setRecentTrades,
     liveCandleTick,
-    lastRealtimeTradeSeq,
     player,
     setPlayer,
     news,
     pushToast,
+    tradingMode,
   } = useAppStore();
 
   const [bottomTab, setBottomTab] = useState<BottomTab>('CENTRAL_BANKS');
@@ -73,7 +79,7 @@ export function ForexPage() {
   }, [activeSymbol]);
 
   const { data: fetchedOverview, refetch: refetchOverview } = useQuery({
-    queryKey: ['forex-overview', lastRealtimeTradeSeq],
+    queryKey: ['forex-overview'],
     queryFn: async () => {
       const ov = await ForexService.getOverview();
       setForexOverview(ov);
@@ -111,18 +117,15 @@ export function ForexPage() {
   });
 
   const { data: playerOrders = [], refetch: refetchOrders } = useQuery({
-    queryKey: ['playerFxOrders', player?.id, lastRealtimeTradeSeq],
+    queryKey: ['playerOrders', player?.id],
     queryFn: () => TradingService.getOrders(),
     enabled: Boolean(player),
+    staleTime: 0,
+    refetchOnReconnect: true,
   });
 
   const fxOpenOrders = useMemo(
-    () =>
-      playerOrders.filter(
-        (o) =>
-          o.symbol.includes('/') &&
-          (o.status === 'OPEN' || o.status === 'PARTIALLY_FILLED'),
-      ),
+    () => filterOpenOrders(playerOrders).filter((o) => o.symbol.includes('/')),
     [playerOrders],
   );
 
@@ -147,7 +150,10 @@ export function ForexPage() {
       const res = await TradingService.cancelOrder(orderId);
       setPlayer(res.profile);
       setOrderBook(res.orderBook);
-      await refetchOrders();
+      if (player) {
+        applySpotOrderToQueryCache(player.id, res.order);
+      }
+      void refetchOrders();
       pushToast({
         tone: 'info',
         title: 'Đã hủy lệnh Forex',
@@ -195,8 +201,184 @@ export function ForexPage() {
     );
   }
 
+  if (tradingMode === 'BEGINNER') {
+    const baseCur = activePair.baseCurrency ?? 'EUR-SIM';
+    const quoteCur = activePair.quoteCurrency ?? 'USD-SIM';
+    const baseBalMinor = player?.wallet.currencyBalances[baseCur]?.availableMinor ?? 0;
+    const quoteBalMinor = player?.wallet.currencyBalances[quoteCur]?.availableMinor ?? 0;
+
+    return (
+      <div
+        data-tutorial="forex-beginner-panel"
+        data-testid="forex-beginner-view"
+        className="max-w-[1440px] mx-auto space-y-4"
+      >
+        <TradingModeToggle />
+
+        {/* Plain-Language Forex Explainer */}
+        <div className="rounded-xl border border-slate-800/90 bg-slate-900/70 p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-lg font-bold text-white">Đổi tiền tệ mô phỏng (Forex Spot · EFX)</h1>
+            <p className="mt-1 text-xs leading-relaxed text-slate-300">
+              <strong className="text-cyan-300">Forex là giao dịch giữa hai loại tiền tệ mô phỏng.</strong> Sàn EFX thực hiện chuyển đổi trực tiếp theo tỷ giá từ sổ lệnh thực — khác với hợp đồng Futures có đòn bẩy và rủi ro thanh lý.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2 text-xs font-mono">
+            <div className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-2">
+              <div className="font-sans text-[10px] text-slate-400">Số dư {baseCur}</div>
+              <div className="font-semibold text-white">{formatCurrencyAmount(baseBalMinor, baseCur)}</div>
+            </div>
+            <div className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-2">
+              <div className="font-sans text-[10px] text-slate-400">Số dư {quoteCur}</div>
+              <div className="font-semibold text-white">{formatCurrencyAmount(quoteBalMinor, quoteCur)}</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Pair Selector Pills */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-1">
+          {fxPairs.map((pair) => {
+            const active = pair.symbol === activePair.symbol;
+            const pScale = pair.priceScale ?? 10_000;
+            const pDec = pair.priceDecimals ?? 4;
+            return (
+              <button
+                key={pair.symbol}
+                type="button"
+                onClick={() => setSelectedForexSymbol(pair.symbol)}
+                className={`shrink-0 rounded-lg border px-3 py-2 text-left transition-colors ${
+                  active
+                    ? 'border-cyan-500/60 bg-slate-900 text-white'
+                    : 'border-slate-800 bg-slate-900/50 text-slate-400 hover:border-slate-700 hover:text-slate-200'
+                }`}
+              >
+                <div className="font-mono text-xs font-bold">{pair.symbol}</div>
+                <div className="mt-0.5 font-mono text-[11px] text-slate-300">
+                  {formatRate(pair.lastPriceMinor, pScale, pDec)}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* 2-Column Beginner Forex Layout */}
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-12 items-start">
+          <div className="lg:col-span-7 space-y-4">
+            <div className="rounded-xl border border-slate-800/80 bg-slate-900/60 p-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-xs text-slate-400">Tỷ giá hiện tại ({activePair.symbol})</div>
+                <div className="mt-0.5 flex items-baseline gap-2.5">
+                  <span className="font-mono text-2xl font-bold tabular-nums text-white">
+                    {formatRate(activePair.lastPriceMinor, scale, decimals)}
+                  </span>
+                  <span
+                    className={`font-mono text-xs font-semibold ${
+                      activePair.priceChange24hPct >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                    }`}
+                  >
+                    {activePair.priceChange24hPct >= 0 ? 'Tăng +' : 'Giảm '}
+                    {activePair.priceChange24hPct.toFixed(2)}% (24h)
+                  </span>
+                </div>
+              </div>
+              <div className="text-xs">
+                <div className="inline-flex items-center gap-1 text-slate-400">
+                  Chênh lệch Mua–Bán (Spread)
+                  <GlossaryTerm termKey="spread" />
+                </div>
+                <div className="mt-0.5 font-mono font-semibold text-white">
+                  {spreadTicks !== null ? `${spreadTicks} pips` : '—'}
+                </div>
+              </div>
+            </div>
+
+            <SimplePriceChart
+              symbol={activeSymbol}
+              candles={candleResp?.candles ?? []}
+              timeframe={timeframe}
+              onTimeframeChange={setTimeframe}
+              positive={activePair.priceChange24hPct >= 0}
+              priceDecimals={decimals}
+              height={260}
+              theme={theme}
+            />
+
+            {/* Beginner Forex Open Orders */}
+            <div className="rounded-xl border border-slate-800/80 bg-slate-900/60 overflow-hidden">
+              <div className="border-b border-slate-800 px-4 py-2.5 text-xs font-semibold text-white">
+                Lệnh Forex đang mở ({fxOpenOrders.length})
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead className="bg-slate-950/60 text-[11px] text-slate-400">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-medium">Cặp tiền</th>
+                      <th className="px-3 py-2 text-left font-medium">Chiều</th>
+                      <th className="px-3 py-2 text-right font-medium">Tỷ giá đặt</th>
+                      <th className="px-3 py-2 text-right font-medium">Đã khớp / Tổng</th>
+                      <th className="px-3 py-2 text-right font-medium">Hủy</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60 font-mono">
+                    {fxOpenOrders.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="px-4 py-6 text-center font-sans text-slate-400">
+                          Không có lệnh Forex chờ khớp. Giao dịch chuyển đổi ngay sẽ tự động hoàn tất vào ví tiền tệ.
+                        </td>
+                      </tr>
+                    ) : (
+                      fxOpenOrders.map((o) => {
+                        const pair = fxPairs.find((p) => p.symbol === o.symbol);
+                        return (
+                          <tr key={o.id}>
+                            <td className="px-3 py-2 font-semibold text-white">{o.symbol}</td>
+                            <td className={`px-3 py-2 font-sans ${o.side === 'BUY' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {o.side === 'BUY' ? 'Mua' : 'Bán'}
+                            </td>
+                            <td className="px-3 py-2 text-right text-slate-200">
+                              {formatRate(o.priceMinor, pair?.priceScale ?? 10_000, pair?.priceDecimals ?? 4)}
+                            </td>
+                            <td className="px-3 py-2 text-right text-slate-200">
+                              {formatQty(o.filledQuantity)} / {formatQty(o.quantity)}
+                            </td>
+                            <td className="px-3 py-2 text-right">
+                              <button
+                                type="button"
+                                disabled={cancellingId === o.id}
+                                onClick={() => handleCancelOrder(o.id)}
+                                className="rounded px-2 py-1 font-sans text-[11px] text-rose-300 hover:bg-rose-500/15"
+                              >
+                                Hủy
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div className="lg:col-span-5">
+            <SimpleTradeFlow
+              asset={activePair}
+              onOrderCompleted={() => {
+                void refetchOrders();
+                void refetchOverview();
+                queryClient.invalidateQueries({ queryKey: ['candles', activeSymbol, timeframe] });
+              }}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="max-w-[1600px] mx-auto space-y-3">
+    <div className="max-w-[1600px] mx-auto space-y-3" data-testid="forex-pro-view">
+      <TradingModeToggle compact />
       {/* Live Pair Telemetry Strip */}
       <header className="rounded-lg bg-[var(--bg-panel)] border border-[var(--border-subtle)] px-4 py-3 flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
@@ -690,7 +872,14 @@ export function ForexPage() {
                               {o.priceMinor !== null ? formatRate(o.priceMinor, oScale, oDec) : 'MARKET'}
                             </td>
                             <td className="px-3 py-2 text-right">
-                              {formatQty(o.filledQuantity)} / {formatQty(o.quantity)}
+                              <div>
+                                {formatQty(o.filledQuantity)} / {formatQty(o.quantity)}
+                              </div>
+                              {o.status === 'PARTIALLY_FILLED' && (
+                                <div className="text-[10px] text-[var(--text-muted)]">
+                                  Còn {formatQty(o.remainingQuantity)} ({calcOrderFillProgressPct(o.filledQuantity, o.quantity)}%)
+                                </div>
+                              )}
                             </td>
                             <td className="px-3 py-2 text-[var(--warning)]">{o.status}</td>
                             <td className="px-3 py-2 text-right">
@@ -827,11 +1016,14 @@ export function ForexPage() {
               player={player}
               prefilledPrice={prefilledPrice}
               onSelectPair={(sym) => setSelectedForexSymbol(sym)}
-              onOrderPlaced={({ profile, orderBook }) => {
+              onOrderPlaced={({ order, profile, orderBook }) => {
                 setPlayer(profile);
                 setOrderBook(orderBook);
-                refetchOrders();
-                refetchOverview();
+                if (player) {
+                  applySpotOrderToQueryCache(player.id, order);
+                }
+                void refetchOrders();
+                void refetchOverview();
                 queryClient.invalidateQueries({ queryKey: ['recentTrades', activeSymbol] });
                 queryClient.invalidateQueries({ queryKey: ['candles', activeSymbol, timeframe] });
               }}

@@ -1,11 +1,13 @@
 import { io, type Socket } from 'socket.io-client';
 import type { RealtimeEnvelope } from '../../shared/contracts/types';
+import { resyncAllOrderQueries } from '../lib/queryClient';
 import { useAppStore } from '../store/useAppStore';
 import { WorldService } from './api';
 
 /**
  * Authoritative Socket.IO Realtime Client with automatic reconnect,
- * room-scoped market subscription, sequence gap detection, and HTTP snapshot fallback.
+ * room-scoped market subscription, sequence gap detection, and authoritative
+ * Open Orders resynchronization upon reconnect.
  */
 class RealtimeClient {
   private socket: Socket | null = null;
@@ -19,7 +21,9 @@ class RealtimeClient {
     if (this.socket) {
       if (token) {
         this.socket.auth = { token };
-        this.socket.emit('auth:identify', token);
+        if (this.socket.connected) {
+          this.socket.emit('auth:identify', token);
+        }
       }
       if (!this.socket.connected) {
         this.socket.connect();
@@ -45,7 +49,7 @@ class RealtimeClient {
       if (s.token) {
         this.socket?.emit('auth:identify', s.token);
       }
-      // Request fresh authoritative snapshot on connect / reconnect
+      // Request fresh authoritative snapshot & resync all Open Orders / Positions from server on connect/reconnect
       this.socket?.emit('world:request_snapshot');
       if (this.subscribedSymbol) {
         this.socket?.emit('market:subscribe', this.subscribedSymbol);
@@ -53,6 +57,7 @@ class RealtimeClient {
       if (this.subscribedFuturesSymbol) {
         this.socket?.emit('futures:subscribe', this.subscribedFuturesSymbol);
       }
+      resyncAllOrderQueries(s.player?.id ?? null);
     });
 
     this.socket.on('disconnect', () => {
@@ -69,6 +74,7 @@ class RealtimeClient {
       const gap = useAppStore.getState().applyRealtimeEnvelope(envelope);
       if (gap) {
         this.requestSnapshot();
+        resyncAllOrderQueries(useAppStore.getState().player?.id ?? null);
       }
     });
   }
@@ -130,7 +136,10 @@ class RealtimeClient {
     if (this.pollTimer) return;
     this.pollTimer = setInterval(() => {
       WorldService.getSnapshot()
-        .then((snap) => useAppStore.getState().applyWorldSnapshot(snap))
+        .then((snap) => {
+          useAppStore.getState().applyWorldSnapshot(snap);
+          resyncAllOrderQueries(useAppStore.getState().player?.id ?? null);
+        })
         .catch(() => {});
     }, 5_000);
   }

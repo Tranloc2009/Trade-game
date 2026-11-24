@@ -33,11 +33,13 @@ export type FuturesOrderType =
 export type FuturesTriggerSource = 'MARK_PRICE' | 'LAST_PRICE';
 export type FuturesTimeInForce = 'GTC' | 'IOC';
 export type FuturesOrderStatus =
+  | 'PENDING'
   | 'PENDING_TRIGGER'
   | 'OPEN'
   | 'PARTIALLY_FILLED'
   | 'FILLED'
   | 'CANCELLED'
+  | 'EXPIRED'
   | 'REJECTED';
 export type FuturesPositionStatus = 'OPEN' | 'MARGIN_CALL' | 'LIQUIDATING' | 'CLOSED';
 export type FuturesPositionTransition =
@@ -206,6 +208,8 @@ export interface FuturesOrder {
   status: FuturesOrderStatus;
   rejectReason: string | null;
   idempotencyKey?: string;
+  expiresAt?: string | null;
+  version?: number;
   createdSeq: number;
   createdAt: string;
   updatedAt: string;

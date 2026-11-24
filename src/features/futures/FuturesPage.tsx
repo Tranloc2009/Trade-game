@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import {
   Activity,
   AlertTriangle,
@@ -15,8 +15,14 @@ import {
   type FuturesPosition,
 } from '../../../shared/contracts/futures';
 import { formatCR, formatCompactCR, formatQty, formatRate } from '../../../shared/contracts/money';
+import { calcOrderFillProgressPct, sanitizeFuturesAccount } from '../../../shared/contracts/orderLifecycle';
+import { BeginnerFuturesPanel } from '../../components/beginner/BeginnerFuturesPanel';
+import { GlossaryTerm } from '../../components/beginner/GlossaryTerm';
+import { SimplePriceChart } from '../../components/beginner/SimplePriceChart';
+import { TradingModeToggle } from '../../components/beginner/TradingModeToggle';
 import { CandlestickChart } from '../../components/charts/CandlestickChart';
 import { formatDateTimeShort, formatTimeShort } from '../../lib/indicators';
+import { setAuthoritativeFuturesAccount } from '../../lib/queryClient';
 import { FuturesService } from '../../services/api';
 import { realtimeClient } from '../../services/realtime';
 import { useAppStore } from '../../store/useAppStore';
@@ -41,7 +47,6 @@ function formatCountdown(targetIso: string, nowMs: number): string {
 }
 
 export function FuturesPage() {
-  const queryClient = useQueryClient();
   const {
     player,
     setPlayer,
@@ -59,6 +64,7 @@ export function FuturesPage() {
     futuresLiveCandleTick,
     futuresSyncSeq,
     pushToast,
+    tradingMode,
   } = useAppStore();
 
   const [bottomTab, setBottomTab] = useState<BottomTab>('POSITIONS');
@@ -68,6 +74,7 @@ export function FuturesPage() {
   const [addMarginAmount, setAddMarginAmount] = useState('500');
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(Date.now());
+  const [beginnerTab, setBeginnerTab] = useState<'POSITIONS' | 'OPEN_ORDERS' | 'HISTORY'>('POSITIONS');
 
   // 1s funding countdown ticker
   useEffect(() => {
@@ -97,26 +104,25 @@ export function FuturesPage() {
 
   const { data: accountData, refetch: refetchAccount } = useQuery({
     queryKey: ['futures-account', player?.id],
-    queryFn: () => FuturesService.getAccount(),
+    queryFn: async () => sanitizeFuturesAccount(await FuturesService.getAccount()),
     enabled: Boolean(player),
-    refetchInterval: 6_000,
+    staleTime: 0,
+    refetchInterval: 15_000,
+    refetchOnReconnect: true,
   });
 
-  // Trigger first-time Risk Disclosure Modal once account loads and is not acknowledged
+  // Trigger first-time Risk Disclosure Modal in PRO mode (Beginner mode uses its own inline 4-concept explainer)
   useEffect(() => {
-    if (player && accountData && !accountData.riskAcknowledged) {
+    if (tradingMode === 'PRO' && player && accountData && !accountData.riskAcknowledged) {
       setRiskModalOpen(true);
     }
-  }, [player?.id, accountData?.riskAcknowledged]);
+  }, [tradingMode, player?.id, accountData?.riskAcknowledged]);
 
-  // Refetch account & overview promptly (debounced) on player-relevant position/funding/liquidation events
+  // Refetch account & overview immediately on player-relevant order/position/funding/liquidation events
   useEffect(() => {
     if (futuresSyncSeq <= 0 || !player) return;
-    const timer = setTimeout(() => {
-      refetchAccount();
-      refetchOverview();
-    }, 450);
-    return () => clearTimeout(timer);
+    void refetchAccount();
+    void refetchOverview();
   }, [futuresSyncSeq]);
 
   // Initial orderbook + trades fetch per contract
@@ -159,8 +165,8 @@ export function FuturesPage() {
   );
 
   const handleOrderSuccess = (nextAccount: FuturesAccountSummary) => {
-    queryClient.setQueryData(['futures-account', player?.id], nextAccount);
-    refetchOverview();
+    setAuthoritativeFuturesAccount(player?.id, nextAccount);
+    void refetchOverview();
   };
 
   const handleCancelOrder = async (orderId: string) => {
@@ -168,7 +174,7 @@ export function FuturesPage() {
     try {
       const res = await FuturesService.cancelOrder(orderId);
       setPlayer(res.profile);
-      queryClient.setQueryData(['futures-account', player?.id], res.account);
+      setAuthoritativeFuturesAccount(player?.id, res.account);
       pushToast({
         tone: 'info',
         title: 'Đã hủy lệnh Futures',
@@ -203,8 +209,8 @@ export function FuturesPage() {
         idempotencyKey: `fclose_${pos.id}_${Date.now()}`,
       });
       setPlayer(res.profile);
-      queryClient.setQueryData(['futures-account', player?.id], res.account);
-      refetchOverview();
+      setAuthoritativeFuturesAccount(player?.id, res.account);
+      void refetchOverview();
       pushToast({
         tone: 'success',
         title: `Đã đóng ${ratio === 1 ? 'toàn bộ' : '50%'} vị thế ${pos.symbol}`,
@@ -231,7 +237,7 @@ export function FuturesPage() {
     try {
       const res = await FuturesService.addMargin(addMarginTarget.id, amt);
       setPlayer(res.profile);
-      queryClient.setQueryData(['futures-account', player?.id], res.account);
+      setAuthoritativeFuturesAccount(player?.id, res.account);
       pushToast({
         tone: 'success',
         title: `Đã bổ sung +${amt.toLocaleString('vi-VN')} CR ký quỹ`,
@@ -285,8 +291,320 @@ export function FuturesPage() {
   const fundingPct = activeContract.estimatedFundingRateBps / 100;
   const insuranceFund = overview?.insuranceFund;
 
+  if (tradingMode === 'BEGINNER') {
+    const positions = accountData?.positions ?? [];
+    const openOrders = accountData?.openOrders ?? [];
+    const orderHistory = accountData?.orderHistory ?? [];
+
+    return (
+      <div className="max-w-[1440px] mx-auto space-y-4" data-testid="futures-beginner-view">
+        <TradingModeToggle />
+
+        {/* Contract Selector Strip */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-1">
+          {contracts.map((c) => {
+            const active = c.symbol === activeContract.symbol;
+            const up = c.priceChange24hPct >= 0;
+            return (
+              <button
+                key={c.symbol}
+                type="button"
+                onClick={() => setSelectedFuturesSymbol(c.symbol)}
+                className={`shrink-0 rounded-lg border px-3 py-2 text-left transition-colors ${
+                  active
+                    ? 'border-cyan-500/60 bg-slate-900 text-white'
+                    : 'border-slate-800 bg-slate-900/50 text-slate-400 hover:border-slate-700 hover:text-slate-200'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-xs font-bold">{c.symbol}</span>
+                  <span className={`font-mono text-[11px] ${up ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    {up ? '+' : ''}
+                    {c.priceChange24hPct.toFixed(2)}%
+                  </span>
+                </div>
+                <div className="mt-0.5 font-mono text-xs text-slate-200">
+                  {formatRate(c.markPriceInt, c.priceScale, c.priceDecimals)} CR
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Simplified Contract Header */}
+        <div className="rounded-xl border border-slate-800/90 bg-slate-900/75 p-4 flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="font-mono text-lg font-bold text-white">{activeContract.symbol}</h1>
+              <span className="text-xs text-slate-400">· {activeContract.name}</span>
+            </div>
+            <div className="mt-1 flex flex-wrap items-baseline gap-3">
+              <span className="font-mono text-2xl font-bold tabular-nums text-white">
+                {formatRate(activeContract.markPriceInt, activeContract.priceScale, activeContract.priceDecimals)} CR
+              </span>
+              <span
+                className={`font-mono text-xs font-semibold ${
+                  activeContract.priceChange24hPct >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                }`}
+              >
+                {activeContract.priceChange24hPct >= 0 ? 'Tăng +' : 'Giảm '}
+                {activeContract.priceChange24hPct.toFixed(2)}% (24h)
+              </span>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-5 text-xs">
+            <div>
+              <div className="inline-flex items-center gap-1 text-slate-400">
+                Funding ước tính
+                <GlossaryTerm termKey="funding_rate" />
+              </div>
+              <div className="mt-0.5 font-mono font-semibold text-white">
+                {fundingPct >= 0 ? '+' : ''}
+                {fundingPct.toFixed(3)}% · {formatCountdown(activeContract.nextFundingAt, nowMs)}
+              </div>
+            </div>
+            <div>
+              <div className="text-slate-400">Chế độ ký quỹ</div>
+              <div className="mt-0.5 font-semibold text-cyan-300">Isolated Margin (Cô lập rủi ro)</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Main 2-Column Beginner Futures Grid */}
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-12 items-start">
+          <div className="lg:col-span-7 space-y-4">
+            <SimplePriceChart
+              symbol={activeContract.symbol}
+              candles={candleData?.candles ?? []}
+              timeframe={timeframe}
+              onTimeframeChange={setTimeframe}
+              positive={activeContract.priceChange24hPct >= 0}
+              priceDecimals={activeContract.priceDecimals}
+              height={280}
+              theme={theme}
+            />
+
+            {/* Strictly separated Open Positions vs Open Orders vs History */}
+            <div className="rounded-xl border border-slate-800/80 bg-slate-900/65 overflow-hidden">
+              <div className="flex items-center gap-1 border-b border-slate-800 px-3 py-2 overflow-x-auto">
+                {(
+                  [
+                    { id: 'POSITIONS', label: `Vị thế đang mở (${positions.length})` },
+                    { id: 'OPEN_ORDERS', label: `Lệnh đang mở (${openOrders.length})` },
+                    { id: 'HISTORY', label: `Lịch sử lệnh (${orderHistory.length})` },
+                  ] as const
+                ).map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => setBeginnerTab(t.id)}
+                    data-testid={`beginner-futures-tab-${t.id.toLowerCase()}`}
+                    className={`min-h-[34px] rounded-md px-3 text-xs font-medium whitespace-nowrap ${
+                      beginnerTab === t.id
+                        ? 'bg-slate-800 text-cyan-300'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="overflow-x-auto">
+                {beginnerTab === 'POSITIONS' && (
+                  <table className="w-full text-xs" data-testid="beginner-futures-positions-table">
+                    <thead className="bg-slate-950/60 text-[11px] text-slate-400">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-medium">Hợp đồng / Hướng</th>
+                        <th className="px-3 py-2 text-right font-medium">Ký quỹ</th>
+                        <th className="px-3 py-2 text-right font-medium">Giá vào / Thanh lý</th>
+                        <th className="px-3 py-2 text-right font-medium">Lời / Lỗ tạm tính</th>
+                        <th className="px-3 py-2 text-right font-medium">Đóng vị thế</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 font-mono">
+                      {positions.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="px-4 py-6 text-center font-sans text-slate-400">
+                            Bạn chưa có vị thế Futures nào đang mở. Vị thế đã mở sẽ xuất hiện riêng tại đây (không lẫn với Lệnh đang mở).
+                          </td>
+                        </tr>
+                      ) : (
+                        positions.map((pos) => {
+                          const c = contracts.find((x) => x.symbol === pos.symbol);
+                          const pScale = c?.priceScale ?? 100;
+                          const pDec = c?.priceDecimals ?? 2;
+                          return (
+                            <tr key={pos.id}>
+                              <td className="px-3 py-2.5">
+                                <div className="font-semibold text-white">{pos.symbol}</div>
+                                <div className={`text-[11px] ${pos.side === 'LONG' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                  {pos.side} · {pos.leverage}x · {formatQty(pos.quantity)}
+                                </div>
+                              </td>
+                              <td className="px-3 py-2.5 text-right text-slate-200">{formatCR(pos.marginMinor)} CR</td>
+                              <td className="px-3 py-2.5 text-right">
+                                <div className="text-slate-200">{formatRate(pos.entryPriceInt, pScale, pDec)}</div>
+                                <div className="text-[11px] text-amber-300">
+                                  TL: {formatRate(pos.liquidationPriceInt, pScale, pDec)}
+                                </div>
+                              </td>
+                              <td
+                                className={`px-3 py-2.5 text-right font-semibold ${
+                                  pos.unrealizedPnlMinor >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                                }`}
+                              >
+                                {pos.unrealizedPnlMinor >= 0 ? 'Lời +' : 'Lỗ '}
+                                {formatCR(pos.unrealizedPnlMinor)} CR
+                                <div className="text-[10px]">
+                                  ({pos.roePct >= 0 ? '+' : ''}
+                                  {pos.roePct.toFixed(2)}%)
+                                </div>
+                              </td>
+                              <td className="px-3 py-2.5 text-right">
+                                <div className="inline-flex items-center gap-1.5 font-sans">
+                                  <button
+                                    type="button"
+                                    disabled={busyActionId !== null}
+                                    onClick={() => handleQuickClose(pos, 0.5)}
+                                    className="rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-800 disabled:opacity-50"
+                                  >
+                                    Đóng 50%
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={busyActionId !== null}
+                                    onClick={() => handleQuickClose(pos, 1)}
+                                    className="rounded bg-rose-600/80 px-2 py-1 text-[11px] font-medium text-white hover:bg-rose-600 disabled:opacity-50"
+                                  >
+                                    Đóng hết
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                )}
+
+                {beginnerTab === 'OPEN_ORDERS' && (
+                  <table className="w-full text-xs" data-testid="beginner-futures-open-orders-table">
+                    <thead className="bg-slate-950/60 text-[11px] text-slate-400">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-medium">Hợp đồng</th>
+                        <th className="px-3 py-2 text-left font-medium">Loại lệnh</th>
+                        <th className="px-3 py-2 text-right font-medium">Giá / Kích hoạt</th>
+                        <th className="px-3 py-2 text-right font-medium">Khối lượng</th>
+                        <th className="px-3 py-2 text-right font-medium">Thao tác</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 font-mono">
+                      {openOrders.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="px-4 py-6 text-center font-sans text-slate-400">
+                            Không có lệnh Futures đang chờ khớp. Các lệnh Cắt lỗ / Chốt lời chưa kích hoạt sẽ hiển thị tại đây.
+                          </td>
+                        </tr>
+                      ) : (
+                        openOrders.map((o) => {
+                          const c = contracts.find((x) => x.symbol === o.symbol);
+                          const pScale = c?.priceScale ?? 100;
+                          const pDec = c?.priceDecimals ?? 2;
+                          return (
+                            <tr key={o.id}>
+                              <td className="px-3 py-2 font-semibold text-white">{o.symbol}</td>
+                              <td className="px-3 py-2 font-sans text-slate-300">
+                                {o.type === 'STOP_MARKET'
+                                  ? 'Cắt lỗ tự động (SL)'
+                                  : o.type === 'TAKE_PROFIT_MARKET'
+                                    ? 'Chốt lời tự động (TP)'
+                                    : `${o.side} ${o.type}`}
+                              </td>
+                              <td className="px-3 py-2 text-right text-slate-200">
+                                {o.triggerPriceInt
+                                  ? formatRate(o.triggerPriceInt, pScale, pDec)
+                                  : formatRate(o.priceInt, pScale, pDec)}
+                              </td>
+                              <td className="px-3 py-2 text-right text-slate-200">
+                                {formatQty(o.filledQuantity)} / {formatQty(o.quantity)}
+                              </td>
+                              <td className="px-3 py-2 text-right">
+                                <button
+                                  type="button"
+                                  disabled={busyActionId === o.id}
+                                  onClick={() => handleCancelOrder(o.id)}
+                                  className="rounded px-2 py-1 font-sans text-[11px] text-rose-300 hover:bg-rose-500/15"
+                                >
+                                  Hủy
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                )}
+
+                {beginnerTab === 'HISTORY' && (
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-950/60 text-[11px] text-slate-400">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-medium">Thời gian</th>
+                        <th className="px-3 py-2 text-left font-medium">Hợp đồng</th>
+                        <th className="px-3 py-2 text-left font-medium">Chiều</th>
+                        <th className="px-3 py-2 text-right font-medium">Đã khớp</th>
+                        <th className="px-3 py-2 text-right font-medium">Trạng thái</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 font-mono">
+                      {orderHistory.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="px-4 py-6 text-center font-sans text-slate-400">
+                            Chưa có lịch sử lệnh Futures.
+                          </td>
+                        </tr>
+                      ) : (
+                        orderHistory.slice(0, 25).map((o) => (
+                          <tr key={o.id}>
+                            <td className="px-3 py-2 text-slate-400">{formatTimeShort(o.createdAt)}</td>
+                            <td className="px-3 py-2 font-semibold text-white">{o.symbol}</td>
+                            <td className={`px-3 py-2 ${o.side === 'BUY' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {o.side === 'BUY' ? 'LONG' : 'SHORT'}
+                            </td>
+                            <td className="px-3 py-2 text-right text-slate-200">{formatQty(o.filledQuantity)}</td>
+                            <td className="px-3 py-2 text-right text-slate-300">{o.status}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="lg:col-span-5">
+            <BeginnerFuturesPanel
+              contract={activeContract}
+              account={accountData}
+              onOrderSuccess={() => {
+                void refetchOverview();
+                void refetchAccount();
+              }}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="max-w-[1600px] mx-auto space-y-3">
+    <div className="max-w-[1600px] mx-auto space-y-3" data-testid="futures-pro-view">
+      <TradingModeToggle compact />
       {/* Contract Selector Strip (6 Perpetual Contracts) */}
       <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
         {contracts.map((c) => {
@@ -703,7 +1021,14 @@ export function FuturesPage() {
                           ) : null}
                         </td>
                         <td className="px-3 py-2 text-right">
-                          {formatQty(o.filledQuantity)} / {formatQty(o.quantity)}
+                          <div>
+                            {formatQty(o.filledQuantity)} / {formatQty(o.quantity)}
+                          </div>
+                          {o.status === 'PARTIALLY_FILLED' && (
+                            <div className="text-[10px] text-[var(--text-muted)]">
+                              Còn {formatQty(o.remainingQuantity)} ({calcOrderFillProgressPct(o.filledQuantity, o.quantity)}%)
+                            </div>
+                          )}
                         </td>
                         <td className="px-3 py-2 text-[var(--accent)]">{o.status}</td>
                         <td className="px-3 py-2 text-right">
