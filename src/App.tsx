@@ -4,28 +4,15 @@ import type { WorldMode } from '../shared/contracts/beginner';
 import { GlossaryDrawer } from './components/beginner/GlossaryTerm';
 import { TutorialOverlay } from './components/beginner/TutorialOverlay';
 import { AppShell } from './components/layout/AppShell';
+import { MyAssetsPage } from './features/assets/MyAssetsPage';
 import { GuestLoginModal } from './features/auth/GuestLoginModal';
-import { BankingPage } from './features/banking/BankingPage';
 import { OverviewPage } from './features/dashboard/OverviewPage';
-import { AssetDiscoveryPage } from './features/discover/AssetDiscoveryPage';
-import { EntertainmentPage } from './features/entertainment/EntertainmentPage';
-import { ExchangePage } from './features/exchange/ExchangePage';
-import { ForexPage } from './features/forex/ForexPage';
-import { FuturesPage } from './features/futures/FuturesPage';
-import { LeaderboardPage } from './features/leaderboard/LeaderboardPage';
-import { EconomyNewsPage } from './features/news/EconomyNewsPage';
-import { PortfolioPage } from './features/portfolio/PortfolioPage';
-import { PropertyPage } from './features/property/PropertyPage';
+import { MyEmpirePage } from './features/empire/MyEmpirePage';
+import { UnifiedExchangePage } from './features/exchange/UnifiedExchangePage';
+import { LifestylePage } from './features/lifestyle/LifestylePage';
 import { SettingsPage } from './features/settings/SettingsPage';
-import { SocialPage } from './features/social/SocialPage';
-import { CapitalHubPage } from './features/cofounder/CapitalHubPage';
-import { CompanyHeadquartersPage } from './features/cofounder/CompanyHeadquartersPage';
-import { EmpireHubPage } from './features/v4/EmpireHubPage';
-import { BusinessEmpirePage } from './features/v4/BusinessEmpirePage';
-import { CorporateEmpirePage } from './features/v4/CorporateEmpirePage';
-import { InvestmentFundsPage } from './features/v4/InvestmentFundsPage';
-import { LuxuryClubPage } from './features/v4/LuxuryClubPage';
-import { CareerProfilePage } from './features/v4/CareerProfilePage';
+import { WorldPage } from './features/world/WorldPage';
+import { isKnownNavParam } from './lib/navigationV5';
 import { queryClient } from './lib/queryClient';
 import {
   PracticeService,
@@ -39,7 +26,7 @@ import { useAppStore } from './store/useAppStore';
 
 function TradingEmpireWorkspace() {
   const {
-    activePage,
+    activeSection,
     theme,
     player,
     worldMode,
@@ -64,7 +51,7 @@ function TradingEmpireWorkspace() {
     }
   }, [theme]);
 
-  // Initial world bootstrap + optional ?autostart=1 / ?guest=Alice|Bob support for instant QA & multiplayer testing
+  // Initial world bootstrap + backward-compatible ?page= & ?guest= / ?autostart=1 support
   useEffect(() => {
     let mounted = true;
     const init = async () => {
@@ -78,29 +65,7 @@ function TradingEmpireWorkspace() {
         const guestParam = params.get('guest');
         const autostart = params.get('autostart') === '1';
         const pageParam = params.get('page');
-        if (
-          pageParam === 'overview' ||
-          pageParam === 'discover' ||
-          pageParam === 'forex' ||
-          pageParam === 'exchange' ||
-          pageParam === 'futures' ||
-          pageParam === 'portfolio' ||
-          pageParam === 'property' ||
-          pageParam === 'business' ||
-          pageParam === 'empire_hub' ||
-          pageParam === 'capital_hub' ||
-          pageParam === 'company_hq' ||
-          pageParam === 'corporate' ||
-          pageParam === 'funds' ||
-          pageParam === 'luxury' ||
-          pageParam === 'career' ||
-          pageParam === 'banking' ||
-          pageParam === 'social' ||
-          pageParam === 'leaderboard' ||
-          pageParam === 'news' ||
-          pageParam === 'entertainment' ||
-          pageParam === 'settings'
-        ) {
+        if (isKnownNavParam(pageParam)) {
           useAppStore.getState().setActivePage(pageParam);
         }
 
@@ -124,21 +89,20 @@ function TradingEmpireWorkspace() {
           realtimeClient.connect(null);
         }
       } catch {
-        // Still connect socket for retry
         realtimeClient.connect(null);
       } finally {
         if (mounted) setBooting(false);
       }
     };
 
-    init();
+    void init();
     return () => {
       mounted = false;
       realtimeClient.disconnect();
     };
   }, []);
 
-  // Poll isolated WORLD-PRACTICE snapshot while in Practice Mode (Socket.IO streams WORLD-01 only)
+  // Poll isolated WORLD-PRACTICE snapshot while in Practice Mode
   useEffect(() => {
     if (worldMode !== 'PRACTICE') return;
     let active = true;
@@ -171,7 +135,7 @@ function TradingEmpireWorkspace() {
     pushToast({
       tone: 'success',
       title: `Xin chào ${res.profile.username}`,
-      description: 'Đã kết nối tới sổ lệnh chung WORLD-01: GLOBAL ECONOMY.',
+      description: 'Bạn đã kết nối vào thế giới Trading Empire.',
     });
   };
 
@@ -201,7 +165,7 @@ function TradingEmpireWorkspace() {
         pushToast({
           tone: 'info',
           title: 'Đã vào Phòng Luyện Tập (100,000 CR)',
-          description: 'Mọi lệnh và số dư tại đây tách biệt hoàn toàn với Thế giới chính WORLD-01.',
+          description: 'Mọi lệnh và số dư tại đây tách biệt hoàn toàn với tài khoản Trực tuyến.',
         });
       } else {
         setApiWorldMode('LIVE');
@@ -221,17 +185,16 @@ function TradingEmpireWorkspace() {
         }
         pushToast({
           tone: 'success',
-          title: 'Đã quay lại Thế giới chính WORLD-01',
-          description: 'Số dư và vị thế trên WORLD-01 vẫn được giữ nguyên vẹn.',
+          title: 'Đã quay lại Thế giới Trực tuyến',
+          description: 'Số dư và vị thế của bạn vẫn được giữ nguyên vẹn.',
         });
       }
     } catch (err) {
       pushToast({
         tone: 'error',
-        title: 'Không thể chuyển thế giới',
+        title: 'Không thể chuyển chế độ',
         description: err instanceof Error ? err.message : 'Vui lòng thử lại sau giây lát.',
       });
-      // Revert API mode cleanly on failure
       setApiWorldMode(worldMode);
     } finally {
       setPracticeBusy(false);
@@ -289,48 +252,20 @@ function TradingEmpireWorkspace() {
     realtimeClient.requestSnapshot();
   };
 
-  const renderPage = () => {
-    switch (activePage) {
-      case 'overview':
+  const renderSection = () => {
+    switch (activeSection) {
+      case 'home':
         return <OverviewPage onEnterPracticeMode={() => handleSwitchWorldMode('PRACTICE')} />;
-      case 'discover':
-        return <AssetDiscoveryPage />;
       case 'exchange':
-        return <ExchangePage />;
-      case 'futures':
-        return <FuturesPage />;
-      case 'forex':
-        return <ForexPage />;
-      case 'portfolio':
-        return <PortfolioPage />;
-      case 'property':
-        return <PropertyPage />;
-      case 'business':
-        return <BusinessEmpirePage />;
-      case 'empire_hub':
-        return <EmpireHubPage />;
-      case 'capital_hub':
-        return <CapitalHubPage />;
-      case 'company_hq':
-        return <CompanyHeadquartersPage />;
-      case 'corporate':
-        return <CorporateEmpirePage />;
-      case 'funds':
-        return <InvestmentFundsPage />;
-      case 'luxury':
-        return <LuxuryClubPage />;
-      case 'career':
-        return <CareerProfilePage />;
-      case 'banking':
-        return <BankingPage />;
-      case 'social':
-        return <SocialPage />;
-      case 'leaderboard':
-        return <LeaderboardPage />;
-      case 'news':
-        return <EconomyNewsPage />;
-      case 'entertainment':
-        return <EntertainmentPage />;
+        return <UnifiedExchangePage />;
+      case 'empire':
+        return <MyEmpirePage />;
+      case 'assets':
+        return <MyAssetsPage />;
+      case 'lifestyle':
+        return <LifestylePage />;
+      case 'world':
+        return <WorldPage />;
       case 'settings':
         return <SettingsPage onWorldReset={handleWorldReset} />;
       default:
@@ -349,10 +284,10 @@ function TradingEmpireWorkspace() {
       >
         {booting ? (
           <div className="p-12 text-center text-xs text-[var(--text-secondary)]">
-            Đang kết nối tới máy chủ WORLD-01: GLOBAL ECONOMY...
+            Đang kết nối tới Trading Empire...
           </div>
         ) : (
-          renderPage()
+          renderSection()
         )}
       </AppShell>
 

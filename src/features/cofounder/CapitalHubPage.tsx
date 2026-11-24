@@ -47,15 +47,17 @@ type HubTab =
   | 'MY_INVESTMENTS'
   | 'INVITES';
 
-const HUB_TABS: Array<{ id: HubTab; label: string }> = [
-  { id: 'DISCOVER', label: 'Khám phá dự án' },
-  { id: 'COFOUNDER_WIZARD', label: 'Tìm đồng sáng lập' },
-  { id: 'ROUNDS', label: 'Doanh nghiệp đang gọi vốn' },
-  { id: 'FUNDS', label: 'Quỹ đầu tư' },
+const PRIMARY_HUB_TABS: Array<{ id: HubTab; label: string }> = [
+  { id: 'DISCOVER', label: 'Tìm dự án' },
+  { id: 'INVITES', label: 'Lời mời hợp tác' },
+  { id: 'MY_INVESTMENTS', label: 'Khoản góp vốn của tôi' },
+];
+
+const ADVANCED_HUB_TABS: Array<{ id: HubTab; label: string }> = [
+  { id: 'ROUNDS', label: 'Vòng gọi vốn' },
   { id: 'EQUITY_MARKET', label: 'Thị trường cổ phần' },
   { id: 'JOINT_VENTURES', label: 'Thương vụ liên doanh' },
-  { id: 'MY_INVESTMENTS', label: 'Khoản đầu tư của tôi' },
-  { id: 'INVITES', label: 'Lời mời hợp tác' },
+  { id: 'FUNDS', label: 'Quỹ đầu tư' },
 ];
 
 const CITY_OPTIONS: Array<{ code: V4CityCode; label: string }> = [
@@ -119,6 +121,7 @@ export function CapitalHubPage() {
 
   const [worldMode, setWorldMode] = useState<WorldMode>('ONLINE');
   const [activeTab, setActiveTab] = useState<HubTab>('DISCOVER');
+  const [showMoreTabs, setShowMoreTabs] = useState(false);
   const [hub, setHub] = useState<CoFounderCapitalHubPayload | null>(null);
   const [myInv, setMyInv] = useState<MyInvestmentsPayload | null>(null);
   const [allBusinesses, setAllBusinesses] = useState<BusinessEntity[]>([]);
@@ -421,14 +424,11 @@ export function CapitalHubPage() {
       {/* Page Header & Mode Switch */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-[var(--border-subtle)] pb-4">
         <div>
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--accent)]">
-            PROJECT CO-FOUNDER · MULTIPLAYER CAPITAL MARKET
-          </div>
-          <h1 className="text-xl lg:text-2xl font-bold tracking-tight text-[var(--text-primary)] mt-1">
-            Capital Hub — Đồng sáng lập & Gọi vốn Doanh nghiệp
+          <h1 className="text-lg lg:text-xl font-bold tracking-tight text-[var(--text-primary)]">
+            Góp vốn chung & Đồng sáng lập
           </h1>
           <p className="text-xs text-[var(--text-secondary)] mt-1 max-w-2xl">
-            Góp vốn minh bạch qua Capital Escrow, thành lập doanh nghiệp đồng sở hữu, phát hành vòng gọi vốn mới và liên doanh tập đoàn bằng CR mô phỏng.
+            Góp vốn an toàn qua tài khoản ký quỹ, cùng bạn bè thành lập doanh nghiệp đồng sở hữu và quản lý cổ phần minh bạch.
           </p>
         </div>
 
@@ -540,33 +540,74 @@ export function CapitalHubPage() {
         </div>
       </div>
 
-      {/* 8 Horizontal Tabs */}
-      <div
-        role="tablist"
-        aria-label="Các mục Capital Hub"
-        className="flex items-center gap-1 overflow-x-auto border-b border-[var(--border-subtle)] pb-px"
-      >
-        {HUB_TABS.map((tab) => {
-          const active = activeTab === tab.id;
-          const badge = tab.id === 'INVITES' && pendingInvitesCount > 0 ? ` (${pendingInvitesCount})` : '';
-          return (
+      {/* Simplified 3 Primary V5 Tabs + Expandable Advanced Tools */}
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border-subtle)] pb-px">
+        <div
+          role="tablist"
+          aria-label="Các mục góp vốn chung"
+          className="flex items-center gap-1 overflow-x-auto"
+        >
+          {PRIMARY_HUB_TABS.map((tab) => {
+            const active = activeTab === tab.id;
+            const badge = tab.id === 'INVITES' && pendingInvitesCount > 0 ? ` (${pendingInvitesCount})` : '';
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setActiveTab(tab.id)}
+                className={`px-3 py-2 text-xs font-medium border-b-2 transition-colors cursor-pointer whitespace-nowrap ${
+                  active
+                    ? 'border-[var(--accent)] text-[var(--accent)]'
+                    : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                }`}
+              >
+                {tab.label}
+                {badge}
+              </button>
+            );
+          })}
+          {activeTab === 'COFOUNDER_WIZARD' && (
             <button
-              key={tab.id}
               type="button"
               role="tab"
-              aria-selected={active}
-              onClick={() => setActiveTab(tab.id)}
-              className={`px-3 py-2 text-xs font-medium border-b-2 transition-colors cursor-pointer whitespace-nowrap ${
-                active
-                  ? 'border-[var(--accent)] text-[var(--accent)]'
-                  : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-              }`}
+              aria-selected={true}
+              onClick={() => setActiveTab('COFOUNDER_WIZARD')}
+              className="px-3 py-2 text-xs font-medium border-b-2 border-[var(--accent)] text-[var(--accent)] cursor-pointer whitespace-nowrap"
             >
-              {tab.label}
-              {badge}
+              Tạo dự án góp vốn
             </button>
-          );
-        })}
+          )}
+          {(showMoreTabs || ADVANCED_HUB_TABS.some((t) => t.id === activeTab)) &&
+            ADVANCED_HUB_TABS.map((tab) => {
+              const active = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`px-3 py-2 text-xs font-medium border-b-2 transition-colors cursor-pointer whitespace-nowrap ${
+                    active
+                      ? 'border-[var(--accent)] text-[var(--accent)]'
+                      : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setShowMoreTabs((v) => !v)}
+          className="px-2.5 py-1.5 text-[11px] font-medium text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer whitespace-nowrap"
+        >
+          {showMoreTabs ? 'Thu gọn nâng cao' : 'Mở rộng (Vòng gọi vốn · Cổ phần · Liên doanh)'}
+        </button>
       </div>
 
       {/* TAB 1: DISCOVER PROJECTS */}

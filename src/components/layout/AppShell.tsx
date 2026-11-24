@@ -1,41 +1,30 @@
 import { useState, type ReactNode } from 'react';
 import {
-  ArrowLeftRight,
   Bell,
   BookOpen,
-  Briefcase,
   Building2,
-  CandlestickChart as ChartIcon,
+  CandlestickChart,
   ChevronLeft,
   ChevronRight,
   Clock,
-  Compass,
   Crown,
-  Dice5,
   FlaskConical,
-  Gem,
-  Handshake,
+  Globe,
   HelpCircle,
-  Landmark,
-  LayoutDashboard,
+  Home,
   LogOut,
   Menu,
-  MessageSquare,
   Moon,
-  Newspaper,
-  PieChart,
   RotateCcw,
   Settings,
   Sun,
-  TrendingUp,
-  Trophy,
-  Users,
-  Warehouse,
+  Wallet,
   X,
 } from 'lucide-react';
 import type { WorldMode } from '../../../shared/contracts/beginner';
 import { formatCR } from '../../../shared/contracts/money';
-import { useAppStore, type NavPage } from '../../store/useAppStore';
+import { V5_SIDEBAR_ITEMS, type V5Section } from '../../lib/navigationV5';
+import { useAppStore } from '../../store/useAppStore';
 
 interface AppShellProps {
   children: ReactNode;
@@ -46,35 +35,15 @@ interface AppShellProps {
   practiceBusy?: boolean;
 }
 
-interface NavItem {
-  id: NavPage;
-  label: string;
-  icon: typeof LayoutDashboard;
-  group: 'CORE' | 'ECONOMY' | 'COMMUNITY' | 'SYSTEM';
-}
-
-const NAV_ITEMS: NavItem[] = [
-  { id: 'overview', label: 'Tổng quan', icon: LayoutDashboard, group: 'CORE' },
-  { id: 'discover', label: 'Khám phá', icon: Compass, group: 'CORE' },
-  { id: 'exchange', label: 'Sàn giao dịch', icon: ChartIcon, group: 'CORE' },
-  { id: 'futures', label: 'Sàn Futures (PERP)', icon: TrendingUp, group: 'CORE' },
-  { id: 'forex', label: 'Sàn Forex (EFX)', icon: ArrowLeftRight, group: 'CORE' },
-  { id: 'portfolio', label: 'Danh mục', icon: PieChart, group: 'CORE' },
-  { id: 'property', label: 'Bất động sản', icon: Warehouse, group: 'ECONOMY' },
-  { id: 'empire_hub', label: 'Trung tâm Đế chế', icon: Crown, group: 'ECONOMY' },
-  { id: 'capital_hub', label: 'Đồng sáng lập & Vốn', icon: Handshake, group: 'ECONOMY' },
-  { id: 'business', label: 'Doanh nghiệp', icon: Building2, group: 'ECONOMY' },
-  { id: 'corporate', label: 'Tập đoàn & M&A', icon: Briefcase, group: 'ECONOMY' },
-  { id: 'funds', label: 'Quỹ đầu tư', icon: PieChart, group: 'ECONOMY' },
-  { id: 'luxury', label: 'CLB Tài sản Cao cấp', icon: Gem, group: 'ECONOMY' },
-  { id: 'career', label: 'Sự nghiệp & Danh vị', icon: Trophy, group: 'ECONOMY' },
-  { id: 'banking', label: 'Ngân hàng', icon: Landmark, group: 'ECONOMY' },
-  { id: 'social', label: 'Empire Connect', icon: MessageSquare, group: 'COMMUNITY' },
-  { id: 'leaderboard', label: 'Xếp hạng', icon: Trophy, group: 'COMMUNITY' },
-  { id: 'news', label: 'Tin kinh tế', icon: Newspaper, group: 'COMMUNITY' },
-  { id: 'entertainment', label: 'Khu giải trí', icon: Dice5, group: 'SYSTEM' },
-  { id: 'settings', label: 'Cài đặt & Chẩn đoán', icon: Settings, group: 'SYSTEM' },
-];
+const SECTION_ICONS: Record<V5Section, typeof Home> = {
+  home: Home,
+  exchange: CandlestickChart,
+  empire: Building2,
+  assets: Wallet,
+  lifestyle: Crown,
+  world: Globe,
+  settings: Settings,
+};
 
 export function AppShell({
   children,
@@ -85,18 +54,13 @@ export function AppShell({
   practiceBusy = false,
 }: AppShellProps) {
   const {
-    activePage,
-    setActivePage,
+    activeSection,
+    setActiveSection,
     sidebarCollapsed,
     toggleSidebar,
     theme,
     toggleTheme,
-    worldId,
     worldMode,
-    isDemoTemporaryServer,
-    connectionState,
-    onlineHumanPlayers,
-    simulatedAgentsCount,
     gameClock,
     player,
     notifications,
@@ -111,36 +75,27 @@ export function AppShell({
   const [notifOpen, setNotifOpen] = useState(false);
 
   const unreadCount = notifications.filter((n) => !n.read).length;
+  const currentSectionSpec = V5_SIDEBAR_ITEMS.find((i) => i.id === activeSection) ?? V5_SIDEBAR_ITEMS[0];
 
-  const connLabel =
-    worldMode === 'PRACTICE'
-      ? 'Luyện tập độc lập'
-      : connectionState === 'connected'
-        ? 'Realtime'
-        : connectionState === 'reconnecting'
-          ? 'Đang kết nối lại'
-          : connectionState === 'polling'
-            ? 'Đồng bộ HTTP'
-            : 'Đang kết nối';
-
-  const handleNav = (page: NavPage) => {
-    setActivePage(page);
+  const handleNav = (section: V5Section) => {
+    setActiveSection(section);
     setMobileMenuOpen(false);
   };
 
   return (
     <div className="min-h-screen flex bg-[var(--bg-app)] text-[var(--text-primary)]">
-      {/* Desktop Collapsible Sidebar */}
+      {/* Desktop Collapsible 7-Item Sidebar */}
       <aside
+        data-testid="v5-sidebar"
         className={`hidden lg:flex flex-col shrink-0 border-r border-[var(--border-subtle)] bg-[var(--bg-sidebar)] transition-[width] duration-150 ${
           sidebarCollapsed ? 'w-16' : 'w-56'
         }`}
       >
-        <div className="h-13 px-3 flex items-center justify-between border-b border-[var(--border-subtle)]">
+        <div className="h-14 px-3.5 flex items-center justify-between border-b border-[var(--border-subtle)]">
           {!sidebarCollapsed && (
             <button
               type="button"
-              onClick={() => handleNav('overview')}
+              onClick={() => handleNav('home')}
               className="text-left cursor-pointer whitespace-nowrap truncate"
             >
               <span className="text-sm font-bold tracking-tight text-[var(--text-primary)]">
@@ -152,154 +107,110 @@ export function AppShell({
             type="button"
             onClick={toggleSidebar}
             aria-label={sidebarCollapsed ? 'Mở rộng thanh điều hướng' : 'Thu gọn thanh điều hướng'}
-            className="p-1.5 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)] transition-colors cursor-pointer"
+            className="p-1.5 rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)] transition-colors cursor-pointer"
           >
             {sidebarCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
           </button>
         </div>
 
-        <nav className="flex-1 py-3 px-2 space-y-1 overflow-y-auto" aria-label="Điều hướng chính">
-          {NAV_ITEMS.map((item, idx) => {
-            const Icon = item.icon;
-            const active = activePage === item.id;
-            const showDivider = idx > 0 && NAV_ITEMS[idx - 1].group !== item.group;
+        <nav className="flex-1 py-3 px-2.5 space-y-1 overflow-y-auto" aria-label="Điều hướng chính">
+          {V5_SIDEBAR_ITEMS.map((item) => {
+            const Icon = SECTION_ICONS[item.id];
+            const active = activeSection === item.id;
             return (
-              <div key={item.id}>
-                {showDivider && <div className="my-2 border-t border-[var(--border-subtle)]/70" />}
-                <button
-                  type="button"
-                  onClick={() => handleNav(item.id)}
-                  title={sidebarCollapsed ? item.label : undefined}
-                  className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
-                    active
-                      ? 'bg-[var(--bg-surface)] text-[var(--accent)]'
-                      : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)]/60'
-                  }`}
-                >
-                  <Icon className="w-4 h-4 shrink-0" />
-                  {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
-                </button>
-              </div>
+              <button
+                key={item.id}
+                type="button"
+                data-testid={`nav-item-${item.id}`}
+                onClick={() => handleNav(item.id)}
+                title={sidebarCollapsed ? item.label : undefined}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-colors cursor-pointer whitespace-nowrap ${
+                  active
+                    ? 'bg-[var(--bg-surface)] text-[var(--accent)] font-semibold'
+                    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)]/60'
+                }`}
+              >
+                <Icon className="w-4 h-4 shrink-0" />
+                {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
+              </button>
             );
           })}
         </nav>
 
         {!sidebarCollapsed && (
-          <div className="p-3 border-t border-[var(--border-subtle)] text-[11px] text-[var(--text-muted)] space-y-1">
-            <div className="font-medium text-[var(--warning)]">
-              {worldMode === 'PRACTICE'
-                ? 'PHÒNG LUYỆN TẬP · 100K CR'
-                : isDemoTemporaryServer
-                  ? 'DEMO — TEMPORARY SERVER'
-                  : worldId}
+          <div className="p-3.5 border-t border-[var(--border-subtle)] text-[11px] text-[var(--text-muted)] space-y-1">
+            <div className="font-semibold text-[var(--text-secondary)]">
+              {worldMode === 'PRACTICE' ? 'Phòng Luyện Tập (100K CR)' : 'Thế giới Trực tuyến'}
             </div>
-            <div>Tài sản mô phỏng · Không giá trị quy đổi tiền thật</div>
+            <div>Tài sản mô phỏng bằng CR · Không quy đổi tiền thật</div>
           </div>
         )}
       </aside>
 
-      {/* Main Column */}
+      {/* Main Workspace Column */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Compact Institutional Top Bar */}
-        <header className="h-13 shrink-0 px-3 lg:px-5 border-b border-[var(--border-subtle)] bg-[var(--bg-sidebar)] flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2.5 min-w-0">
+        {/* Clean Institutional Top Bar */}
+        <header className="h-14 shrink-0 px-3 lg:px-6 border-b border-[var(--border-subtle)] bg-[var(--bg-sidebar)] flex items-center justify-between gap-2">
+          <div className="flex items-center gap-3 min-w-0">
             <button
               type="button"
               onClick={() => setMobileMenuOpen(true)}
               aria-label="Mở menu điều hướng"
-              className="lg:hidden p-2 -ml-1 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
+              className="lg:hidden p-2 -ml-1 rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
             >
               <Menu className="w-5 h-5" />
             </button>
 
-            <span className="lg:hidden text-sm font-bold tracking-tight whitespace-nowrap">TRADING EMPIRE</span>
-
-            <div className="hidden md:flex items-center gap-2 text-xs text-[var(--text-secondary)] min-w-0">
-              <span
-                className={`font-mono font-semibold whitespace-nowrap ${
-                  worldMode === 'PRACTICE' ? 'text-[var(--warning)]' : 'text-[var(--text-primary)]'
-                }`}
-              >
-                {worldMode === 'PRACTICE' ? 'WORLD-PRACTICE' : worldId}
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="text-sm font-bold tracking-tight text-[var(--text-primary)] whitespace-nowrap">
+                {currentSectionSpec.label}
               </span>
-              <span aria-hidden="true">·</span>
-              <span
-                className={`inline-flex items-center gap-1.5 whitespace-nowrap ${
-                  worldMode === 'PRACTICE'
-                    ? 'text-[var(--warning)]'
-                    : connectionState === 'connected'
-                      ? 'text-[var(--positive)]'
-                      : 'text-[var(--warning)]'
-                }`}
-              >
-                <span
-                  className={`w-1.5 h-1.5 rounded-full ${
-                    worldMode === 'PRACTICE'
-                      ? 'bg-[var(--warning)]'
-                      : connectionState === 'connected'
-                        ? 'bg-[var(--positive)]'
-                        : 'bg-[var(--warning)]'
-                  }`}
-                />
-                {connLabel}
-              </span>
-              {worldMode === 'LIVE' && (
-                <>
-                  <span aria-hidden="true" className="hidden xl:inline">·</span>
-                  <span className="hidden xl:inline-flex items-center gap-1 whitespace-nowrap font-mono" title="Số kết nối thực trên máy chủ">
-                    <Users className="w-3.5 h-3.5 text-[var(--text-muted)]" />
-                    {onlineHumanPlayers} người chơi · {simulatedAgentsCount} NPC
-                  </span>
-                </>
-              )}
               {gameClock && (
-                <>
-                  <span aria-hidden="true" className="hidden xl:inline">·</span>
-                  <span
-                    className="hidden xl:inline-flex items-center gap-1 whitespace-nowrap font-mono"
-                    title={gameClock.nextStockMarketChangeLabel}
-                  >
-                    <Clock className="w-3.5 h-3.5 text-[var(--text-muted)]" />
-                    {gameClock.formattedGameTime}
-                    <span className={gameClock.stockMarketOpen ? 'text-[var(--positive)]' : 'text-[var(--warning)]'}>
-                      ({gameClock.stockMarketOpen ? 'ESE Mở' : 'ESE Đóng'})
-                    </span>
+                <span
+                  className="hidden md:inline-flex items-center gap-1.5 text-xs text-[var(--text-muted)] font-mono tabular-nums whitespace-nowrap"
+                  title={gameClock.nextStockMarketChangeLabel}
+                >
+                  <span aria-hidden="true">·</span>
+                  <Clock className="w-3.5 h-3.5 shrink-0" />
+                  <span>{gameClock.formattedGameTime}</span>
+                  <span className={gameClock.stockMarketOpen ? 'text-[var(--positive)]' : 'text-[var(--warning)]'}>
+                    {gameClock.stockMarketOpen ? 'Cổ phiếu mở' : 'Cổ phiếu đóng'}
                   </span>
-                </>
+                </span>
               )}
             </div>
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
-            {/* Practice Mode Switcher */}
+            {/* Practice Mode Switcher (isolated sandbox, distinct from Career progression) */}
             <button
               type="button"
               disabled={practiceBusy}
               onClick={() => onSwitchWorldMode(worldMode === 'PRACTICE' ? 'LIVE' : 'PRACTICE')}
               data-testid="practice-mode-toggle"
-              className={`px-2.5 py-1.5 rounded-md text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap disabled:opacity-50 ${
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 disabled:opacity-50 ${
                 worldMode === 'PRACTICE'
                   ? 'bg-[var(--warning)] text-[#0B0F17]'
-                  : 'border border-[var(--warning)]/50 bg-[var(--bg-panel)] text-[var(--warning)] hover:bg-[var(--bg-surface)]'
+                  : 'border border-[var(--border-subtle)] bg-[var(--bg-panel)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)]'
               }`}
               title={
                 worldMode === 'PRACTICE'
-                  ? 'Quay về Thế giới chính WORLD-01'
-                  : 'Vào Phòng Luyện Tập tách biệt với 100,000 CR'
+                  ? 'Quay lại Thế giới Trực tuyến'
+                  : 'Thử nghiệm giao dịch trong Phòng Luyện Tập với 100,000 CR'
               }
             >
-              <FlaskConical className="w-3.5 h-3.5" />
+              <FlaskConical className="w-3.5 h-3.5 shrink-0" />
               <span className="hidden sm:inline">
-                {worldMode === 'PRACTICE' ? 'Về WORLD-01' : 'Luyện tập'}
+                {worldMode === 'PRACTICE' ? 'Về Trực tuyến' : 'Luyện tập'}
               </span>
             </button>
 
             <button
               type="button"
               onClick={() => setTutorialOpen(true)}
-              aria-label="Mở hướng dẫn giao dịch 10 bài"
-              title="Hướng dẫn 10 bài"
-              className="hidden sm:inline-flex p-2 rounded text-[var(--text-secondary)] hover:text-[var(--accent)] hover:bg-[var(--bg-surface)] transition-colors cursor-pointer"
+              aria-label="Mở hướng dẫn người mới"
+              title="Hướng dẫn nhanh"
+              className="hidden sm:inline-flex p-2 rounded-lg text-[var(--text-secondary)] hover:text-[var(--accent)] hover:bg-[var(--bg-surface)] transition-colors cursor-pointer"
             >
               <BookOpen className="w-4 h-4" />
             </button>
@@ -307,29 +218,34 @@ export function AppShell({
             <button
               type="button"
               onClick={() => setGlossaryDrawerOpen(true)}
-              aria-label="Mở từ điển thuật ngữ tài chính"
-              title="Từ điển thuật ngữ"
-              className="p-2 rounded text-[var(--text-secondary)] hover:text-[var(--accent)] hover:bg-[var(--bg-surface)] transition-colors cursor-pointer"
+              aria-label="Mở giải thích thuật ngữ"
+              title="Giải thích thuật ngữ"
+              className="p-2 rounded-lg text-[var(--text-secondary)] hover:text-[var(--accent)] hover:bg-[var(--bg-surface)] transition-colors cursor-pointer"
             >
               <HelpCircle className="w-4 h-4" />
             </button>
 
             {player && (
-              <div className="hidden sm:flex items-center gap-3 mx-1 text-xs font-mono">
-                <div className="text-right">
-                  <div className="text-[10px] text-[var(--text-muted)]">Khả dụng</div>
-                  <div className="font-semibold text-[var(--text-primary)]">
+              <button
+                type="button"
+                onClick={() => handleNav('assets')}
+                className="hidden sm:flex items-center gap-2 px-2.5 py-1 rounded-lg hover:bg-[var(--bg-surface)] transition-colors cursor-pointer text-right"
+                title="Xem chi tiết Tài sản"
+              >
+                <div>
+                  <div className="text-[10px] text-[var(--text-muted)] leading-none">Tiền khả dụng</div>
+                  <div className="text-xs font-mono font-semibold tabular-nums text-[var(--text-primary)] mt-0.5">
                     {formatCR(player.wallet.availableMinor)} CR
                   </div>
                 </div>
-              </div>
+              </button>
             )}
 
             <button
               type="button"
               onClick={toggleTheme}
               aria-label={theme === 'dark' ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối'}
-              className="p-2 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)] transition-colors cursor-pointer"
+              className="p-2 rounded-lg text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)] transition-colors cursor-pointer"
             >
               {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
@@ -342,18 +258,18 @@ export function AppShell({
                   if (!notifOpen) markNotificationsRead();
                 }}
                 aria-label="Thông báo thị trường"
-                className="relative p-2 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)] transition-colors cursor-pointer"
+                className="relative p-2 rounded-lg text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)] transition-colors cursor-pointer"
               >
                 <Bell className="w-4 h-4" />
                 {unreadCount > 0 && (
-                  <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-[var(--accent)]" />
+                  <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-[var(--accent)]" />
                 )}
               </button>
 
               {notifOpen && (
-                <div className="absolute right-0 mt-2 w-80 bg-[var(--bg-panel)] border border-[var(--border-subtle)] rounded-lg shadow-xl z-40">
-                  <div className="px-3 py-2 border-b border-[var(--border-subtle)] flex items-center justify-between">
-                    <span className="text-xs font-semibold">Thông báo thế giới</span>
+                <div className="absolute right-0 mt-2 w-80 bg-[var(--bg-panel)] border border-[var(--border-subtle)] rounded-xl shadow-xl z-40">
+                  <div className="px-3.5 py-2.5 border-b border-[var(--border-subtle)] flex items-center justify-between">
+                    <span className="text-xs font-semibold">Thông báo mới</span>
                     <button
                       type="button"
                       onClick={() => setNotifOpen(false)}
@@ -366,7 +282,7 @@ export function AppShell({
                   <div className="max-h-72 overflow-y-auto divide-y divide-[var(--border-subtle)]/60">
                     {notifications.length === 0 ? (
                       <div className="p-4 text-xs text-[var(--text-muted)] text-center">
-                        Chưa có sự kiện mới từ máy chủ {worldId}.
+                        Chưa có thông báo mới.
                       </div>
                     ) : (
                       notifications.map((n) => (
@@ -382,14 +298,14 @@ export function AppShell({
             </div>
 
             {player ? (
-              <div className="flex items-center gap-1.5 pl-2 border-l border-[var(--border-subtle)]">
+              <div className="flex items-center gap-1 pl-2 border-l border-[var(--border-subtle)]">
                 <button
                   type="button"
                   onClick={onSwitchAccount}
-                  className="flex items-center gap-2 px-2 py-1 rounded hover:bg-[var(--bg-surface)] transition-colors cursor-pointer"
-                  title="Đổi tài khoản Guest thử nghiệm"
+                  className="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-[var(--bg-surface)] transition-colors cursor-pointer"
+                  title="Đổi tài khoản"
                 >
-                  <span className="w-7 h-7 rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)] flex items-center justify-center text-[11px] font-mono font-semibold text-[var(--accent)]">
+                  <span className="w-7 h-7 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-subtle)] flex items-center justify-center text-[11px] font-mono font-semibold text-[var(--accent)]">
                     {player.avatarInitials}
                   </span>
                   <div className="hidden md:block text-left leading-tight">
@@ -397,16 +313,16 @@ export function AppShell({
                       {player.username}
                     </div>
                     <div className="text-[10px] text-[var(--text-muted)] whitespace-nowrap">
-                      Lv.{player.level} · {worldMode === 'PRACTICE' ? 'Practice' : 'Guest'}
+                      Cấp {player.level} · {worldMode === 'PRACTICE' ? 'Luyện tập' : 'Trực tuyến'}
                     </div>
                   </div>
                 </button>
                 <button
                   type="button"
                   onClick={onLogout}
-                  aria-label="Đăng xuất phiên Guest"
+                  aria-label="Đăng xuất"
                   title="Đăng xuất"
-                  className="p-1.5 rounded text-[var(--text-muted)] hover:text-[var(--negative)] hover:bg-[var(--bg-surface)] transition-colors cursor-pointer"
+                  className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--negative)] hover:bg-[var(--bg-surface)] transition-colors cursor-pointer"
                 >
                   <LogOut className="w-4 h-4" />
                 </button>
@@ -415,9 +331,9 @@ export function AppShell({
               <button
                 type="button"
                 onClick={onSwitchAccount}
-                className="px-3 py-1.5 rounded text-xs font-semibold bg-[var(--accent)] text-[#0B0F17] hover:bg-[var(--accent-hover)] transition-colors cursor-pointer whitespace-nowrap"
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-[var(--accent)] text-[#0B0F17] hover:bg-[var(--accent-hover)] transition-colors cursor-pointer whitespace-nowrap shrink-0"
               >
-                Vào Guest
+                Đăng nhập
               </button>
             )}
           </div>
@@ -427,12 +343,12 @@ export function AppShell({
         {worldMode === 'PRACTICE' && (
           <div
             data-testid="practice-mode-banner"
-            className="px-3 lg:px-5 py-2 bg-[var(--warning)]/15 border-b border-[var(--warning)]/40 flex flex-wrap items-center justify-between gap-2 text-xs"
+            className="px-3 lg:px-6 py-2 bg-[var(--warning)]/15 border-b border-[var(--warning)]/40 flex flex-wrap items-center justify-between gap-2 text-xs"
           >
             <div className="flex items-center gap-2 text-[var(--text-primary)]">
               <FlaskConical className="w-4 h-4 text-[var(--warning)] shrink-0" />
               <span>
-                <strong className="text-[var(--warning)]">PHÒNG LUYỆN TẬP (100,000 CR)</strong> — Tách biệt hoàn toàn khỏi Thế giới chính WORLD-01. Mọi lệnh giao dịch tại đây không ảnh hưởng số dư chính.
+                <strong className="text-[var(--warning)]">Phòng Luyện Tập (100,000 CR)</strong> — Tách biệt hoàn toàn khỏi tài khoản Trực tuyến.
               </span>
             </div>
             <div className="flex items-center gap-2">
@@ -441,7 +357,7 @@ export function AppShell({
                 disabled={practiceBusy}
                 onClick={onResetPractice}
                 data-testid="practice-reset-btn"
-                className="px-2.5 py-1 rounded-md font-semibold bg-[var(--bg-panel)] border border-[var(--warning)]/60 text-[var(--warning)] hover:bg-[var(--bg-surface)] inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                className="px-2.5 py-1 rounded-md font-semibold bg-[var(--bg-panel)] border border-[var(--warning)]/60 text-[var(--warning)] hover:bg-[var(--bg-surface)] inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap disabled:opacity-50"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
                 Đặt lại 100,000 CR
@@ -450,24 +366,24 @@ export function AppShell({
                 type="button"
                 disabled={practiceBusy}
                 onClick={() => onSwitchWorldMode('LIVE')}
-                className="px-2.5 py-1 rounded-md font-semibold bg-[var(--accent)] text-[#0B0F17] hover:bg-[var(--accent-hover)] cursor-pointer disabled:opacity-50"
+                className="px-2.5 py-1 rounded-md font-semibold bg-[var(--accent)] text-[#0B0F17] hover:bg-[var(--accent-hover)] cursor-pointer whitespace-nowrap disabled:opacity-50"
               >
-                Quay về WORLD-01
+                Về Trực tuyến
               </button>
             </div>
           </div>
         )}
 
         {/* Main Scrollable Viewport */}
-        <main className="flex-1 overflow-y-auto p-3 lg:p-5 pb-24 lg:pb-6">{children}</main>
+        <main className="flex-1 overflow-y-auto p-3.5 lg:p-6 pb-20 lg:pb-8">{children}</main>
       </div>
 
-      {/* Mobile Navigation Drawer */}
+      {/* Mobile 7-Item Navigation Drawer */}
       {mobileMenuOpen && (
         <div className="fixed inset-0 z-50 lg:hidden flex">
           <div className="fixed inset-0 bg-black/60" onClick={() => setMobileMenuOpen(false)} />
           <div className="relative w-64 max-w-[82vw] bg-[var(--bg-sidebar)] border-r border-[var(--border-subtle)] flex flex-col z-10">
-            <div className="h-13 px-4 flex items-center justify-between border-b border-[var(--border-subtle)]">
+            <div className="h-14 px-4 flex items-center justify-between border-b border-[var(--border-subtle)]">
               <span className="text-sm font-bold">TRADING EMPIRE</span>
               <button
                 type="button"
@@ -478,22 +394,22 @@ export function AppShell({
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <nav className="flex-1 p-2 space-y-1 overflow-y-auto">
-              {NAV_ITEMS.map((item) => {
-                const Icon = item.icon;
-                const active = activePage === item.id;
+            <nav className="flex-1 p-2.5 space-y-1 overflow-y-auto">
+              {V5_SIDEBAR_ITEMS.map((item) => {
+                const Icon = SECTION_ICONS[item.id];
+                const active = activeSection === item.id;
                 return (
                   <button
                     key={item.id}
                     type="button"
                     onClick={() => handleNav(item.id)}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium cursor-pointer ${
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium cursor-pointer ${
                       active
-                        ? 'bg-[var(--bg-surface)] text-[var(--accent)]'
+                        ? 'bg-[var(--bg-surface)] text-[var(--accent)] font-semibold'
                         : 'text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]/50'
                     }`}
                   >
-                    <Icon className="w-4 h-4" />
+                    <Icon className="w-4 h-4 shrink-0" />
                     <span>{item.label}</span>
                   </button>
                 );
@@ -506,39 +422,39 @@ export function AppShell({
                   setMobileMenuOpen(false);
                   setTutorialOpen(true);
                 }}
-                className="w-full py-2 px-3 rounded-md text-xs font-medium bg-[var(--bg-surface)] text-[var(--text-primary)] inline-flex items-center gap-2 cursor-pointer"
+                className="w-full py-2 px-3 rounded-lg text-xs font-medium bg-[var(--bg-surface)] text-[var(--text-primary)] inline-flex items-center gap-2 cursor-pointer"
               >
                 <BookOpen className="w-4 h-4 text-[var(--accent)]" />
-                Hướng dẫn 10 bài
+                Hướng dẫn người mới
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Compact Mobile Bottom Bar (under 15% mobile viewport cap) */}
+      {/* Compact Mobile Bottom Bar */}
       <nav
         aria-label="Điều hướng nhanh di động"
         className="lg:hidden fixed bottom-0 inset-x-0 h-14 bg-[var(--bg-sidebar)] border-t border-[var(--border-subtle)] grid grid-cols-5 z-30"
       >
         {(
           [
-            { id: 'overview', label: 'Tổng quan', icon: LayoutDashboard },
-            { id: 'discover', label: 'Khám phá', icon: Compass },
-            { id: 'exchange', label: 'Sàn Spot', icon: ChartIcon },
-            { id: 'futures', label: 'Futures', icon: TrendingUp },
-            { id: 'portfolio', label: 'Danh mục', icon: PieChart },
+            { id: 'home', label: 'Trang chủ', icon: Home },
+            { id: 'exchange', label: 'Giao dịch', icon: CandlestickChart },
+            { id: 'empire', label: 'Đế chế', icon: Building2 },
+            { id: 'assets', label: 'Tài sản', icon: Wallet },
+            { id: 'world', label: 'Thế giới', icon: Globe },
           ] as const
         ).map((tab) => {
           const Icon = tab.icon;
-          const active = activePage === tab.id;
+          const active = activeSection === tab.id;
           return (
             <button
               key={tab.id}
               type="button"
               onClick={() => handleNav(tab.id)}
               className={`flex flex-col items-center justify-center gap-0.5 text-[10px] font-medium cursor-pointer ${
-                active ? 'text-[var(--accent)]' : 'text-[var(--text-secondary)]'
+                active ? 'text-[var(--accent)] font-semibold' : 'text-[var(--text-secondary)]'
               }`}
             >
               <Icon className="w-4 h-4" />
@@ -556,7 +472,7 @@ export function AppShell({
         {toasts.map((t) => (
           <div
             key={t.id}
-            className="pointer-events-auto bg-[var(--bg-panel)] border border-[var(--border-subtle)] rounded-lg px-3.5 py-2.5 shadow-xl flex items-start justify-between gap-2"
+            className="pointer-events-auto bg-[var(--bg-panel)] border border-[var(--border-subtle)] rounded-xl px-3.5 py-2.5 shadow-xl flex items-start justify-between gap-2"
           >
             <div className="space-y-0.5 text-xs">
               <div

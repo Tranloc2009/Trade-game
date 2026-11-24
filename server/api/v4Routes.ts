@@ -25,6 +25,7 @@ import {
   WORLD_EVENT_TEMPLATES_V4,
 } from '../engine/v4/V4Catalog';
 import { WorldMacroV4Engine } from '../engine/v4/WorldMacroV4Engine';
+import { requireAdminDev } from '../security/AdminAuth';
 
 function ok<T>(res: Response, data: T, status = 200): void {
   const body: ApiSuccess<T> = {
@@ -766,9 +767,10 @@ export function createV4Router(world: WorldEngine): Router {
   // 7. DEV QA CYCLE TRIGGER & MACRO BALANCE SIMULATION
   // ============================================================================
 
-  router.post('/dev/advance-cycle', (req, res, next) => {
+  const adminGuard = requireAdminDev(world.devToolsEnabled);
+
+  router.post('/dev/advance-cycle', adminGuard, (req, res, next) => {
     try {
-      if (!world.devToolsEnabled) throw new DomainError('FORBIDDEN_IN_PRODUCTION', undefined, 403);
       const cycles = Math.min(10, Math.max(1, Number(req.body?.cycles) || 1));
       const forceEventTemplateId =
         typeof req.body?.forceEventTemplateId === 'string' ? req.body.forceEventTemplateId : undefined;
@@ -784,9 +786,8 @@ export function createV4Router(world: WorldEngine): Router {
     }
   });
 
-  router.get('/dev/balance-simulation', (req, res, next) => {
+  router.get('/dev/balance-simulation', adminGuard, (req, res, next) => {
     try {
-      if (!world.devToolsEnabled) throw new DomainError('FORBIDDEN_IN_PRODUCTION', undefined, 403);
       const days = Math.min(365, Math.max(7, Number(req.query.days) || 90));
       const report = WorldMacroV4Engine.runEconomyBalanceSimulation(days, 2026);
       ok(res, report);

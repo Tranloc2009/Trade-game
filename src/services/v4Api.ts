@@ -33,7 +33,7 @@ import type {
   WealthRankSpec,
   WorldMacroEventV4,
 } from '../../shared/contracts/v4';
-import { ApiClientError, getAuthToken } from './api';
+import { ApiClientError, getAdminToken, getAuthToken } from './api';
 
 async function v4Request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
@@ -43,6 +43,10 @@ async function v4Request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getAuthToken();
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);
+  }
+  const adminToken = getAdminToken();
+  if (adminToken) {
+    headers.set('X-Admin-Token', adminToken);
   }
 
   const res = await fetch(`/api/v4${path}`, { ...init, headers });

@@ -88,6 +88,7 @@ import type {
 // Auth tokens live strictly in JS memory (NEVER persisted to localStorage)
 let liveAuthTokenMemory: string | null = null;
 let practiceAuthTokenMemory: string | null = null;
+let adminAuthTokenMemory: string | null = null;
 let activeWorldMode: WorldMode = 'LIVE';
 
 export function setApiWorldMode(mode: WorldMode): void {
@@ -108,6 +109,14 @@ export function setAuthToken(token: string | null, mode: WorldMode = activeWorld
 
 export function getAuthToken(mode: WorldMode = activeWorldMode): string | null {
   return mode === 'PRACTICE' ? practiceAuthTokenMemory : liveAuthTokenMemory;
+}
+
+export function setAdminToken(token: string | null): void {
+  adminAuthTokenMemory = token;
+}
+
+export function getAdminToken(): string | null {
+  return adminAuthTokenMemory;
 }
 
 export class ApiClientError extends Error {
@@ -140,6 +149,9 @@ async function request<T>(path: string, init: RequestInit = {}, modeOverride?: W
   }
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);
+  }
+  if (adminAuthTokenMemory) {
+    headers.set('X-Admin-Token', adminAuthTokenMemory);
   }
 
   let res: Response;
@@ -190,6 +202,30 @@ export const WorldService = {
       method: 'POST',
       body: JSON.stringify({ symbol }),
     }),
+};
+
+export const AdminService = {
+  getStatus: () =>
+    request<{
+      devToolsEnabled: boolean;
+      authorized: boolean;
+      configuredViaEnv: boolean;
+      claimed: boolean;
+      requiresSetup: boolean;
+    }>('/api/admin/status', {}, 'LIVE'),
+  claim: (passcode: string) =>
+    request<{ token: string; expiresAt: string }>(
+      '/api/admin/claim',
+      { method: 'POST', body: JSON.stringify({ passcode }) },
+      'LIVE',
+    ),
+  login: (passcode: string) =>
+    request<{ token: string; expiresAt: string }>(
+      '/api/admin/login',
+      { method: 'POST', body: JSON.stringify({ passcode }) },
+      'LIVE',
+    ),
+  logout: () => request<{ loggedOut: boolean }>('/api/admin/logout', { method: 'POST' }, 'LIVE'),
 };
 
 export const TradingService = {

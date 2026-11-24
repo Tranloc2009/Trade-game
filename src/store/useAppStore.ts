@@ -38,6 +38,16 @@ import {
   queryClient,
 } from '../lib/queryClient';
 
+import {
+  resolveLegacyNavigation,
+  type AssetsTab,
+  type EmpireTab,
+  type ExchangeMarketTab,
+  type LifestyleTab,
+  type V5Section,
+  type WorldTab,
+} from '../lib/navigationV5';
+
 // Bounded deduplication set for incoming realtime event IDs (prevents duplicate mutations on redelivery)
 const MAX_SEEN_EVENT_IDS = 600;
 const seenEventIds = new Set<string>();
@@ -58,6 +68,7 @@ export function resetSeenRealtimeEvents(): void {
 }
 
 export type NavPage =
+  | V5Section
   | 'overview'
   | 'discover'
   | 'exchange'
@@ -166,6 +177,14 @@ function saveUiPrefs(prefs: UiPrefs): void {
 interface AppState {
   // Navigation & UI Prefs
   activePage: NavPage;
+  activeSection: V5Section;
+  exchangeMarketTab: ExchangeMarketTab;
+  empireTab: EmpireTab;
+  assetsTab: AssetsTab;
+  lifestyleTab: LifestyleTab;
+  worldTab: WorldTab;
+  careerViewOpen: boolean;
+  companyHqOpen: boolean;
   exchangeClassFilter: 'ALL' | 'CRYPTO' | 'STOCK';
   selectedSymbol: string;
   selectedForexSymbol: string;
@@ -222,6 +241,14 @@ interface AppState {
 
   // Actions
   setActivePage: (page: NavPage) => void;
+  setActiveSection: (section: V5Section) => void;
+  setExchangeMarketTab: (tab: ExchangeMarketTab) => void;
+  setEmpireTab: (tab: EmpireTab) => void;
+  setAssetsTab: (tab: AssetsTab) => void;
+  setLifestyleTab: (tab: LifestyleTab) => void;
+  setWorldTab: (tab: WorldTab) => void;
+  setCareerViewOpen: (open: boolean) => void;
+  setCompanyHqOpen: (open: boolean) => void;
   openCompanyHq: (companyId: string) => void;
   setSelectedHqCompanyId: (companyId: string | null) => void;
   setConnectUnreadCounts: (notifications: number, messages: number) => void;
@@ -277,7 +304,15 @@ function persistFromState(s: AppState, overrides: Partial<UiPrefs> = {}): void {
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
-  activePage: 'overview',
+  activePage: 'home',
+  activeSection: 'home',
+  exchangeMarketTab: 'STOCK',
+  empireTab: 'business',
+  assetsTab: 'summary',
+  lifestyleTab: 'showroom',
+  worldTab: 'news',
+  careerViewOpen: false,
+  companyHqOpen: false,
   exchangeClassFilter: 'ALL',
   selectedSymbol: 'NOVA',
   selectedForexSymbol: 'EUR-SIM/USD-SIM',
@@ -330,29 +365,88 @@ export const useAppStore = create<AppState>((set, get) => ({
   connectUnreadNotifications: 0,
   connectUnreadMessages: 0,
 
-  setActivePage: (page) => set({ activePage: page }),
-  openCompanyHq: (companyId) => set({ selectedHqCompanyId: companyId, activePage: 'company_hq' }),
+  setActivePage: (page) =>
+    set((state) => {
+      const resolved = resolveLegacyNavigation(page);
+      return {
+        activePage: page,
+        activeSection: resolved.section,
+        exchangeMarketTab: resolved.exchangeMarketTab ?? state.exchangeMarketTab,
+        empireTab: resolved.empireTab ?? state.empireTab,
+        assetsTab: resolved.assetsTab ?? state.assetsTab,
+        lifestyleTab: resolved.lifestyleTab ?? state.lifestyleTab,
+        worldTab: resolved.worldTab ?? state.worldTab,
+        careerViewOpen: resolved.openCareerView ?? false,
+        companyHqOpen: resolved.openCompanyHq ?? false,
+      };
+    }),
+  setActiveSection: (section) =>
+    set({
+      activePage: section,
+      activeSection: section,
+      careerViewOpen: false,
+      companyHqOpen: false,
+    }),
+  setExchangeMarketTab: (exchangeMarketTab) =>
+    set({
+      exchangeMarketTab,
+      exchangeClassFilter:
+        exchangeMarketTab === 'STOCK' || exchangeMarketTab === 'CRYPTO' ? exchangeMarketTab : 'ALL',
+    }),
+  setEmpireTab: (empireTab) => set({ empireTab, companyHqOpen: false }),
+  setAssetsTab: (assetsTab) => set({ assetsTab }),
+  setLifestyleTab: (lifestyleTab) => set({ lifestyleTab }),
+  setWorldTab: (worldTab) => set({ worldTab }),
+  setCareerViewOpen: (careerViewOpen) => set({ careerViewOpen }),
+  setCompanyHqOpen: (companyHqOpen) => set({ companyHqOpen }),
+
+  openCompanyHq: (companyId) =>
+    set({
+      selectedHqCompanyId: companyId,
+      activePage: 'company_hq',
+      activeSection: 'empire',
+      empireTab: 'business',
+      companyHqOpen: true,
+    }),
   setSelectedHqCompanyId: (selectedHqCompanyId) => set({ selectedHqCompanyId }),
   setConnectUnreadCounts: (connectUnreadNotifications, connectUnreadMessages) =>
     set({ connectUnreadNotifications, connectUnreadMessages }),
 
   openAssetInExchange: (symbol, marketClass) =>
-    set({
-      selectedSymbol: symbol,
-      exchangeClassFilter: marketClass ?? 'ALL',
-      activePage: 'exchange',
+    set((state) => {
+      const found = state.assets.find((a) => a.symbol === symbol);
+      const inferredTab: ExchangeMarketTab =
+        marketClass === 'CRYPTO' || found?.marketClass === 'CRYPTO' || symbol.includes('-SIM')
+          ? found?.marketClass === 'FOREX' || symbol.includes('/')
+            ? 'FOREX'
+            : 'CRYPTO'
+          : found?.marketClass === 'FOREX' || symbol.includes('/')
+            ? 'FOREX'
+            : 'STOCK';
+      return {
+        selectedSymbol: inferredTab === 'FOREX' ? state.selectedSymbol : symbol,
+        selectedForexSymbol: inferredTab === 'FOREX' ? symbol : state.selectedForexSymbol,
+        exchangeClassFilter: inferredTab === 'CRYPTO' ? 'CRYPTO' : inferredTab === 'STOCK' ? 'STOCK' : 'ALL',
+        exchangeMarketTab: inferredTab,
+        activePage: 'exchange',
+        activeSection: 'exchange',
+      };
     }),
 
   openForexPair: (symbol) =>
     set({
       selectedForexSymbol: symbol,
-      activePage: 'forex',
+      exchangeMarketTab: 'FOREX',
+      activePage: 'exchange',
+      activeSection: 'exchange',
     }),
 
   openFuturesContract: (symbol) =>
     set({
       selectedFuturesSymbol: symbol,
-      activePage: 'futures',
+      exchangeMarketTab: 'FUTURES',
+      activePage: 'exchange',
+      activeSection: 'exchange',
     }),
 
   setExchangeClassFilter: (filter) => set({ exchangeClassFilter: filter }),

@@ -1,16 +1,11 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  ArrowUpRight,
   Building2,
+  Handshake,
   MapPin,
-  Play,
   Plus,
-  RefreshCw,
-  Settings,
   ShieldAlert,
-  TrendingUp,
-  Users,
 } from 'lucide-react';
 import { formatCR } from '../../../shared/contracts/money';
 import type {
@@ -26,15 +21,7 @@ import { V4Service } from '../../services/v4Api';
 import { useAppStore } from '../../store/useAppStore';
 
 type MainView = 'DASHBOARD' | 'CATALOG';
-type FlagshipTab =
-  | 'OVERVIEW'
-  | 'OPERATIONS'
-  | 'EMPLOYEES'
-  | 'UPGRADE'
-  | 'BRANCHES'
-  | 'FINANCIALS'
-  | 'OWNERSHIP'
-  | 'SETTINGS';
+type FlagshipTab = 'OVERVIEW' | 'OPERATIONS' | 'GROWTH' | 'FINANCE';
 
 const INDUSTRY_LABELS: Record<'ALL' | V4BusinessIndustry, string> = {
   ALL: 'Tất cả ngành',
@@ -59,8 +46,8 @@ const BRANCH_LABELS: Record<UpgradeBranch, string> = {
 function MiniProfitChart({ history }: { history: BusinessEntity['financialHistory'] }) {
   if (history.length === 0) {
     return (
-      <div className="h-36 flex items-center justify-center text-xs text-[var(--text-muted)] border border-dashed border-[var(--border-subtle)] rounded">
-        Chưa có chu kỳ vận hành nào. Chờ chu kỳ 60 giây hoặc bấm "Chạy 1 chu kỳ" để xem dữ liệu tài chính thực.
+      <div className="h-36 flex items-center justify-center text-xs text-[var(--text-muted)] border border-dashed border-[var(--border-subtle)] rounded px-4 text-center">
+        Chưa có chu kỳ vận hành nào. Hệ thống tự động tổng kết doanh thu và chi phí sau mỗi chu kỳ 60 giây.
       </div>
     );
   }
@@ -141,7 +128,7 @@ function MiniProfitChart({ history }: { history: BusinessEntity['financialHistor
 }
 
 export function BusinessEmpirePage() {
-  const { player, setPlayer, v4SyncSeq, pushToast } = useAppStore();
+  const { player, setPlayer, v4SyncSeq, pushToast, setActivePage } = useAppStore();
   const qc = useQueryClient();
 
   const [mainView, setMainView] = useState<MainView>('DASHBOARD');
@@ -193,15 +180,6 @@ export function BusinessEmpirePage() {
       });
     },
     onError: (err: Error) => pushToast({ tone: 'error', title: 'Không thể thành lập', description: err.message }),
-  });
-
-  const advanceCycleMutation = useMutation({
-    mutationFn: () => V4Service.devAdvanceCycle(1),
-    onSuccess: () => {
-      invalidateAll();
-      pushToast({ tone: 'info', title: 'Đã chạy 1 chu kỳ vận hành doanh nghiệp' });
-    },
-    onError: (err: Error) => pushToast({ tone: 'error', title: 'Lỗi mô phỏng chu kỳ', description: err.message }),
   });
 
   const empMutation = useMutation({
@@ -342,11 +320,11 @@ export function BusinessEmpirePage() {
       {/* Top Bar */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-[var(--border-subtle)] pb-4">
         <div className="space-y-1">
-          <h1 className="text-xl font-bold tracking-tight text-[var(--text-primary)]">
-            Doanh Nghiệp V4 — Operations & Empire Management
+          <h1 className="text-lg font-bold tracking-tight text-[var(--text-primary)]">
+            Doanh nghiệp của tôi
           </h1>
           <p className="text-xs text-[var(--text-secondary)]">
-            {data.catalog.length} loại hình doanh nghiệp · 10 cấp độ phát triển · Ngân sách hộ gia đình hữu hạn & cạnh tranh thị phần tại 8 thành phố Việt Nam.
+            Tự mở công ty độc lập ({data.catalog.length} ngành nghề tại 8 thành phố Việt Nam) hoặc góp vốn lập công ty chung cùng bạn bè.
           </p>
         </div>
 
@@ -355,7 +333,7 @@ export function BusinessEmpirePage() {
             <button
               type="button"
               onClick={() => setMainView('DASHBOARD')}
-              className={`px-3 py-1.5 rounded font-medium cursor-pointer transition-colors ${
+              className={`px-3 py-1.5 rounded font-medium cursor-pointer transition-colors whitespace-nowrap ${
                 mainView === 'DASHBOARD'
                   ? 'bg-[var(--bg-panel)] text-[var(--accent)]'
                   : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
@@ -366,24 +344,23 @@ export function BusinessEmpirePage() {
             <button
               type="button"
               onClick={() => setMainView('CATALOG')}
-              className={`px-3 py-1.5 rounded font-medium cursor-pointer transition-colors ${
+              className={`px-3 py-1.5 rounded font-medium cursor-pointer transition-colors whitespace-nowrap ${
                 mainView === 'CATALOG'
                   ? 'bg-[var(--bg-panel)] text-[var(--accent)]'
                   : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
               }`}
             >
-              Khởi nghiệp ({data.catalog.length} ngành)
+              Mở công ty mới ({data.catalog.length})
             </button>
           </div>
 
           <button
             type="button"
-            onClick={() => advanceCycleMutation.mutate()}
-            disabled={advanceCycleMutation.isPending}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer disabled:opacity-50"
+            onClick={() => setActivePage('capital_hub')}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-primary)] hover:border-[var(--accent)] cursor-pointer whitespace-nowrap shrink-0"
           >
-            <Play className="w-3.5 h-3.5 text-[var(--positive)]" />
-            Chạy 1 chu kỳ
+            <Handshake className="w-3.5 h-3.5 text-[var(--accent)]" />
+            Góp vốn cùng bạn bè
           </button>
         </div>
       </div>
@@ -682,7 +659,7 @@ export function BusinessEmpirePage() {
                   </div>
                 </div>
 
-                {/* 8 Flagship Tabs */}
+                {/* 4 Simplified V5 Tabs */}
                 <div
                   role="tablist"
                   aria-label="Phân mục quản trị doanh nghiệp"
@@ -690,14 +667,10 @@ export function BusinessEmpirePage() {
                 >
                   {(
                     [
-                      ['OVERVIEW', '1. Tổng quan'],
-                      ['OPERATIONS', '2. Vận hành'],
-                      ['EMPLOYEES', '3. Nhân sự'],
-                      ['UPGRADE', '4. Nâng cấp'],
-                      ['BRANCHES', '5. Chi nhánh'],
-                      ['FINANCIALS', '6. Báo cáo TC'],
-                      ['OWNERSHIP', '7. Cổ đông'],
-                      ['SETTINGS', '8. Cài đặt'],
+                      ['OVERVIEW', 'Tổng quan'],
+                      ['OPERATIONS', 'Vận hành & Nhân sự'],
+                      ['GROWTH', 'Phát triển & Chi nhánh'],
+                      ['FINANCE', 'Tài chính & Cổ đông'],
                     ] as const
                   ).map(([id, label]) => (
                     <button
@@ -706,7 +679,7 @@ export function BusinessEmpirePage() {
                       role="tab"
                       aria-selected={activeTab === id}
                       onClick={() => setActiveTab(id)}
-                      className={`px-3 py-1.5 rounded text-xs font-medium transition-colors cursor-pointer ${
+                      className={`px-3 py-1.5 rounded text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
                         activeTab === id
                           ? 'bg-[var(--bg-surface)] text-[var(--accent)] border border-[var(--accent)]/40'
                           : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)]/50'
@@ -864,16 +837,17 @@ export function BusinessEmpirePage() {
                           </button>
                         </div>
                       )}
-                    </div>
-                  )}
-
-                  {/* 3. EMPLOYEES */}
-                  {activeTab === 'EMPLOYEES' && (
-                    <div className="space-y-3">
-                      <div className="text-xs text-[var(--text-secondary)]">
-                        Quản lý 7 vai trò nhân sự NPC. Lương thấp hơn thị trường sẽ giảm năng suất và độ hài lòng.
-                      </div>
-                      <div className="overflow-x-auto">
+                      {/* Employees section inside Vận hành */}
+                      <div className="pt-4 border-t border-[var(--border-subtle)] space-y-3">
+                        <div>
+                          <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                            Nhân sự công ty
+                          </h3>
+                          <p className="text-xs text-[var(--text-secondary)] mt-0.5">
+                            Tuyển dụng, đào tạo và điều chỉnh nhân sự. Lương thấp hơn thị trường sẽ giảm năng suất và độ hài lòng.
+                          </p>
+                        </div>
+                        <div className="overflow-x-auto">
                         <table className="w-full text-xs">
                           <thead>
                             <tr className="border-b border-[var(--border-subtle)] text-[11px] text-[var(--text-muted)]">
@@ -953,13 +927,75 @@ export function BusinessEmpirePage() {
                             })}
                           </tbody>
                         </table>
+                        </div>
+                      </div>
+
+                      {/* Operating Status & Franchise inside Vận hành */}
+                      <div className="pt-4 border-t border-[var(--border-subtle)] space-y-3 text-xs">
+                        <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                          Trạng thái & Nhượng quyền
+                        </h3>
+                        {isController ? (
+                          <div className="space-y-3">
+                            <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
+                              <div>
+                                <div className="font-semibold text-[var(--text-primary)]">Trạng thái vận hành</div>
+                                <div className="text-[11px] text-[var(--text-muted)]">
+                                  Tái cơ cấu giúp cắt giảm chi phí cố định khi thị trường khó khăn.
+                                </div>
+                              </div>
+                              <div className="flex gap-1.5">
+                                {(['ACTIVE', 'RESTRUCTURING', 'SUSPENDED'] as const).map((st) => (
+                                  <button
+                                    key={st}
+                                    type="button"
+                                    onClick={() => settingsMutation.mutate({ businessId: activeBiz.id, status: st })}
+                                    className={`px-2.5 py-1.5 rounded font-medium cursor-pointer border ${
+                                      activeBiz.status === st
+                                        ? 'border-[var(--accent)] bg-[var(--accent)]/15 text-[var(--accent)]'
+                                        : 'border-[var(--border-subtle)] bg-[var(--bg-panel)] text-[var(--text-secondary)]'
+                                    }`}
+                                  >
+                                    {st === 'ACTIVE' ? 'Hoạt động' : st === 'RESTRUCTURING' ? 'Tái cơ cấu' : 'Tạm dừng'}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
+                              <div>
+                                <div className="font-semibold text-[var(--text-primary)]">Nhượng quyền thương hiệu</div>
+                                <div className="text-[11px] text-[var(--text-muted)]">
+                                  Yêu cầu Level ≥ 3 và Uy tín ≥ 60 để thu phí nhượng quyền hàng chu kỳ.
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  settingsMutation.mutate({
+                                    businessId: activeBiz.id,
+                                    franchiseEnabled: !activeBiz.franchiseEnabled,
+                                  })
+                                }
+                                className="px-3 py-1.5 rounded font-semibold bg-[var(--bg-panel)] border border-[var(--border-subtle)] hover:border-[var(--accent)] cursor-pointer whitespace-nowrap"
+                              >
+                                {activeBiz.franchiseEnabled ? 'Đang mở Nhượng quyền' : 'Kích hoạt Nhượng quyền'}
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2 text-[var(--text-muted)]">
+                            <ShieldAlert className="w-4 h-4" />
+                            Chỉ Chủ sở hữu hoặc CEO mới được thay đổi cấu hình điều hành.
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
 
-                  {/* 4. UPGRADE (10 Levels + 5-Branch Upgrade Tree) */}
-                  {activeTab === 'UPGRADE' && (
-                    <div className="space-y-5">
+                  {/* 3. GROWTH (Levels + 5-Branch Upgrade Tree + Branches) */}
+                  {activeTab === 'GROWTH' && (
+                    <div className="space-y-6">
                       <div className="p-3.5 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-subtle)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div className="space-y-1">
                           <div className="text-xs font-semibold text-[var(--text-primary)]">
@@ -968,8 +1004,8 @@ export function BusinessEmpirePage() {
                           </div>
                           {activeBiz.pendingUpgrade ? (
                             <div className="text-xs text-[var(--warning)] font-mono">
-                              Đang nâng cấp lên Level {activeBiz.pendingUpgrade.targetLevel} (Hoàn tất tại Giờ game{' '}
-                              {activeBiz.pendingUpgrade.completesAtGameHour}). Chạy thêm chu kỳ để hoàn tất.
+                              Đang nâng cấp lên Level {activeBiz.pendingUpgrade.targetLevel} (Tự động hoàn tất tại Giờ game{' '}
+                              {activeBiz.pendingUpgrade.completesAtGameHour}).
                             </div>
                           ) : nextLevelSpec ? (
                             <div className="text-[11px] text-[var(--text-secondary)]">
@@ -1035,12 +1071,11 @@ export function BusinessEmpirePage() {
                           })}
                         </div>
                       </div>
-                    </div>
-                  )}
-
-                  {/* 5. BRANCHES */}
-                  {activeTab === 'BRANCHES' && (
-                    <div className="space-y-4">
+                      {/* Branches inside Phát triển */}
+                      <div className="pt-4 border-t border-[var(--border-subtle)] space-y-4">
+                        <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                          Mở rộng chi nhánh ({activeBiz.branches.length})
+                        </h3>
                       {isController && (
                         <div className="flex flex-col sm:flex-row gap-2 pb-3 border-b border-[var(--border-subtle)]">
                           <select
@@ -1102,12 +1137,13 @@ export function BusinessEmpirePage() {
                           ))}
                         </div>
                       )}
+                      </div>
                     </div>
                   )}
 
-                  {/* 6. FINANCIAL REPORTS */}
-                  {activeTab === 'FINANCIALS' && (
-                    <div className="space-y-4">
+                  {/* 4. FINANCE & SHAREHOLDERS */}
+                  {activeTab === 'FINANCE' && (
+                    <div className="space-y-6">
                       {latestFin ? (
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono">
                           <div className="p-2.5 rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
@@ -1168,95 +1204,35 @@ export function BusinessEmpirePage() {
                           </tbody>
                         </table>
                       </div>
-                    </div>
-                  )}
-
-                  {/* 7. OWNERSHIP */}
-                  {activeTab === 'OWNERSHIP' && (
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-[var(--text-secondary)]">
-                          Tổng cổ phần phát hành:{' '}
-                          <strong className="font-mono text-[var(--text-primary)]">
-                            {activeBiz.totalIssuedShares.toLocaleString('en-US')} CP
-                          </strong>
-                        </span>
-                        <span className="text-[var(--text-muted)]">
-                          Giá trị sổ sách/CP: {formatCR(Math.round(activeBiz.valuationMinor / Math.max(1, activeBiz.totalIssuedShares)))} CR
-                        </span>
-                      </div>
-                      <div className="divide-y divide-[var(--border-subtle)]/60">
-                        {activeBiz.shareholders.map((sh) => (
-                          <div key={sh.playerId} className="py-2.5 flex items-center justify-between text-xs">
-                            <span className="font-medium text-[var(--text-primary)]">{sh.playerName}</span>
-                            <div className="font-mono text-right">
-                              <span>{sh.shares.toLocaleString('en-US')} CP</span>
-                              <span className="text-[var(--text-muted)] mx-1.5">·</span>
-                              <span className="font-semibold text-[var(--accent)]">{sh.ownershipPct.toFixed(2)}%</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* 8. SETTINGS */}
-                  {activeTab === 'SETTINGS' && (
-                    <div className="space-y-4 text-xs">
-                      {isController ? (
-                        <div className="space-y-3">
-                          <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
-                            <div>
-                              <div className="font-semibold text-[var(--text-primary)]">Trạng thái vận hành</div>
-                              <div className="text-[11px] text-[var(--text-muted)]">
-                                Tái cơ cấu cắt giảm chi phí cố định trong giai đoạn suy thoái hoặc khó khăn dòng tiền.
+                      {/* Ownership / Shareholders inside Tài chính & Cổ đông */}
+                      <div className="pt-4 border-t border-[var(--border-subtle)] space-y-3">
+                        <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                          Cơ cấu cổ đông ({activeBiz.shareholders.length})
+                        </h3>
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                          <span className="text-[var(--text-secondary)]">
+                            Tổng cổ phần phát hành:{' '}
+                            <strong className="font-mono text-[var(--text-primary)]">
+                              {activeBiz.totalIssuedShares.toLocaleString('en-US')} CP
+                            </strong>
+                          </span>
+                          <span className="text-[var(--text-muted)]">
+                            Giá trị sổ sách/CP: {formatCR(Math.round(activeBiz.valuationMinor / Math.max(1, activeBiz.totalIssuedShares)))} CR
+                          </span>
+                        </div>
+                        <div className="divide-y divide-[var(--border-subtle)]/60">
+                          {activeBiz.shareholders.map((sh) => (
+                            <div key={sh.playerId} className="py-2.5 flex items-center justify-between text-xs">
+                              <span className="font-medium text-[var(--text-primary)]">{sh.playerName}</span>
+                              <div className="font-mono text-right">
+                                <span>{sh.shares.toLocaleString('en-US')} CP</span>
+                                <span className="text-[var(--text-muted)] mx-1.5">·</span>
+                                <span className="font-semibold text-[var(--accent)]">{sh.ownershipPct.toFixed(2)}%</span>
                               </div>
                             </div>
-                            <div className="flex gap-1.5">
-                              {(['ACTIVE', 'RESTRUCTURING', 'SUSPENDED'] as const).map((st) => (
-                                <button
-                                  key={st}
-                                  type="button"
-                                  onClick={() => settingsMutation.mutate({ businessId: activeBiz.id, status: st })}
-                                  className={`px-2.5 py-1.5 rounded font-medium cursor-pointer border ${
-                                    activeBiz.status === st
-                                      ? 'border-[var(--accent)] bg-[var(--accent)]/15 text-[var(--accent)]'
-                                      : 'border-[var(--border-subtle)] bg-[var(--bg-panel)] text-[var(--text-secondary)]'
-                                  }`}
-                                >
-                                  {st}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-
-                          <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
-                            <div>
-                              <div className="font-semibold text-[var(--text-primary)]">Nhượng quyền thương hiệu (Franchise)</div>
-                              <div className="text-[11px] text-[var(--text-muted)]">
-                                Yêu cầu Level ≥ 3 và Uy tín ≥ 60 để thu phí nhượng quyền và Royalty hàng chu kỳ.
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                settingsMutation.mutate({
-                                  businessId: activeBiz.id,
-                                  franchiseEnabled: !activeBiz.franchiseEnabled,
-                                })
-                              }
-                              className="px-3 py-1.5 rounded font-semibold bg-[var(--bg-panel)] border border-[var(--border-subtle)] hover:border-[var(--accent)] cursor-pointer"
-                            >
-                              {activeBiz.franchiseEnabled ? 'Đang mở Nhượng quyền' : 'Kích hoạt Nhượng quyền'}
-                            </button>
-                          </div>
+                          ))}
                         </div>
-                      ) : (
-                        <div className="flex items-center gap-2 text-[var(--text-muted)]">
-                          <ShieldAlert className="w-4 h-4" />
-                          Chỉ Chủ sở hữu hoặc CEO mới được thay đổi cấu hình điều hành.
-                        </div>
-                      )}
+                      </div>
                     </div>
                   )}
                 </div>
