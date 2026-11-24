@@ -30,6 +30,12 @@ import {
 import { DomainError } from '../domain/DomainError';
 import { buildSeedAssets } from '../seed/worldSeed';
 import { DemoAuthProvider, SecurityGuard, sanitizePlainText } from '../security/SecurityGuard';
+import type {
+  BotAgentTelemetry,
+  BotEcosystemOverview,
+} from '../../shared/contracts/bots';
+import type { NewsItem } from '../../shared/contracts/types';
+import { AutonomousBotEngine, type BotTickOptions, type BotTickResult } from './bots/AutonomousBotEngine';
 import { BankingEngine } from './banking/BankingEngine';
 import { BusinessEngine } from './business/BusinessEngine';
 import { EconomyEngine } from './economy/EconomyEngine';
@@ -48,6 +54,33 @@ import { MarketMakerEngine, SIMULATED_AGENTS } from './market-makers/MarketMaker
 import { CandleAggregator } from './matching/CandleAggregator';
 import { MatchingEngine, type PlaceOrderCommand } from './matching/MatchingEngine';
 import { PROPERTY_DEV_NPC_ID, PROPERTY_DEV_NPC_NAME, PropertyEngine } from './property/PropertyEngine';
+import { BusinessEmpireEngine } from './v4/BusinessEmpireEngine';
+import { CareerRankEngine, resolveWealthRank, type PlayerCareerMetricsSnapshot } from './v4/CareerRankEngine';
+import { InvestmentFundEngine } from './v4/InvestmentFundEngine';
+import { LuxuryClubEngine } from './v4/LuxuryClubEngine';
+import { WorldMacroV4Engine } from './v4/WorldMacroV4Engine';
+import { BUSINESS_CATALOG } from './v4/V4Catalog';
+import { CoFounderEngine } from './cofounder/CoFounderEngine';
+import type {
+  BoardProposalType,
+  CapitalProjectPolicy,
+  CapitalProjectVisibility,
+  CapitalRoundType,
+  CoFounderCapitalHubPayload,
+  CoFounderInvite,
+  CompanyRole,
+  WorldMode,
+} from '../../shared/contracts/cofounder';
+import type {
+  BusinessModelType,
+  EmployeeRole,
+  FundGovernanceProposal,
+  FundType,
+  GovernanceProposalType,
+  MaDealType,
+  OwnedLuxuryAsset,
+  V4CityCode,
+} from '../../shared/contracts/v4';
 
 export const STARTING_CAPITAL_CR = 100_000;
 export const STARTING_CAPITAL_MINOR = toMinor(STARTING_CAPITAL_CR);
@@ -115,6 +148,9 @@ export interface WorldEngineOptions {
   enableBackgroundLoops?: boolean;
   devToolsEnabled?: boolean;
   providers?: ExternalProviderRegistry;
+  botAgentCount?: number;
+  botSeed?: number;
+  botCpuBudgetMs?: number;
 }
 
 /**
@@ -138,16 +174,24 @@ export class WorldEngine {
   public readonly forexBots: ForexBotEngine;
   public readonly futures: FuturesEngine;
   public readonly futuresBots: FuturesBotEngine;
+  public readonly bots: AutonomousBotEngine;
   public readonly economy: EconomyEngine;
   public readonly properties: PropertyEngine;
   public readonly business: BusinessEngine;
   public readonly banking: BankingEngine;
+  public readonly macroV4: WorldMacroV4Engine;
+  public readonly businessEmpire: BusinessEmpireEngine;
+  public readonly funds: InvestmentFundEngine;
+  public readonly luxury: LuxuryClubEngine;
+  public readonly career: CareerRankEngine;
+  public readonly cofounder: CoFounderEngine;
 
   private players = new Map<string, PlayerRecord>();
   private chatMessages: ChatMessage[] = [];
   private stateVersion = 1;
   private bootedAtMs = Date.now();
   private timers: Array<ReturnType<typeof setInterval>> = [];
+  private v4MacroTickSeq = 0;
 
   // Updated by SocketGateway with real connected clients (NEVER fabricated!)
   private activeConnectionCount = 0;
@@ -172,10 +216,24 @@ export class WorldEngine {
     this.forexBots = new ForexBotEngine(this.ledger, this.matching, this.centralBanks);
     this.futures = new FuturesEngine(this.worldId, this.ledger, this.matching);
     this.futuresBots = new FuturesBotEngine(this.ledger, this.futures);
+    const envBotCount = Number(process.env.BOT_AGENT_COUNT);
+    const initialBotCount =
+      options.botAgentCount ?? (Number.isFinite(envBotCount) && envBotCount >= 8 ? Math.floor(envBotCount) : 24);
+    this.bots = new AutonomousBotEngine(this.ledger, this.matching, this.futures, {
+      agentCount: initialBotCount,
+      seed: options.botSeed,
+      cpuBudgetMsPerTick: options.botCpuBudgetMs,
+    });
     this.economy = new EconomyEngine(options.calendarMode ?? 'ACCELERATED');
     this.properties = new PropertyEngine(this.worldId, this.ledger);
     this.business = new BusinessEngine(this.worldId, this.ledger);
     this.banking = new BankingEngine(this.ledger);
+    this.macroV4 = new WorldMacroV4Engine();
+    this.businessEmpire = new BusinessEmpireEngine(this.worldId, this.ledger, this.matching);
+    this.funds = new InvestmentFundEngine(this.worldId, this.ledger, this.matching);
+    this.luxury = new LuxuryClubEngine(this.ledger);
+    this.career = new CareerRankEngine();
+    this.cofounder = new CoFounderEngine(this.worldId, this.ledger, this.businessEmpire, this.funds);
 
     this.bindMatchingHooks();
     this.bindFuturesHooks();
@@ -262,6 +320,7 @@ export class WorldEngine {
         this.eventBus.publish('futures.funding.settled', event);
       },
       onLiquidation: (event) => {
+        this.bots.onFuturesLiquidation(event.playerId, event.symbol);
         this.eventBus.publish('futures.liquidation.executed', event);
         this.emitPlayerFinancialSync(event.playerId);
       },
@@ -287,10 +346,18 @@ export class WorldEngine {
     this.forexBots.reset();
     this.futures.reset();
     this.futuresBots.reset();
+    this.bots.reset();
     this.economy.reset();
     this.properties.reset();
     this.business.reset();
     this.banking.reset();
+    this.macroV4.reset();
+    this.businessEmpire.reset();
+    this.funds.reset();
+    this.luxury.reset();
+    this.career.reset();
+    this.cofounder.reset();
+    this.v4MacroTickSeq = 0;
 
     // 1. Seed 6 ECX Crypto + 8 ESE Stocks + 6 EFX Forex Pairs
     const assets = buildSeedAssets();
@@ -386,6 +453,26 @@ export class WorldEngine {
     }
     this.futuresBots.seedInitialOrderBooks();
 
+    // 3c. Seed Autonomous AI Trading Ecosystem V2 (8 Archetypes — Finite Capital, Public-Data Only)
+    this.bots.fundAgents(assets);
+    for (const botCfg of this.bots.listAgentConfigs()) {
+      this.players.set(botCfg.id, {
+        id: botCfg.id,
+        username: botCfg.username,
+        avatarInitials: botCfg.username.slice(0, 2).toUpperCase(),
+        role: botCfg.role,
+        joinedAt: new Date().toISOString(),
+        level: 10,
+        exp: 10_000,
+        title: botCfg.strategyLabel,
+        startingCapitalMinor: toMinor(botCfg.initialCapitalCR),
+        tradingVolumeMinor: 0,
+        achievements: [],
+        netWorthHistory: [],
+      });
+    }
+    this.bots.seedInitialLiquidity(this.economy.state);
+
     // 4. Seed initial grounded news & sync ledger + Central Bank metrics
     this.economy.seedInitialNews(assets);
     this.economy.syncLedgerMetrics(this.ledger);
@@ -413,7 +500,10 @@ export class WorldEngine {
       publishedAt: new Date().toISOString(),
     });
 
-    // 5. Initial welcome world message (system notice, clearly labeled)
+    // 5. Seed V4 Multiplayer Living World (NPC-owned businesses, private offering & 2 public investment funds from finite NPC wallets)
+    this.seedV4MultiplayerEcosystem();
+
+    // 6. Initial welcome world message (system notice, clearly labeled)
     this.chatMessages.push({
       id: 'chat_boot_1',
       channel: 'WORLD',
@@ -421,12 +511,133 @@ export class WorldEngine {
       senderName: 'WORLD-01 System',
       senderTitle: 'Exchange Notice',
       content:
-        'Chào mừng tới WORLD-01: GLOBAL ECONOMY (DEMO — TEMPORARY SERVER). Mọi giao dịch được khớp theo cơ chế Price-Time Priority trên máy chủ chung.',
+        'Chào mừng tới WORLD-01: GLOBAL ECONOMY — V4 RISE OF BILLIONAIRES (DEMO — TEMPORARY SERVER). Mọi giao dịch được khớp theo cơ chế Price-Time Priority trên máy chủ chung.',
       timestamp: new Date().toISOString(),
       reportedBy: [],
     });
 
     this.stateVersion += 1;
+  }
+
+  private seedV4MultiplayerEcosystem(): void {
+    const instA = SIMULATED_AGENTS[1]; // Institutional finite-capital NPC
+    const instB = SIMULATED_AGENTS[2] ?? SIMULATED_AGENTS[1];
+    if (!instA || !instB) return;
+
+    try {
+      // Seed 3 realistic VN businesses operated by finite-capital institutional NPCs
+      const b1 = this.businessEmpire.createBusiness({
+        founderId: instA.id,
+        founderName: instA.username,
+        businessTypeId: 'fnb_coffee_shop',
+        businessName: 'Saigon Heritage Roastery',
+        ticker: 'SGR',
+        cityCode: 'HCMC',
+        locationLabel: 'Quận 1 — Nguyễn Huệ, TP.HCM',
+        businessModel: 'PREMIUM_NICHE',
+        initialCapitalCR: 95_000,
+        founderNetWorthMinor: 4_500_000 * 100,
+        idempotencyKey: 'seed_v4_b1',
+      });
+      const b2 = this.businessEmpire.createBusiness({
+        founderId: instB.id,
+        founderName: instB.username,
+        businessTypeId: 'tech_software_startup',
+        businessName: 'Thăng Long Cloud Core',
+        ticker: 'TLC',
+        cityCode: 'HANOI',
+        locationLabel: 'Cầu Giấy — Duy Tân, Hà Nội',
+        businessModel: 'B2B_CONTRACT',
+        initialCapitalCR: 180_000,
+        founderNetWorthMinor: 4_500_000 * 100,
+        idempotencyKey: 'seed_v4_b2',
+      });
+      this.businessEmpire.createBusiness({
+        founderId: instA.id,
+        founderName: instA.username,
+        businessTypeId: 'hosp_mini_hotel',
+        businessName: 'Mỹ Khê Boutique Hotel',
+        ticker: 'MKR',
+        cityCode: 'DANANG',
+        locationLabel: 'Sơn Trà — Võ Nguyên Giáp, Đà Nẵng',
+        businessModel: 'PREMIUM_NICHE',
+        initialCapitalCR: 240_000,
+        founderNetWorthMinor: 4_500_000 * 100,
+        idempotencyKey: 'seed_v4_b3',
+      });
+
+      // Run 1 initial operating cycle so starter businesses show real operating metrics & financials
+      const clock = this.economy.getGameClock();
+      this.businessEmpire.runOperatingCycle({
+        tickId: 'v4_seed_cycle_1',
+        gameDay: clock.gameDay,
+        currentGameHourTotal: clock.gameHour,
+        macro: this.macroV4.indicators,
+      });
+
+      // Open 1 primary capital raise listing & 1 secondary share listing so players can invest right away
+      this.businessEmpire.createPrivateShareListing({
+        businessId: b1.id,
+        sellerId: instA.id,
+        sellerName: instA.username,
+        offeringType: 'SECONDARY',
+        shares: 2_500,
+        pricePerShareCR: 11.5,
+      });
+      this.businessEmpire.createPrivateShareListing({
+        businessId: b2.id,
+        sellerId: instB.id,
+        sellerName: instB.username,
+        offeringType: 'PRIMARY',
+        shares: 3_000,
+        pricePerShareCR: 21,
+      });
+
+      // Seed 2 realistic public multiplayer Investment Funds with live ESE/ECX/T-Bill allocations
+      const f1 = this.funds.createFund({
+        founderId: instA.id,
+        founderName: instA.username,
+        name: 'Saigon Growth Equity Fund',
+        code: 'SGEF',
+        fundType: 'STOCK_FUND',
+        description: 'Quỹ cổ phiếu tăng trưởng tập trung vào các tập đoàn công nghệ và tài chính hàng đầu trên sàn ESE.',
+        managementFeeAnnualPct: 1.5,
+        redemptionFeePct: 0.5,
+        maxSinglePositionPct: 35,
+        minCashReservePct: 15,
+        initialCapitalCR: 250_000,
+        isPublic: true,
+        logoColor: '#38bdf8',
+        idempotencyKey: 'seed_v4_f1',
+      });
+      this.funds.executeFundTrade({ fundId: f1.id, managerId: instA.id, symbol: 'NOVA', side: 'BUY', amountCR: 70_000 });
+      this.funds.executeFundTrade({ fundId: f1.id, managerId: instA.id, symbol: 'TITAN', side: 'BUY', amountCR: 60_000 });
+      this.funds.executeFundTrade({ fundId: f1.id, managerId: instA.id, symbol: 'AERO', side: 'BUY', amountCR: 50_000 });
+
+      const f2 = this.funds.createFund({
+        founderId: instB.id,
+        founderName: instB.username,
+        name: 'Indochina Balanced Alpha',
+        code: 'IBAF',
+        fundType: 'MULTI_ASSET_FUND',
+        description: 'Quỹ đa tài sản cân bằng giữa cổ phiếu, bất động sản Việt Nam, crypto giao ngay và tín phiếu phòng thủ.',
+        managementFeeAnnualPct: 1.2,
+        redemptionFeePct: 0.4,
+        maxSinglePositionPct: 30,
+        minCashReservePct: 20,
+        initialCapitalCR: 200_000,
+        isPublic: true,
+        logoColor: '#10b981',
+        idempotencyKey: 'seed_v4_f2',
+      });
+      this.funds.executeFundTrade({ fundId: f2.id, managerId: instB.id, symbol: 'VN-RE-HCMC', side: 'BUY', amountCR: 50_000 });
+      this.funds.executeFundTrade({ fundId: f2.id, managerId: instB.id, symbol: 'TBILL-30D', side: 'BUY', amountCR: 45_000 });
+      this.funds.executeFundTrade({ fundId: f2.id, managerId: instB.id, symbol: 'BTC-SIM', side: 'BUY', amountCR: 35_000 });
+
+      this.funds.markToMarketAndAccrueFees(this.macroV4.indicators);
+    } catch (err) {
+      console.error('[WorldEngine] V4 seed ecosystem warning:', err);
+    }
   }
 
   public startBackgroundLoops(): void {
@@ -464,8 +675,10 @@ export class WorldEngine {
 
         // Empire Futures Exchange tick: AI bot liquidity & orders -> Mark Price refresh -> Liquidation Engine -> Due Funding
         this.futuresBots.runFuturesTick(this.economy.state);
-        this.futures.refreshAllMarkPrices();
-        this.futures.runLiquidationCheck();
+
+        // Autonomous AI Trading Ecosystem V2 tick (24/7 server-authoritative across Spot, Meme Coins & Futures)
+        this.runAutonomousBotTick();
+
         this.futures.settleDueFunding();
 
         const settledAuctions = this.properties.settleExpiredAuctions();
@@ -488,6 +701,7 @@ export class WorldEngine {
         if (newNews) {
           this.eventBus.publish('news.published', newNews);
           this.futuresBots.reactToNews(newNews);
+          this.triggerBotNewsReaction(newNews);
         }
 
         this.triggerCentralBankEvent();
@@ -505,13 +719,17 @@ export class WorldEngine {
         }
 
         this.banking.accrueInterestCycle(this.economy.state);
+
+        // V4 Rise of Billionaires unified macro, business operating, fund MTM, luxury & career progression tick
+        this.runV4MacroAndOperatingCycle();
+
         this.snapshotHumanNetWorthHistory();
 
         this.eventBus.publish('world.status', {
           gameClock: this.economy.getGameClock(),
           economy: this.economy.state,
           onlineHumanPlayers: this.onlineHumanPlayerIds.size,
-          simulatedAgentsCount: SIMULATED_AGENTS.length + FOREX_AI_AGENTS.length + FUTURES_AI_BOTS.length,
+          simulatedAgentsCount: this.getTotalSimulatedAgentsCount(),
         });
         this.eventBus.publish('leaderboard.updated', this.getLeaderboard('PLAYERS'));
       } catch (err) {
@@ -686,7 +904,11 @@ export class WorldEngine {
     }
 
     const propertyValueMinor = this.properties.getPlayerPropertyValueMinor(playerId);
-    const businessEquityMinor = this.business.getPlayerBusinessEquityMinor(playerId);
+    const businessEquityMinor =
+      this.business.getPlayerBusinessEquityMinor(playerId) +
+      this.businessEmpire.getPlayerV4BusinessEquityMinor(playerId);
+    const fundUnitsValueMinor = this.funds.getPlayerFundValueMinor(playerId);
+    const luxuryAssetsValueMinor = this.luxury.getPlayerLuxuryValueMinor(playerId);
     const totalDebtMinor = this.banking.getPlayerTotalDebtMinor(playerId);
 
     const clonedWallet = cloneWallet(wallet);
@@ -721,8 +943,12 @@ export class WorldEngine {
       forexValueMinor +
       futuresEquityMinor +
       propertyValueMinor +
-      businessEquityMinor -
+      businessEquityMinor +
+      fundUnitsValueMinor +
+      luxuryAssetsValueMinor -
       totalDebtMinor;
+
+    const wealthRank = resolveWealthRank(netWorthMinor).current;
 
     return {
       id: record.id,
@@ -745,6 +971,10 @@ export class WorldEngine {
       futuresUnrealizedPnlMinor,
       propertyValueMinor,
       businessEquityMinor,
+      fundUnitsValueMinor,
+      luxuryAssetsValueMinor,
+      wealthRankName: wealthRank.name,
+      wealthRankTier: wealthRank.tier,
       totalDebtMinor,
       netWorthMinor,
       tradingVolumeMinor: record.tradingVolumeMinor,
@@ -763,7 +993,7 @@ export class WorldEngine {
       sequenceNumber: this.eventBus.getSequenceNumber(),
       serverTimestamp: new Date().toISOString(),
       onlineHumanPlayers: this.onlineHumanPlayerIds.size,
-      simulatedAgentsCount: SIMULATED_AGENTS.length + FOREX_AI_AGENTS.length + FUTURES_AI_BOTS.length,
+      simulatedAgentsCount: this.getTotalSimulatedAgentsCount(),
       gameClock: this.economy.getGameClock(),
       economy: { ...this.economy.state, activeEvents: [...this.economy.state.activeEvents] },
       assets: this.matching.listAssets().map((a) => ({ ...a })),
@@ -944,6 +1174,85 @@ export class WorldEngine {
       marginCalls: liq.marginCalls.length,
       liquidations: liq.liquidations.length,
     };
+  }
+
+  // ============================================================================
+  // AUTONOMOUS AI TRADING ECOSYSTEM V2 (24/7 AUTHORITATIVE AGENT ENGINE)
+  // ============================================================================
+
+  public getTotalSimulatedAgentsCount(): number {
+    return (
+      SIMULATED_AGENTS.length +
+      FOREX_AI_AGENTS.length +
+      FUTURES_AI_BOTS.length +
+      this.bots.getConfiguredAgentCount()
+    );
+  }
+
+  public runAutonomousBotTick(options: BotTickOptions = {}): BotTickResult {
+    const result = this.bots.runTick(this.economy.state, this.economy.news, options);
+    for (const trade of result.spotTrades) {
+      this.onTradeExecuted(trade);
+    }
+    for (const sym of result.affectedSpotSymbols) {
+      const asset = this.matching.getAsset(sym);
+      if (asset) {
+        this.eventBus.publish('market.quote.updated', asset);
+        this.eventBus.publish('market.orderbook.updated', this.matching.getOrderBook(sym), `market:${sym}`);
+        const latestCandles = this.candles.getCandles(sym, '5m', 2);
+        if (latestCandles.length > 0) {
+          this.eventBus.publish('market.candle.updated', { symbol: sym, candles: latestCandles }, `market:${sym}`);
+        }
+      }
+    }
+    this.futures.refreshAllMarkPrices();
+    this.futures.runLiquidationCheck();
+    this.economy.syncLedgerMetrics(this.ledger);
+    return result;
+  }
+
+  private triggerBotNewsReaction(news: NewsItem) {
+    const reaction = this.bots.reactToNews(news, this.economy.state);
+    for (const trade of reaction.spotTrades) {
+      this.onTradeExecuted(trade);
+    }
+    for (const sym of reaction.affectedSpotSymbols) {
+      const asset = this.matching.getAsset(sym);
+      if (asset) {
+        this.eventBus.publish('market.quote.updated', asset);
+        this.eventBus.publish('market.orderbook.updated', this.matching.getOrderBook(sym), `market:${sym}`);
+      }
+    }
+    this.futures.refreshAllMarkPrices();
+    this.futures.runLiquidationCheck();
+    this.economy.syncLedgerMetrics(this.ledger);
+    return reaction;
+  }
+
+  public publishNewsAndReact(news: NewsItem) {
+    this.economy.news.unshift(news);
+    if (this.economy.news.length > 60) this.economy.news.pop();
+    this.eventBus.publish('news.published', news);
+    this.futuresBots.reactToNews(news);
+    return this.triggerBotNewsReaction(news);
+  }
+
+  public getBotEcosystemOverview(): BotEcosystemOverview {
+    return this.bots.getOverview(this.economy.state, this.economy.news, this.onlineHumanPlayerIds.size);
+  }
+
+  public getBotAgentTelemetry(agentId: string): BotAgentTelemetry | null {
+    return this.bots.getAgentTelemetry(agentId);
+  }
+
+  public reconfigureBotEcosystem(options: {
+    agentCount?: number;
+    seed?: number;
+    cpuBudgetMsPerTick?: number;
+  }): BotEcosystemOverview {
+    this.bots.configure(options);
+    this.bootstrapWorld();
+    return this.getBotEcosystemOverview();
   }
 
   /**
@@ -1274,7 +1583,7 @@ export class WorldEngine {
       eventSequence: this.eventBus.getSequenceNumber(),
       activeConnections: this.activeConnectionCount,
       onlineHumanPlayers: this.onlineHumanPlayerIds.size,
-      simulatedAgentsCount: SIMULATED_AGENTS.length + FOREX_AI_AGENTS.length + FUTURES_AI_BOTS.length,
+      simulatedAgentsCount: this.getTotalSimulatedAgentsCount(),
       matchingEngineHealth: 'OPERATIONAL',
       totalOrders: this.matching.getTotalOrdersCount() + this.futures.getTotalOrdersCount(),
       openOrdersCount: this.matching.getOpenOrdersCount() + this.futures.getOpenOrdersCount(),
@@ -1334,5 +1643,1450 @@ export class WorldEngine {
         this.unlockAchievement(rec.id, 'DIVERSIFIED', 'Nhà đầu tư đa dạng hóa', 'Nắm giữ đồng thời từ 3 mã tài sản trở lên.', 80);
       }
     }
+  }
+
+  // ============================================================================
+  // TRADING EMPIRE V4 — RISE OF BILLIONAIRES AUTHORITATIVE ENTRY POINTS
+  // ============================================================================
+
+  public runV4MacroAndOperatingCycle(options?: { forceEventTemplateId?: string; tickId?: string }) {
+    this.v4MacroTickSeq += 1;
+    const tickId = options?.tickId ?? `v4_tick_${this.v4MacroTickSeq}`;
+    const clock = this.economy.getGameClock();
+
+    const macroRes = this.macroV4.tickMacro({
+      tickId,
+      gameDay: clock.gameDay,
+      baseEconomy: this.economy.state,
+      forceTemplateId: options?.forceEventTemplateId,
+      activeBusinessCount: this.businessEmpire.listBusinesses().length,
+    });
+
+    if (macroRes.startedEvent) {
+      this.eventBus.publish('economy.event.started', macroRes.startedEvent);
+    }
+    for (const ended of macroRes.endedEvents) {
+      this.eventBus.publish('economy.event.ended', ended);
+    }
+    for (const newsItem of macroRes.generatedNews) {
+      this.economy.news.unshift(newsItem);
+      if (this.economy.news.length > 80) this.economy.news.pop();
+      this.eventBus.publish('news.published', newsItem);
+    }
+
+    const updatedBusinesses = this.businessEmpire.runOperatingCycle({
+      tickId,
+      gameDay: clock.gameDay,
+      currentGameHourTotal: clock.gameHour + this.v4MacroTickSeq * 6,
+      macro: this.macroV4.indicators,
+    });
+
+    for (const biz of updatedBusinesses) {
+      this.eventBus.publish('business.revenue.updated', {
+        businessId: biz.id,
+        businessName: biz.businessName,
+        revenueMinor: biz.revenueLastCycleMinor,
+        expensesMinor: biz.operatingExpensesLastCycleMinor,
+        netProfitMinor: biz.netProfitLastCycleMinor,
+        companyCashMinor: biz.companyCashMinor,
+        status: biz.status,
+      });
+      if (
+        (this.macroV4.indicators.phase === 'RECESSION' || this.macroV4.indicators.phase === 'SLOWDOWN') &&
+        biz.status === 'ACTIVE'
+      ) {
+        this.career.recordCounter(biz.ownerId, 'survivedRecessionWithBusiness');
+      }
+    }
+
+    const updatedFunds = this.funds.markToMarketAndAccrueFees(this.macroV4.indicators);
+    const luxuryRes = this.luxury.runMaintenanceAndDepreciationCycle();
+
+    // Re-evaluate progression for all human players
+    for (const rec of this.players.values()) {
+      if (rec.role === 'PLAYER') {
+        this.syncPlayerCareerAndNotify(rec.id);
+      }
+    }
+    for (const pid of luxuryRes.affectedPlayerIds) {
+      this.emitPlayerFinancialSync(pid);
+    }
+
+    return {
+      tickId,
+      macro: this.macroV4.getOverview(),
+      startedEvents: macroRes.startedEvent ? [macroRes.startedEvent] : [],
+      endedEvents: macroRes.endedEvents,
+      businessesUpdated: updatedBusinesses.length,
+      fundsUpdated: updatedFunds.length,
+      luxuryMaintenanceCollectedMinor: luxuryRes.totalMaintenanceCollectedMinor,
+    };
+  }
+
+  public getV4PlayerCareer(playerId: string) {
+    const rec = this.players.get(playerId);
+    if (!rec) throw new DomainError('UNAUTHORIZED', undefined, 401);
+    return this.syncPlayerCareerAndNotify(playerId);
+  }
+
+  public syncPlayerCareerAndNotify(playerId: string) {
+    const rec = this.players.get(playerId);
+    const profile = this.getPlayerProfile(playerId);
+    if (!rec || !profile) return null;
+
+    const counters = this.career.getCounters(playerId);
+    const allBiz = this.businessEmpire.listBusinesses();
+    const ownedBiz = allBiz.filter((b) => b.ownerId === playerId || b.founderId === playerId);
+    const allHoldings = this.businessEmpire.listHoldings().filter((h) => h.founderId === playerId);
+    const allProps = this.properties.listProperties().filter((p) => p.ownerId === playerId);
+    const allFunds = this.funds.listFunds();
+    const myLuxury = this.luxury.listPlayerAssets(playerId);
+
+    const propCities = new Set(allProps.map((p) => p.cityCode ?? 'HCMC'));
+    const luxCats = new Set(myLuxury.map((a) => a.category));
+    const tradesCount = this.matching.listPlayerTrades(playerId, 100).length;
+
+    const metrics: PlayerCareerMetricsSnapshot = {
+      playerId,
+      username: rec.username,
+      netWorthMinor: profile.netWorthMinor,
+      totalDebtMinor: profile.totalDebtMinor,
+      stockValueMinor: profile.stockValueMinor,
+      forexValueMinor: profile.forexValueMinor,
+      savingsAndTermMinor: profile.wallet.savingsMinor + profile.wallet.termDepositMinor,
+      propertyValueMinor: profile.propertyValueMinor,
+      distinctHoldings: profile.holdings.filter((h) => h.availableQty + h.lockedQty > 0).length,
+      tradesExecuted: tradesCount,
+      businessesFounded: ownedBiz.length,
+      maxBusinessLevel: ownedBiz.reduce((max, b) => Math.max(max, b.level), 0),
+      profitableBusinessCycles: ownedBiz.reduce(
+        (cnt, b) => cnt + b.financialHistory.filter((f) => f.netProfitMinor > 0).length,
+        0,
+      ),
+      totalBusinessEmployees: ownedBiz.reduce((sum, b) => sum + b.employeeCount, 0),
+      businessUpgradesCompleted:
+        counters.businessUpgradesCompleted +
+        ownedBiz.reduce((sum, b) => sum + Object.values(b.upgradeTree).reduce((s, r) => s + r, 0), 0),
+      branchesOpened: ownedBiz.reduce((sum, b) => sum + b.branches.length, 0),
+      franchisesActive: this.businessEmpire
+        .listFranchises()
+        .filter((f) => f.franchiseePlayerId === playerId || ownedBiz.some((b) => b.id === f.franchisorBusinessId))
+        .length,
+      holdingsCreated: allHoldings.length,
+      iposCompleted: ownedBiz.filter((b) => b.isPublicIpo).length,
+      hasManufacturingLv4: ownedBiz.some((b) => b.industry === 'MANUFACTURING' && b.level >= 4),
+      hasTechLv4: ownedBiz.some((b) => b.industry === 'TECHNOLOGY' && b.level >= 4),
+      hasRetailOrFnbLv4: ownedBiz.some((b) => (b.industry === 'RETAIL' || b.industry === 'FNB') && b.level >= 4),
+      hasHospitalityLv4: ownedBiz.some((b) => b.industry === 'HOSPITALITY' && b.level >= 4),
+      hasRealEstateCompany: ownedBiz.some((b) => b.industry === 'REAL_ESTATE'),
+      dividendsReceived: counters.dividendsReceived,
+      privateShareDeals: counters.privateShareDeals,
+      governanceVotesCast: counters.governanceVotesCast,
+      maDealsCompleted: counters.maDealsCompleted,
+      maControllingDealsCompleted: counters.maControllingDealsCompleted,
+      propertiesOwned: allProps.length,
+      propertiesRented: allProps.filter((p) => p.isRented).length,
+      propertyCitiesOwned: propCities.size,
+      hasHcmcProperty: propCities.has('HCM'),
+      hasHanoiProperty: propCities.has('HN'),
+      hasCoastalProperty: propCities.has('DN'),
+      fundsCreated: allFunds.filter((f) => f.founderId === playerId).length,
+      fundSubscriptionsOrTrades: counters.fundSubscriptionsOrTrades,
+      hasFundMembership: allFunds.some((f) => f.members.some((m) => m.playerId === playerId && m.units > 0)),
+      hasFundManagedTrade: counters.hasFundManagedTrade,
+      supercarsOwned: myLuxury.filter((a) => a.category === 'SUPERCAR').length,
+      penthouseOwned: myLuxury.some((a) => a.category === 'LUXURY_RESIDENCE'),
+      jetsOwned: myLuxury.filter((a) => a.category === 'PRIVATE_JET').length,
+      yachtsOwned: myLuxury.filter((a) => a.category === 'YACHT').length,
+      collectiblesOwned: myLuxury.filter((a) => a.category === 'COLLECTIBLE').length,
+      luxuryCustomizations: counters.luxuryCustomizations,
+      luxuryDistinctCategories: luxCats.size,
+      survivedRecessionWithBusiness: counters.survivedRecessionWithBusiness,
+      restructuredOrRescuedBusiness: counters.restructuredOrRescuedBusiness,
+    };
+
+    const delta = this.career.evaluatePlayerProgression(metrics);
+    if (rec.role === 'PLAYER') {
+      rec.title = delta.profile.equippedTitleName;
+      if (delta.rankChanged) {
+        this.eventBus.publish('player.rank.changed', {
+          playerId,
+          username: rec.username,
+          from: delta.rankChanged.from,
+          to: delta.rankChanged.to,
+        });
+      }
+      for (const m of delta.newlyCompletedMissions) {
+        this.eventBus.publish(
+          'career.mission.completed',
+          { playerId, mission: m },
+          `player:${playerId}`,
+        );
+      }
+      for (const tid of delta.newlyUnlockedTitleIds) {
+        this.eventBus.publish(
+          'achievement.unlocked',
+          { playerId, titleId: tid },
+          `player:${playerId}`,
+        );
+      }
+    }
+
+    return delta.profile;
+  }
+
+  // --- Business V4 Wrappers ---
+
+  public createV4Business(
+    playerId: string,
+    payload: {
+      businessTypeId: string;
+      businessName: string;
+      ticker: string;
+      cityCode: V4CityCode;
+      locationLabel?: string;
+      linkedPropertyId?: string | null;
+      businessModel?: BusinessModelType;
+      initialCapitalCR: number;
+      idempotencyKey?: string;
+    },
+  ) {
+    const player = this.players.get(playerId);
+    const profile = this.getPlayerProfile(playerId);
+    if (!player || !profile) throw new DomainError('UNAUTHORIZED', undefined, 401);
+
+    const biz = this.businessEmpire.createBusiness({
+      founderId: playerId,
+      founderName: player.username,
+      founderNetWorthMinor: profile.netWorthMinor,
+      businessModel: payload.businessModel ?? 'MASS_MARKET',
+      businessTypeId: payload.businessTypeId,
+      businessName: payload.businessName,
+      ticker: payload.ticker,
+      cityCode: payload.cityCode,
+      locationLabel: payload.locationLabel,
+      linkedPropertyId: payload.linkedPropertyId,
+      initialCapitalCR: payload.initialCapitalCR,
+      idempotencyKey: payload.idempotencyKey,
+    });
+    this.career.recordJourneyEvent(
+      playerId,
+      'BUSINESS',
+      `Thành lập ${biz.businessName} (${biz.ticker})`,
+      `Ngành ${biz.businessTypeName} tại ${biz.cityName} với vốn khởi đầu ${(biz.initialCapitalMinor / 100).toLocaleString('en-US')} CR.`,
+    );
+    this.eventBus.publish('business.created', biz);
+    this.emitPlayerFinancialSync(playerId);
+    this.syncPlayerCareerAndNotify(playerId);
+    return biz;
+  }
+
+  public injectV4BusinessCapital(playerId: string, businessId: string, amountCR: number) {
+    const player = this.players.get(playerId);
+    if (!player) throw new DomainError('UNAUTHORIZED', undefined, 401);
+    const prev = this.businessEmpire.getBusiness(businessId);
+    const biz = this.businessEmpire.injectCapital(businessId, playerId, player.username, amountCR);
+    if (prev && (prev.status === 'DISTRESSED' || prev.status === 'RESTRUCTURING')) {
+      this.career.recordCounter(playerId, 'restructuredOrRescuedBusiness');
+    }
+    this.eventBus.publish('business.revenue.updated', biz);
+    this.emitPlayerFinancialSync(playerId);
+    this.syncPlayerCareerAndNotify(playerId);
+    return biz;
+  }
+
+  public updateV4BusinessSettings(
+    playerId: string,
+    businessId: string,
+    payload: {
+      sellingPriceCR?: number;
+      status?: 'ACTIVE' | 'SUSPENDED' | 'RESTRUCTURING';
+      franchiseEnabled?: boolean;
+      franchiseFeeCR?: number;
+      franchiseRoyaltyPct?: number;
+    },
+  ) {
+    const statusAction =
+      payload.status === 'SUSPENDED'
+        ? 'PAUSE'
+        : payload.status === 'ACTIVE'
+          ? 'RESUME'
+          : payload.status === 'RESTRUCTURING'
+            ? 'RESTRUCTURE'
+            : undefined;
+    const biz = this.businessEmpire.updateBusinessSettings({
+      businessId,
+      requesterId: playerId,
+      sellingPriceCR: payload.sellingPriceCR,
+      statusAction,
+      enableFranchise: payload.franchiseEnabled,
+      franchiseFeeCR: payload.franchiseFeeCR,
+      franchiseRoyaltyPct: payload.franchiseRoyaltyPct,
+    });
+    if (payload.status === 'RESTRUCTURING') {
+      this.career.recordCounter(playerId, 'restructuredOrRescuedBusiness');
+    }
+    this.eventBus.publish('business.revenue.updated', biz);
+    this.syncPlayerCareerAndNotify(playerId);
+    return biz;
+  }
+
+  public manageV4BusinessEmployees(
+    playerId: string,
+    businessId: string,
+    payload: {
+      action: 'HIRE' | 'FIRE' | 'TRAIN' | 'SET_SALARY';
+      role: EmployeeRole;
+      count?: number;
+      salaryCR?: number;
+    },
+  ) {
+    const biz = this.businessEmpire.manageEmployees({
+      businessId,
+      requesterId: playerId,
+      ...payload,
+    });
+    this.eventBus.publish('business.revenue.updated', biz);
+    this.syncPlayerCareerAndNotify(playerId);
+    return biz;
+  }
+
+  public upgradeV4BusinessLevel(playerId: string, businessId: string) {
+    const clock = this.economy.getGameClock();
+    const biz = this.businessEmpire.upgradeBusinessLevel({
+      businessId,
+      requesterId: playerId,
+      currentGameHourTotal: clock.gameHour + this.v4MacroTickSeq * 6,
+    });
+    this.career.recordCounter(playerId, 'businessUpgradesCompleted');
+    this.career.recordJourneyEvent(
+      playerId,
+      'BUSINESS',
+      `Nâng cấp ${biz.businessName} lên Level ${biz.pendingUpgrade?.targetLevel ?? biz.level + 1}`,
+      'Đã thanh toán chi phí mở rộng từ tài khoản doanh nghiệp.',
+    );
+    this.eventBus.publish('business.upgraded', biz);
+    this.syncPlayerCareerAndNotify(playerId);
+    return biz;
+  }
+
+  public purchaseV4UpgradeNode(playerId: string, businessId: string, nodeId: string) {
+    const biz = this.businessEmpire.purchaseUpgradeNode({
+      businessId,
+      requesterId: playerId,
+      nodeId,
+    });
+    this.career.recordCounter(playerId, 'businessUpgradesCompleted');
+    this.eventBus.publish('business.upgraded', biz);
+    this.syncPlayerCareerAndNotify(playerId);
+    return biz;
+  }
+
+  public openV4BusinessBranch(
+    playerId: string,
+    businessId: string,
+    cityCode: V4CityCode,
+    locationLabel?: string,
+  ) {
+    const res = this.businessEmpire.openBranch({
+      businessId,
+      requesterId: playerId,
+      cityCode,
+      locationLabel,
+    });
+    this.career.recordJourneyEvent(
+      playerId,
+      'BUSINESS',
+      `Mở chi nhánh ${res.business.businessName} tại ${res.branch.cityName}`,
+      res.branch.locationLabel,
+    );
+    this.eventBus.publish('business.branch.opened', res);
+    this.syncPlayerCareerAndNotify(playerId);
+    return res;
+  }
+
+  public signV4Franchise(playerId: string, franchisorBusinessId: string, cityCode: V4CityCode) {
+    const player = this.players.get(playerId);
+    if (!player) throw new DomainError('UNAUTHORIZED', undefined, 401);
+    const agreement = this.businessEmpire.signFranchiseAgreement({
+      franchisorBusinessId,
+      franchiseePlayerId: playerId,
+      franchiseeName: player.username,
+      cityCode,
+    });
+    this.emitPlayerFinancialSync(playerId);
+    this.syncPlayerCareerAndNotify(playerId);
+    return agreement;
+  }
+
+  public payV4Dividend(playerId: string, businessId: string, amountCR: number) {
+    const biz = this.businessEmpire.distributeDividend(businessId, playerId, amountCR);
+    for (const sh of biz.shareholders) {
+      this.career.recordCounter(sh.playerId, 'dividendsReceived');
+      this.emitPlayerFinancialSync(sh.playerId);
+      this.syncPlayerCareerAndNotify(sh.playerId);
+    }
+    this.eventBus.publish('company.dividend.paid', { businessId: biz.id, businessName: biz.businessName, amountCR });
+    return biz;
+  }
+
+  // --- Corporate, Private Shares, Governance, M&A, Holding & IPO Wrappers ---
+
+  public raiseV4Capital(
+    playerId: string,
+    companyId: string,
+    investorId: string,
+    investmentCR: number,
+  ) {
+    const investor = this.players.get(investorId);
+    if (!investor) throw new DomainError('UNAUTHORIZED', 'Không tìm thấy nhà đầu tư.', 404);
+    const res = this.businessEmpire.raiseCapital({
+      businessId: companyId,
+      approvedByFounderId: playerId,
+      investorId,
+      investorName: investor.username,
+      investmentCR,
+    });
+    this.career.recordCounter(investorId, 'privateShareDeals');
+    this.eventBus.publish('company.shares.transferred', res);
+    this.emitPlayerFinancialSync(investorId);
+    this.syncPlayerCareerAndNotify(investorId);
+    return res;
+  }
+
+  public createV4PrivateListing(
+    playerId: string,
+    payload: {
+      companyId: string;
+      offeringType: 'PRIMARY' | 'SECONDARY';
+      shares: number;
+      pricePerShareCR: number;
+    },
+  ) {
+    const player = this.players.get(playerId);
+    if (!player) throw new DomainError('UNAUTHORIZED', undefined, 401);
+    return this.businessEmpire.createPrivateShareListing({
+      businessId: payload.companyId,
+      sellerId: playerId,
+      sellerName: player.username,
+      offeringType: payload.offeringType,
+      shares: payload.shares,
+      pricePerShareCR: payload.pricePerShareCR,
+    });
+  }
+
+  public buyV4PrivateListing(playerId: string, listingId: string, shares?: number, _idempotencyKey?: string) {
+    const player = this.players.get(playerId);
+    if (!player) throw new DomainError('UNAUTHORIZED', undefined, 401);
+    const existingListing = this.businessEmpire.listPrivateListings().find((l) => l.id === listingId);
+    const targetShares = shares ?? existingListing?.sharesAvailable ?? 1;
+    const res = this.businessEmpire.buyPrivateShareListing({
+      listingId,
+      buyerId: playerId,
+      buyerName: player.username,
+      shares: targetShares,
+    });
+    this.career.recordCounter(playerId, 'privateShareDeals');
+    this.career.recordJourneyEvent(
+      playerId,
+      'INVESTMENT',
+      `Mua ${targetShares.toLocaleString('en-US')} cổ phần ${res.business.businessName}`,
+      `Giao dịch ${res.listing.offeringType === 'PRIMARY' ? 'phát hành mới (Primary)' : 'chuyển nhượng thứ cấp (Secondary)'}.`,
+    );
+    this.eventBus.publish('company.shares.transferred', res);
+    this.emitPlayerFinancialSync(playerId);
+    this.emitPlayerFinancialSync(res.listing.sellerId);
+    this.syncPlayerCareerAndNotify(playerId);
+    return { ...res, company: res.business };
+  }
+
+  public createV4GovernanceProposal(
+    playerId: string,
+    companyId: string,
+    payload: {
+      type: GovernanceProposalType;
+      title: string;
+      description: string;
+      payload?: Record<string, unknown>;
+    },
+  ) {
+    const player = this.players.get(playerId);
+    if (!player) throw new DomainError('UNAUTHORIZED', undefined, 401);
+    const prop = this.businessEmpire.createGovernanceProposal({
+      businessId: companyId,
+      proposerId: playerId,
+      proposerName: player.username,
+      ...payload,
+    });
+    this.career.recordCounter(playerId, 'governanceVotesCast');
+    this.syncPlayerCareerAndNotify(playerId);
+    return prop;
+  }
+
+  public voteV4GovernanceProposal(
+    playerId: string,
+    companyId: string,
+    proposalId: string,
+    vote: 'FOR' | 'AGAINST',
+  ) {
+    const player = this.players.get(playerId);
+    if (!player) throw new DomainError('UNAUTHORIZED', undefined, 401);
+    const res = this.businessEmpire.voteOnProposal({
+      businessId: companyId,
+      proposalId,
+      voterId: playerId,
+      voterName: player.username,
+      vote,
+    });
+    this.career.recordCounter(playerId, 'governanceVotesCast');
+    this.syncPlayerCareerAndNotify(playerId);
+    return res;
+  }
+
+  public submitV4MaOffer(
+    playerId: string,
+    payload: {
+      targetCompanyId: string;
+      targetPct: 10 | 25 | 51 | 75 | 100;
+      offerPricePerShareCR: number;
+      dealType?: MaDealType;
+      buyerHoldingId?: string | null;
+      idempotencyKey?: string;
+    },
+  ) {
+    const player = this.players.get(playerId);
+    if (!player) throw new DomainError('UNAUTHORIZED', undefined, 401);
+    const offer = this.businessEmpire.submitAcquisitionOffer({
+      buyerId: playerId,
+      buyerName: player.username,
+      ...payload,
+    });
+    this.emitPlayerFinancialSync(playerId);
+
+    // If target seller is an NPC agent and offer is fair (>= 1.05x current share valuation), NPC evaluates and auto-accepts transparently
+    const targetOwner = this.players.get(offer.sellerId);
+    const targetBiz = this.businessEmpire.getBusiness(offer.targetCompanyId);
+    if (targetOwner && targetOwner.role !== 'PLAYER' && targetBiz && targetBiz.totalIssuedShares > 0) {
+      const fairPerShare = targetBiz.valuationMinor / targetBiz.totalIssuedShares;
+      if (offer.offerPricePerShareMinor >= fairPerShare * 1.05) {
+        const settled = this.respondV4MaOffer(offer.sellerId, offer.id, 'ACCEPT');
+        return settled.offer;
+      }
+    }
+    return offer;
+  }
+
+  public respondV4MaOffer(playerId: string, offerId: string, decision: 'ACCEPT' | 'REJECT' | 'CANCEL') {
+    const res = this.businessEmpire.respondAcquisitionOffer({
+      offerId,
+      responderId: playerId,
+      decision,
+    });
+    this.emitPlayerFinancialSync(res.offer.buyerId);
+    this.emitPlayerFinancialSync(res.offer.sellerId);
+    if (decision === 'ACCEPT' && res.business) {
+      this.career.recordCounter(res.offer.buyerId, 'maDealsCompleted');
+      if (res.offer.targetPct >= 51) {
+        this.career.recordCounter(res.offer.buyerId, 'maControllingDealsCompleted');
+      }
+      this.career.recordJourneyEvent(
+        res.offer.buyerId,
+        'FINANCE',
+        `Hoàn tất M&A ${res.offer.targetPct}% ${res.offer.targetCompanyName}`,
+        `Thanh toán ký quỹ ${(res.offer.totalOfferMinor / 100).toLocaleString('en-US')} CR thành công.`,
+      );
+      this.eventBus.publish('company.acquisition.completed', res);
+      this.syncPlayerCareerAndNotify(res.offer.buyerId);
+      this.syncPlayerCareerAndNotify(res.offer.sellerId);
+    }
+    return { ...res, company: res.business };
+  }
+
+  public createV4Holding(playerId: string, name: string, ticker: string, _initialCashCR = 0) {
+    const player = this.players.get(playerId);
+    if (!player) throw new DomainError('UNAUTHORIZED', undefined, 401);
+    const holding = this.businessEmpire.createHoldingCompany({
+      founderId: playerId,
+      founderName: player.username,
+      name,
+      ticker,
+    });
+    this.career.recordJourneyEvent(
+      playerId,
+      'BUSINESS',
+      `Thành lập Tập đoàn mẹ ${holding.name} (${holding.ticker})`,
+      'Sẵn sàng hợp nhất công ty con theo sơ đồ sở hữu.',
+    );
+    this.emitPlayerFinancialSync(playerId);
+    this.syncPlayerCareerAndNotify(playerId);
+    return holding;
+  }
+
+  public attachV4Subsidiary(playerId: string, holdingId: string, businessId: string) {
+    const holding = this.businessEmpire.attachSubsidiaryToHolding(holdingId, businessId, playerId);
+    this.syncPlayerCareerAndNotify(playerId);
+    return holding;
+  }
+
+  public launchV4Ipo(playerId: string, businessId: string, offeringPriceCR?: number) {
+    const biz = this.businessEmpire.getBusiness(businessId);
+    const defaultShares = Math.max(1_000, Math.floor((biz?.totalIssuedShares ?? 10_000) * 0.25));
+    const defaultPriceCR =
+      offeringPriceCR && offeringPriceCR >= 1
+        ? offeringPriceCR
+        : Math.max(
+            2,
+            Math.round(((biz?.valuationMinor ?? 200_000 * 100) / Math.max(biz?.totalIssuedShares ?? 10_000, 1)) / 100),
+          );
+    const res = this.businessEmpire.launchIpo({
+      businessId,
+      requesterId: playerId,
+      offeringShares: defaultShares,
+      ipoPriceCR: defaultPriceCR,
+    });
+    this.career.recordJourneyEvent(
+      playerId,
+      'INVESTMENT',
+      `Niêm yết IPO thành công: ${res.listedAsset.symbol}`,
+      `${res.business.businessName} chính thức giao dịch công khai trên sàn ESE.`,
+    );
+    this.eventBus.publish('market.quote.updated', res.listedAsset);
+    this.emitPlayerFinancialSync(playerId);
+    this.syncPlayerCareerAndNotify(playerId);
+    return { ...res, company: res.business, asset: res.listedAsset };
+  }
+
+  // --- Investment Fund V4 Wrappers ---
+
+  public createV4Fund(
+    playerId: string,
+    payload: {
+      name: string;
+      code: string;
+      fundType: FundType;
+      description?: string;
+      investmentObjective?: string;
+      managementFeeAnnualPct?: number;
+      redemptionFeePct?: number;
+      maxSinglePositionPct?: number;
+      minCashReservePct?: number;
+      initialCapitalCR: number;
+      isPublic?: boolean;
+      logoColor?: string;
+      idempotencyKey?: string;
+    },
+  ) {
+    const player = this.players.get(playerId);
+    if (!player) throw new DomainError('UNAUTHORIZED', undefined, 401);
+    const fund = this.funds.createFund({
+      founderId: playerId,
+      founderName: player.username,
+      ...payload,
+    });
+    this.career.recordJourneyEvent(
+      playerId,
+      'FINANCE',
+      `Thành lập quỹ đầu tư ${fund.name} (${fund.code})`,
+      `Vốn khởi tạo ${payload.initialCapitalCR.toLocaleString('en-US')} CR — Không đòn bẩy.`,
+    );
+    this.eventBus.publish('fund.created', fund);
+    this.emitPlayerFinancialSync(playerId);
+    this.syncPlayerCareerAndNotify(playerId);
+    return fund;
+  }
+
+  public subscribeV4Fund(playerId: string, fundId: string, amountCR: number, idempotencyKey?: string) {
+    const player = this.players.get(playerId);
+    if (!player) throw new DomainError('UNAUTHORIZED', undefined, 401);
+    const res = this.funds.subscribeFund({
+      fundId,
+      playerId,
+      playerName: player.username,
+      amountCR,
+      idempotencyKey,
+    });
+    this.career.recordCounter(playerId, 'fundSubscriptionsOrTrades');
+    this.eventBus.publish('fund.subscription.completed', {
+      fundId: res.fund.id,
+      fundCode: res.fund.code,
+      playerId,
+      unitsIssued: res.unitsIssued,
+      amountCR,
+    });
+    this.emitPlayerFinancialSync(playerId);
+    this.syncPlayerCareerAndNotify(playerId);
+    return res;
+  }
+
+  public redeemV4Fund(playerId: string, fundId: string, units: number, idempotencyKey?: string) {
+    const player = this.players.get(playerId);
+    if (!player) throw new DomainError('UNAUTHORIZED', undefined, 401);
+    const res = this.funds.requestRedemption({
+      fundId,
+      playerId,
+      playerName: player.username,
+      units,
+      idempotencyKey,
+    });
+    if (res.settledImmediately) {
+      this.eventBus.publish('fund.redemption.completed', {
+        fundId: res.fund.id,
+        fundCode: res.fund.code,
+        playerId,
+        request: res.request,
+      });
+    }
+    this.emitPlayerFinancialSync(playerId);
+    this.syncPlayerCareerAndNotify(playerId);
+    return res;
+  }
+
+  public executeV4FundTrade(
+    playerId: string,
+    fundId: string,
+    symbol: string,
+    side: 'BUY' | 'SELL',
+    amountCR: number,
+  ) {
+    const fund = this.funds.executeFundTrade({
+      fundId,
+      managerId: playerId,
+      symbol,
+      side,
+      amountCR,
+    });
+    this.career.recordCounter(playerId, 'fundSubscriptionsOrTrades');
+    this.career.recordCounter(playerId, 'hasFundManagedTrade');
+    this.syncPlayerCareerAndNotify(playerId);
+    return fund;
+  }
+
+  public createV4FundProposal(
+    playerId: string,
+    fundId: string,
+    payload: {
+      type: FundGovernanceProposal['type'];
+      title: string;
+      description: string;
+      payload?: Record<string, unknown>;
+    },
+  ) {
+    const player = this.players.get(playerId);
+    if (!player) throw new DomainError('UNAUTHORIZED', undefined, 401);
+    const prop = this.funds.createFundProposal({
+      fundId,
+      proposerId: playerId,
+      proposerName: player.username,
+      ...payload,
+    });
+    this.career.recordCounter(playerId, 'governanceVotesCast');
+    this.syncPlayerCareerAndNotify(playerId);
+    return prop;
+  }
+
+  public voteV4FundProposal(playerId: string, fundId: string, proposalId: string, vote: 'FOR' | 'AGAINST') {
+    const player = this.players.get(playerId);
+    if (!player) throw new DomainError('UNAUTHORIZED', undefined, 401);
+    const res = this.funds.voteFundProposal({
+      fundId,
+      proposalId,
+      voterId: playerId,
+      voterName: player.username,
+      vote,
+    });
+    this.career.recordCounter(playerId, 'governanceVotesCast');
+    this.syncPlayerCareerAndNotify(playerId);
+    return res;
+  }
+
+  // --- Luxury Club V4 Wrappers ---
+
+  public buyV4LuxuryFromShowroom(
+    playerId: string,
+    catalogId: string,
+    exteriorColorHex?: string,
+    exteriorColorName?: string,
+    idempotencyKey?: string,
+  ) {
+    const player = this.players.get(playerId);
+    if (!player) throw new DomainError('UNAUTHORIZED', undefined, 401);
+    const asset = this.luxury.purchaseFromShowroom({
+      playerId,
+      playerName: player.username,
+      catalogId,
+      exteriorColorHex,
+      exteriorColorName,
+      idempotencyKey,
+    });
+    this.career.recordJourneyEvent(
+      playerId,
+      'LIFESTYLE',
+      `Sở hữu ${asset.modelName}`,
+      `Bổ sung vào Empire Luxury Club (${asset.segmentLabel}).`,
+    );
+    this.eventBus.publish('luxury.asset.purchased', asset);
+    this.emitPlayerFinancialSync(playerId);
+    this.syncPlayerCareerAndNotify(playerId);
+    return asset;
+  }
+
+  public customizeV4LuxuryAsset(
+    playerId: string,
+    assetId: string,
+    payload: {
+      exteriorColorHex: string;
+      exteriorColorName: string;
+      exteriorTrim: OwnedLuxuryAsset['exteriorTrim'];
+    },
+  ) {
+    const asset = this.luxury.customizeAsset({ assetId, playerId, ...payload });
+    this.career.recordCounter(playerId, 'luxuryCustomizations');
+    this.emitPlayerFinancialSync(playerId);
+    this.syncPlayerCareerAndNotify(playerId);
+    return asset;
+  }
+
+  public buyV4LuxuryResale(playerId: string, listingId: string, idempotencyKey?: string) {
+    const player = this.players.get(playerId);
+    if (!player) throw new DomainError('UNAUTHORIZED', undefined, 401);
+    const res = this.luxury.buyResaleListing({
+      listingId,
+      buyerId: playerId,
+      buyerName: player.username,
+      idempotencyKey,
+    });
+    this.eventBus.publish('luxury.asset.sold', res);
+    this.emitPlayerFinancialSync(playerId);
+    this.emitPlayerFinancialSync(res.sellerId);
+    this.syncPlayerCareerAndNotify(playerId);
+    return res;
+  }
+
+  // =========================================================================
+  // PROJECT CO-FOUNDER — MULTIPLAYER ENTREPRENEURSHIP & GOVERNANCE WRAPPERS
+  // =========================================================================
+
+  public getCoFounderCapitalHub(playerId: string | null, worldMode: WorldMode = 'ONLINE'): CoFounderCapitalHubPayload {
+    const knownPlayers: CoFounderCapitalHubPayload['knownPlayers'] = [];
+    for (const rec of this.players.values()) {
+      if (rec.role === 'PLAYER') {
+        knownPlayers.push({
+          playerId: rec.id,
+          username: rec.username,
+          title: rec.title,
+          isNpc: false,
+        });
+      } else if (worldMode === 'CAREER' && (rec.role === 'INVESTOR_BOT' || rec.role === 'MARKET_MAKER')) {
+        // Career Mode explicitly allows inviting real finite-budget NPC investors (never fabricated in ONLINE mode)
+        knownPlayers.push({
+          playerId: rec.id,
+          username: rec.username,
+          title: `${rec.title} (NPC Career)`,
+          isNpc: true,
+        });
+      }
+    }
+
+    const projects = this.cofounder.listProjects(worldMode, playerId);
+    const myContributions = playerId
+      ? projects.flatMap((p) => p.contributions.filter((c) => c.contributorId === playerId))
+      : [];
+
+    return {
+      worldMode,
+      projects,
+      capitalRounds: this.cofounder.listCapitalRounds(worldMode),
+      privateListings: this.businessEmpire
+        .listPrivateListings()
+        .filter((l) => this.cofounder.getCompanyWorldMode(l.companyId) === worldMode),
+      jointVentures: this.cofounder.listJointVentures(worldMode),
+      funds: this.funds.listFunds(),
+      catalog: BUSINESS_CATALOG,
+      myInvites: playerId ? this.cofounder.listInvitesForPlayer(playerId, worldMode) : [],
+      myContributions,
+      knownPlayers: knownPlayers.slice(0, 40),
+      featureFlags: {
+        empireConnectNativeApiReady: true,
+        bigUpdateUnifiedPersistenceReady: true,
+        beginnerModeAdapterReady: true,
+      },
+    };
+  }
+
+  public getCompanyHeadquarters(companyId: string, playerId: string | null) {
+    return this.cofounder.getCompanyHeadquarters(companyId, playerId);
+  }
+
+  public getMyCoFounderInvestments(playerId: string, worldMode: WorldMode = 'ONLINE') {
+    return this.cofounder.getMyInvestments(playerId, worldMode);
+  }
+
+  public createCoFounderProject(
+    playerId: string,
+    payload: {
+      worldMode?: WorldMode;
+      businessName: string;
+      ticker: string;
+      logoColor?: string;
+      businessTypeId: string;
+      businessModel?: BusinessModelType;
+      cityCode: V4CityCode;
+      businessGoal: string;
+      businessPlan: string;
+      riskDisclosure?: string;
+      targetCapitalCR: number;
+      initialTotalShares: number;
+      minContributionCR: number;
+      visibility: CapitalProjectVisibility;
+      deadlineGameDay?: number;
+      founderInitialCommitCR?: number;
+      founderInitialRole?: CompanyRole;
+      policy?: Partial<CapitalProjectPolicy>;
+    },
+  ) {
+    const player = this.players.get(playerId);
+    if (!player) throw new DomainError('UNAUTHORIZED', undefined, 401);
+    const clock = this.economy.getGameClock();
+    const project = this.cofounder.createCapitalProject({
+      founderId: playerId,
+      founderName: player.username,
+      worldMode: payload.worldMode ?? 'ONLINE',
+      businessName: sanitizePlainText(payload.businessName).slice(0, 64),
+      ticker: sanitizePlainText(payload.ticker).slice(0, 10).toUpperCase(),
+      logoColor: payload.logoColor,
+      businessTypeId: payload.businessTypeId,
+      businessModel: payload.businessModel,
+      cityCode: payload.cityCode,
+      businessGoal: sanitizePlainText(payload.businessGoal).slice(0, 180),
+      businessPlan: sanitizePlainText(payload.businessPlan).slice(0, 600),
+      riskDisclosure: payload.riskDisclosure ? sanitizePlainText(payload.riskDisclosure).slice(0, 280) : undefined,
+      targetCapitalCR: payload.targetCapitalCR,
+      initialTotalShares: payload.initialTotalShares,
+      minContributionCR: payload.minContributionCR,
+      visibility: payload.visibility,
+      deadlineGameDay: payload.deadlineGameDay ?? clock.gameDay + 14,
+      founderInitialCommitCR: payload.founderInitialCommitCR,
+      founderInitialRole: payload.founderInitialRole,
+      policy: payload.policy,
+    });
+    this.eventBus.publish('cofounder.project.updated', project);
+    this.emitPlayerFinancialSync(playerId);
+    return project;
+  }
+
+  public inviteCoFounder(
+    inviterId: string,
+    payload: {
+      projectId: string;
+      inviteeId?: string;
+      inviteeUsername?: string;
+      proposedRole: CompanyRole;
+      proposedContributionCR: number;
+      inviteChannel: CoFounderInvite['inviteChannel'];
+      message?: string;
+    },
+  ) {
+    const inviter = this.players.get(inviterId);
+    if (!inviter) throw new DomainError('UNAUTHORIZED', undefined, 401);
+
+    let invitee: PlayerRecord | undefined;
+    if (payload.inviteeId) {
+      invitee = this.players.get(payload.inviteeId);
+    } else if (payload.inviteeUsername) {
+      const normalized = payload.inviteeUsername.trim().toLowerCase();
+      for (const rec of this.players.values()) {
+        if (rec.username.toLowerCase() === normalized) {
+          invitee = rec;
+          break;
+        }
+      }
+    }
+    if (!invitee) {
+      throw new DomainError('VALIDATION_ERROR', 'Không tìm thấy người chơi được mời theo Username hoặc Player ID.', 404);
+    }
+
+    const project = this.cofounder.getProject(payload.projectId);
+    if (!project) throw new DomainError('PROJECT_NOT_FOUND', undefined, 404);
+    if (project.worldMode === 'ONLINE' && invitee.role !== 'PLAYER') {
+      throw new DomainError(
+        'VALIDATION_ERROR',
+        'Trong chế độ Online Multiplayer chỉ có thể mời người chơi thật làm đồng sáng lập.',
+        400,
+      );
+    }
+
+    const invite = this.cofounder.inviteCoFounder({
+      projectId: payload.projectId,
+      inviterId,
+      inviterName: inviter.username,
+      inviteeId: invitee.id,
+      inviteeName: invitee.username,
+      proposedRole: payload.proposedRole,
+      proposedContributionCR: payload.proposedContributionCR,
+      inviteChannel: payload.inviteChannel,
+      message: payload.message ? sanitizePlainText(payload.message).slice(0, 240) : undefined,
+    });
+    this.eventBus.publish('cofounder.invite.received', invite, `player:${invitee.id}`);
+    this.eventBus.publish('cofounder.project.updated', this.cofounder.getProject(payload.projectId));
+    return invite;
+  }
+
+  public respondCoFounderInvite(
+    playerId: string,
+    payload: {
+      inviteId: string;
+      decision: 'ACCEPT' | 'REJECT' | 'COUNTER_PROPOSE';
+      counterContributionCR?: number;
+      counterRole?: CompanyRole;
+      counterNote?: string;
+    },
+  ) {
+    const invite = this.cofounder.respondCoFounderInvite({
+      inviteId: payload.inviteId,
+      responderId: playerId,
+      decision: payload.decision,
+      counterContributionCR: payload.counterContributionCR,
+      counterRole: payload.counterRole,
+      counterNote: payload.counterNote ? sanitizePlainText(payload.counterNote).slice(0, 240) : undefined,
+    });
+    this.eventBus.publish('cofounder.project.updated', this.cofounder.getProject(invite.projectId));
+    return invite;
+  }
+
+  public commitCapitalToCoFounderProject(
+    playerId: string,
+    payload: {
+      projectId: string;
+      amountCR: number;
+      worldMode?: WorldMode;
+      inviteCode?: string;
+      proposedRole?: CompanyRole;
+      idempotencyKey?: string;
+    },
+  ) {
+    const player = this.players.get(playerId);
+    if (!player) throw new DomainError('UNAUTHORIZED', undefined, 401);
+    const result = this.cofounder.commitCapitalToProject({
+      projectId: payload.projectId,
+      contributorId: playerId,
+      contributorName: player.username,
+      amountCR: payload.amountCR,
+      isNpc: player.role !== 'PLAYER',
+      worldMode: payload.worldMode,
+      inviteCode: payload.inviteCode,
+      proposedRole: payload.proposedRole,
+      idempotencyKey: payload.idempotencyKey,
+    });
+    this.eventBus.publish('cofounder.commitment.updated', {
+      projectId: result.project.id,
+      contribution: result.contribution,
+      committedCapitalMinor: result.project.committedCapitalMinor,
+      targetCapitalMinor: result.project.targetCapitalMinor,
+      status: result.project.status,
+    });
+    this.eventBus.publish('cofounder.project.updated', result.project);
+    this.emitPlayerFinancialSync(playerId);
+    return result;
+  }
+
+  /**
+   * Career Mode Only: Invite a real finite-budget NPC investor from the world to commit real CR into escrow.
+   * Strictly forbidden in ONLINE mode.
+   */
+  public commitCareerNpcToProject(
+    requesterId: string,
+    payload: {
+      projectId: string;
+      npcId?: string;
+      amountCR: number;
+    },
+  ) {
+    const project = this.cofounder.getProject(payload.projectId);
+    if (!project) throw new DomainError('PROJECT_NOT_FOUND', undefined, 404);
+    if (project.worldMode !== 'CAREER') {
+      throw new DomainError(
+        'CROSS_WORLD_TRANSFER_FORBIDDEN',
+        'Chỉ được gọi nhà đầu tư NPC trong chế độ Career. Online Multiplayer chỉ nhận vốn từ người chơi thật.',
+        403,
+      );
+    }
+    if (project.founderId !== requesterId) {
+      throw new DomainError('FORBIDDEN', 'Chỉ nhà sáng lập dự án mới có thể mời NPC đầu tư trong Career Mode.', 403);
+    }
+
+    let npc: PlayerRecord | undefined;
+    if (payload.npcId) {
+      const candidate = this.players.get(payload.npcId);
+      if (candidate && (candidate.role === 'INVESTOR_BOT' || candidate.role === 'MARKET_MAKER')) {
+        npc = candidate;
+      }
+    } else {
+      for (const rec of this.players.values()) {
+        if (rec.role === 'INVESTOR_BOT' || rec.role === 'MARKET_MAKER') {
+          const wallet = this.ledger.wallets.getWallet(rec.id);
+          if (wallet && wallet.availableMinor >= toMinor(payload.amountCR)) {
+            npc = rec;
+            break;
+          }
+        }
+      }
+    }
+
+    if (!npc) {
+      throw new DomainError('INSUFFICIENT_FUNDS', 'Không có nhà đầu tư NPC nào đủ vốn CR khả dụng cho khoản góp này.', 400);
+    }
+
+    const result = this.cofounder.commitCapitalToProject({
+      projectId: payload.projectId,
+      contributorId: npc.id,
+      contributorName: npc.username,
+      amountCR: payload.amountCR,
+      isNpc: true,
+      worldMode: 'CAREER',
+      proposedRole: 'BOARD_MEMBER',
+    });
+    this.eventBus.publish('cofounder.commitment.updated', {
+      projectId: result.project.id,
+      contribution: result.contribution,
+      committedCapitalMinor: result.project.committedCapitalMinor,
+      targetCapitalMinor: result.project.targetCapitalMinor,
+      status: result.project.status,
+    });
+    this.eventBus.publish('cofounder.project.updated', result.project);
+    return result;
+  }
+
+  public approveOrRejectCoFounderContribution(
+    founderId: string,
+    projectId: string,
+    contributionId: string,
+    decision: 'APPROVE' | 'REJECT',
+  ) {
+    const project = this.cofounder.approveOrRejectContribution({
+      projectId,
+      contributionId,
+      founderId,
+      decision,
+    });
+    this.eventBus.publish('cofounder.project.updated', project);
+    const contrib = project.contributions.find((c) => c.contributionId === contributionId);
+    if (contrib) {
+      this.emitPlayerFinancialSync(contrib.contributorId);
+    }
+    return project;
+  }
+
+  public withdrawCoFounderCommitment(playerId: string, projectId: string, contributionId: string) {
+    const project = this.cofounder.withdrawCommitment({
+      projectId,
+      contributionId,
+      contributorId: playerId,
+    });
+    this.eventBus.publish('cofounder.project.updated', project);
+    this.emitPlayerFinancialSync(playerId);
+    return project;
+  }
+
+  public cancelOrExpireCoFounderProject(
+    requesterId: string,
+    projectId: string,
+    reason: 'CANCELLED' | 'EXPIRED' = 'CANCELLED',
+  ) {
+    const result = this.cofounder.cancelOrExpireProject({
+      projectId,
+      requesterId,
+      reason,
+    });
+    this.eventBus.publish('cofounder.project.updated', result.project);
+    const affected = new Set(result.project.contributions.map((c) => c.contributorId));
+    for (const pid of affected) {
+      this.emitPlayerFinancialSync(pid);
+    }
+    return result;
+  }
+
+  public activateCoFounderProject(requesterId: string, projectId: string, idempotencyKey?: string) {
+    const res = this.cofounder.activateProject({
+      projectId,
+      requesterId,
+      idempotencyKey,
+    });
+    this.eventBus.publish('cofounder.project.updated', res.project);
+    this.eventBus.publish('cofounder.company.activated', {
+      projectId: res.project.id,
+      company: res.company,
+      shareholderIds: res.company.shareholders.map((s) => s.playerId),
+    });
+    this.eventBus.publish('business.created', res.company);
+
+    for (const sh of res.company.shareholders) {
+      if (this.players.get(sh.playerId)?.role === 'PLAYER') {
+        this.career.recordJourneyEvent(
+          sh.playerId,
+          'BUSINESS',
+          `Đồng sáng lập ${res.company.businessName} (${res.company.ticker})`,
+          `Sở hữu ${sh.ownershipPct.toFixed(2)}% cổ phần (${sh.shares.toLocaleString('en-US')} cp) qua Capital Hub.`,
+        );
+        this.emitPlayerFinancialSync(sh.playerId);
+        this.syncPlayerCareerAndNotify(sh.playerId);
+      }
+    }
+    return res;
+  }
+
+  public shareCoFounderProjectToEmpireConnect(playerId: string, projectId: string, note?: string) {
+    const player = this.players.get(playerId);
+    if (!player) throw new DomainError('UNAUTHORIZED', undefined, 401);
+    const project = this.cofounder.getProject(projectId);
+    if (!project) throw new DomainError('PROJECT_NOT_FOUND', undefined, 404);
+
+    const pct = Math.round((project.committedCapitalMinor / Math.max(1, project.targetCapitalMinor)) * 100);
+    const cleanNote = note ? sanitizePlainText(note).slice(0, 140) : 'Đang tìm đồng sáng lập cùng góp vốn';
+    const text = `[Capital Hub · ${project.ticker}] ${project.businessName} (${project.cityName}) — Tiến độ vốn ${pct}% · Mã mời: ${project.inviteCode} · ${cleanNote}`;
+
+    const chatMsg: ChatMessage = {
+      id: `chat_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`,
+      channel: 'MARKET',
+      senderId: playerId,
+      senderName: player.username,
+      senderTitle: player.title,
+      content: text,
+      timestamp: new Date().toISOString(),
+      reportedBy: [],
+    };
+    this.chatMessages.push(chatMsg);
+    if (this.chatMessages.length > 200) {
+      this.chatMessages = this.chatMessages.slice(-200);
+    }
+    this.eventBus.publish('chat.message', chatMsg);
+    return chatMsg;
+  }
+
+  public assignCoFounderCompanyRole(
+    actorId: string,
+    payload: {
+      companyId: string;
+      targetPlayerId: string;
+      role: CompanyRole;
+      action: 'GRANT' | 'REVOKE';
+    },
+  ) {
+    const actor = this.players.get(actorId);
+    const target = this.players.get(payload.targetPlayerId);
+    if (!actor) throw new DomainError('UNAUTHORIZED', undefined, 401);
+    if (!target) throw new DomainError('VALIDATION_ERROR', 'Không tìm thấy cổ đông mục tiêu.', 404);
+    return this.cofounder.assignCompanyRole({
+      companyId: payload.companyId,
+      actorId,
+      actorName: actor.username,
+      targetPlayerId: payload.targetPlayerId,
+      targetPlayerName: target.username,
+      role: payload.role,
+      action: payload.action,
+    });
+  }
+
+  public attemptUnauthorizedCompanyWithdrawal(actorId: string, companyId: string): never {
+    const actor = this.players.get(actorId);
+    if (!actor) throw new DomainError('UNAUTHORIZED', undefined, 401);
+    return this.businessEmpire.attemptUnauthorizedCompanyWithdrawal(companyId, actorId);
+  }
+
+  public createCoFounderBoardProposal(
+    playerId: string,
+    payload: {
+      companyId: string;
+      type: BoardProposalType;
+      title: string;
+      description: string;
+      rationale: string;
+      expectedImpact: string;
+      estimatedCostCR?: number;
+      payload?: Record<string, unknown>;
+      durationHours?: number;
+    },
+  ) {
+    const player = this.players.get(playerId);
+    if (!player) throw new DomainError('UNAUTHORIZED', undefined, 401);
+    const proposal = this.cofounder.createBoardProposal({
+      companyId: payload.companyId,
+      proposerId: playerId,
+      proposerName: player.username,
+      type: payload.type,
+      title: sanitizePlainText(payload.title).slice(0, 120),
+      description: sanitizePlainText(payload.description).slice(0, 400),
+      rationale: sanitizePlainText(payload.rationale).slice(0, 300),
+      expectedImpact: sanitizePlainText(payload.expectedImpact).slice(0, 240),
+      estimatedCostCR: payload.estimatedCostCR,
+      payload: payload.payload,
+      durationHours: payload.durationHours,
+    });
+    this.eventBus.publish('board.proposal.created', proposal);
+    return proposal;
+  }
+
+  public voteCoFounderBoardProposal(
+    playerId: string,
+    proposalId: string,
+    choice: 'FOR' | 'AGAINST' | 'ABSTAIN',
+  ) {
+    const player = this.players.get(playerId);
+    if (!player) throw new DomainError('UNAUTHORIZED', undefined, 401);
+    const proposal = this.cofounder.voteBoardProposal({
+      proposalId,
+      voterId: playerId,
+      voterName: player.username,
+      choice,
+    });
+    this.career.recordCounter(playerId, 'governanceVotesCast');
+    this.eventBus.publish('board.proposal.voted', proposal);
+    this.syncPlayerCareerAndNotify(playerId);
+    return proposal;
+  }
+
+  public executeCoFounderBoardProposal(playerId: string, proposalId: string) {
+    const player = this.players.get(playerId);
+    if (!player) throw new DomainError('UNAUTHORIZED', undefined, 401);
+    const clock = this.economy.getGameClock();
+    const res = this.cofounder.executeBoardProposal({
+      proposalId,
+      executorId: playerId,
+      executorName: player.username,
+      currentGameHourTotal: clock.gameDay * 24 + clock.gameHour,
+    });
+    this.eventBus.publish('board.proposal.executed', {
+      proposal: res.proposal,
+      company: res.company,
+      dividendRecord: res.dividendRecord ?? null,
+    });
+    this.eventBus.publish('business.revenue.updated', res.company);
+    if (res.dividendRecord) {
+      this.eventBus.publish('company.dividend.paid', res.dividendRecord);
+      for (const payout of res.dividendRecord.payouts) {
+        this.emitPlayerFinancialSync(payout.playerId);
+      }
+    }
+    this.emitPlayerFinancialSync(playerId);
+    return res;
+  }
+
+  public createCoFounderCapitalRound(
+    playerId: string,
+    payload: {
+      companyId: string;
+      roundType: CapitalRoundType;
+      preMoneyValuationCR: number;
+      targetRaiseCR: number;
+      useOfProceeds: string;
+      preemptiveRightsEnabled?: boolean;
+      visibility?: CapitalProjectVisibility;
+    },
+  ) {
+    const player = this.players.get(playerId);
+    if (!player) throw new DomainError('UNAUTHORIZED', undefined, 401);
+    const round = this.cofounder.createCapitalRound({
+      companyId: payload.companyId,
+      requesterId: playerId,
+      requesterName: player.username,
+      roundType: payload.roundType,
+      preMoneyValuationCR: payload.preMoneyValuationCR,
+      targetRaiseCR: payload.targetRaiseCR,
+      useOfProceeds: sanitizePlainText(payload.useOfProceeds).slice(0, 300),
+      preemptiveRightsEnabled: payload.preemptiveRightsEnabled,
+      visibility: payload.visibility,
+    });
+    this.eventBus.publish('capital.round.updated', round);
+    return round;
+  }
+
+  public investCoFounderCapitalRound(
+    playerId: string,
+    payload: {
+      roundId: string;
+      amountCR: number;
+      worldMode?: WorldMode;
+      idempotencyKey?: string;
+    },
+  ) {
+    const player = this.players.get(playerId);
+    if (!player) throw new DomainError('UNAUTHORIZED', undefined, 401);
+    const res = this.cofounder.investInCapitalRound({
+      roundId: payload.roundId,
+      investorId: playerId,
+      investorName: player.username,
+      amountCR: payload.amountCR,
+      worldMode: payload.worldMode,
+      idempotencyKey: payload.idempotencyKey,
+    });
+    this.eventBus.publish('capital.round.updated', res.round);
+    this.eventBus.publish('business.revenue.updated', res.company);
+    this.emitPlayerFinancialSync(playerId);
+    this.syncPlayerCareerAndNotify(playerId);
+    return res;
+  }
+
+  public createCoFounderJointVenture(
+    playerId: string,
+    payload: {
+      creatorCompanyId: string;
+      partnerCompanyIds: string[];
+      jvName: string;
+      ticker: string;
+      businessTypeId: string;
+      cityCode: V4CityCode;
+      purpose: string;
+      partnerContributionsCR: Array<{ companyId: string; amountCR: number }>;
+      worldMode?: WorldMode;
+    },
+  ) {
+    const jv = this.cofounder.createJointVenture({
+      creatorPlayerId: playerId,
+      creatorCompanyId: payload.creatorCompanyId,
+      partnerCompanyIds: payload.partnerCompanyIds,
+      jvName: sanitizePlainText(payload.jvName).slice(0, 64),
+      ticker: sanitizePlainText(payload.ticker).slice(0, 10).toUpperCase(),
+      businessTypeId: payload.businessTypeId,
+      cityCode: payload.cityCode,
+      purpose: sanitizePlainText(payload.purpose).slice(0, 240),
+      partnerContributionsCR: payload.partnerContributionsCR,
+      worldMode: payload.worldMode,
+    });
+    this.eventBus.publish('jv.updated', jv);
+    return jv;
+  }
+
+  public approveCoFounderJointVenture(playerId: string, jvId: string, partnerCompanyId: string) {
+    const res = this.cofounder.approveAndActivateJointVenture({
+      jvId,
+      partnerCompanyId,
+      approverPlayerId: playerId,
+    });
+    this.eventBus.publish('jv.updated', res.jv);
+    if (res.company) {
+      this.eventBus.publish('cofounder.company.activated', {
+        projectId: res.jv.id,
+        company: res.company,
+        shareholderIds: res.company.shareholders.map((s) => s.playerId),
+      });
+      this.eventBus.publish('business.created', res.company);
+    }
+    return res;
+  }
+
+  public postCoFounderDiscussion(
+    playerId: string,
+    companyId: string,
+    content: string,
+    channel: 'SHAREHOLDER_ROOM' | 'EMPIRE_CONNECT_SHARE' = 'SHAREHOLDER_ROOM',
+  ) {
+    const player = this.players.get(playerId);
+    if (!player) throw new DomainError('UNAUTHORIZED', undefined, 401);
+    return this.cofounder.postShareholderDiscussion({
+      companyId,
+      authorId: playerId,
+      authorName: player.username,
+      content: sanitizePlainText(content).slice(0, 400),
+      channel,
+    });
   }
 }

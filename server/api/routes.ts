@@ -30,9 +30,24 @@ import { z } from 'zod';
 import { ALL_CURRENCIES } from '../../shared/contracts/money';
 import { DomainError } from '../domain/DomainError';
 import { WorldEngine } from '../engine/WorldEngine';
+import { createV4Router } from './v4Routes';
+import { createCoFounderRouter } from './cofounderRoutes';
 
 const TriggerCentralBankSchema = z.object({
   currency: z.enum(ALL_CURRENCIES as unknown as [string, ...string[]]).optional(),
+});
+
+const BotDevTickSchema = z.object({
+  ticks: z.number().int().min(1).max(20).optional(),
+  targetSymbol: z.string().min(1).max(32).optional(),
+  forceAllAgents: z.boolean().optional(),
+  includeNova: z.boolean().optional(),
+});
+
+const BotDevConfigureSchema = z.object({
+  agentCount: z.number().int().min(8).max(200).optional(),
+  seed: z.number().int().min(1).max(2_147_483_647).optional(),
+  cpuBudgetMsPerTick: z.number().min(2).max(250).optional(),
 });
 
 function ok<T>(res: Response, data: T, status = 200): void {
@@ -846,6 +861,79 @@ export function createApiRouter(world: WorldEngine): Router {
     ok(res, world.getDiagnostics());
   });
 
+  // Autonomous AI Trading Ecosystem V2 Telemetry & Dev Controls
+  router.get('/bots/overview', (_req, res) => {
+    ok(res, world.getBotEcosystemOverview());
+  });
+
+  router.get('/bots/:id', (req, res, next) => {
+    try {
+      const telemetry = world.getBotAgentTelemetry(req.params.id);
+      if (!telemetry) throw new DomainError('VALIDATION_ERROR', 'Không tìm thấy AI Trader theo mã yêu cầu.', 404);
+      ok(res, telemetry);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/bots/dev/tick', (req, res, next) => {
+    try {
+      if (!world.devToolsEnabled) throw new DomainError('FORBIDDEN_IN_PRODUCTION', undefined, 403);
+      const parsed = BotDevTickSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return fail(res, 'VALIDATION_ERROR', parsed.error.issues[0]?.message, 400);
+      }
+      const ticks = parsed.data.ticks ?? 1;
+      let totalSpotTrades = 0;
+      let totalFuturesTrades = 0;
+      let totalOrdersSubmitted = 0;
+      const affectedSpot = new Set<string>();
+      const affectedFutures = new Set<string>();
+      let lastTickDurationMs = 0;
+
+      for (let i = 0; i < ticks; i++) {
+        const resTick = world.runAutonomousBotTick({
+          targetSymbol: parsed.data.targetSymbol?.toUpperCase(),
+          forceAllAgents: parsed.data.forceAllAgents ?? true,
+          includeNova: parsed.data.includeNova,
+        });
+        totalSpotTrades += resTick.spotTrades.length;
+        totalFuturesTrades += resTick.futuresTrades.length;
+        totalOrdersSubmitted += resTick.ordersSubmitted;
+        lastTickDurationMs = resTick.tickDurationMs;
+        for (const s of resTick.affectedSpotSymbols) affectedSpot.add(s);
+        for (const s of resTick.affectedFuturesSymbols) affectedFutures.add(s);
+      }
+
+      ok(res, {
+        ticksExecuted: ticks,
+        spotTradesExecuted: totalSpotTrades,
+        futuresTradesExecuted: totalFuturesTrades,
+        ordersSubmitted: totalOrdersSubmitted,
+        lastTickDurationMs,
+        affectedSpotSymbols: Array.from(affectedSpot),
+        affectedFuturesSymbols: Array.from(affectedFutures),
+        performance: world.bots.getPerformanceMetrics(),
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/bots/dev/configure', (req, res, next) => {
+    try {
+      if (!world.devToolsEnabled) throw new DomainError('FORBIDDEN_IN_PRODUCTION', undefined, 403);
+      const parsed = BotDevConfigureSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return fail(res, 'VALIDATION_ERROR', parsed.error.issues[0]?.message, 400);
+      }
+      const overview = world.reconfigureBotEcosystem(parsed.data);
+      ok(res, overview);
+    } catch (err) {
+      next(err);
+    }
+  });
+
   router.post('/dev/simulate-bot-tick', (req, res, next) => {
     try {
       if (!world.devToolsEnabled) throw new DomainError('FORBIDDEN_IN_PRODUCTION', undefined, 403);
@@ -867,6 +955,12 @@ export function createApiRouter(world: WorldEngine): Router {
       next(err);
     }
   });
+
+  // Trading Empire V4 — Rise of Billionaires routes
+  router.use('/v4', createV4Router(world));
+
+  // Trading Empire — Project Co-Founder routes
+  router.use('/cofounder', createCoFounderRouter(world));
 
   // Malformed JSON / Domain Error handler
   router.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {

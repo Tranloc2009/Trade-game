@@ -1,0 +1,1985 @@
+# TRADING EMPIRE V4 — RISE OF BILLIONAIRES
+## Advanced Multiplayer Business, Corporate Economy, Investment Funds & Lifestyle Expansion
+
+# 0. VAI TRÒ VÀ TẦM NHÌN
+
+Bạn là một đội ngũ phát triển game và phần mềm chuyên nghiệp gồm:
+
+- AAA Game Director.
+- Senior Game Economy Designer.
+- Principal Financial Systems Architect.
+- Multiplayer Backend Engineer.
+- Business Simulation Engineer.
+- Senior React & TypeScript Developer.
+- Principal UI/UX Designer.
+- Database Architecture Engineer.
+- Financial Accounting Specialist.
+- Quality Assurance Engineer.
+
+NHIỆM VỤ:
+
+Nâng cấp trực tiếp dự án TRADING EMPIRE hiện tại thành một trò chơi mô phỏng kinh tế, kinh doanh và xây dựng đế chế tài chính multiplayer có chiều sâu.
+
+Người chơi phải có thể lựa chọn nhiều con đường phát triển khác nhau:
+
+- Nhà đầu tư chứng khoán.
+- Doanh nhân.
+- Chủ chuỗi cửa hàng.
+- Chủ tập đoàn sản xuất.
+- Nhà đầu tư bất động sản.
+- Nhà quản lý quỹ.
+- Nhà tài phiệt sở hữu nhiều công ty.
+
+Không giới hạn gameplay vào việc mua bán cổ phiếu và crypto.
+
+Tạo một nền kinh tế có thể phát triển, suy thoái, cạnh tranh và thay đổi theo quyết định của người chơi.
+
+Mọi tài sản và giao dịch chỉ sử dụng CR mô phỏng, không nạp tiền thật, không rút tiền thật và không có phần thưởng quy đổi ra ngoài trò chơi.
+
+# 1. QUY ĐỊNH BẮT BUỘC
+
+Đây là một dự án đã tồn tại.
+
+Trước khi triển khai:
+
+1. Đọc toàn bộ repository.
+2. Kiểm tra Git branch và working tree.
+3. Đọc tài liệu kiến trúc.
+4. Kiểm tra những tính năng đang hoạt động.
+5. Xác định các module cần mở rộng.
+6. Kiểm tra Wallet, Ledger, Economy Engine và Multiplayer Server.
+7. Tạo branch riêng `feature/business-empire-v4` trong workspace độc lập.
+
+KHÔNG ĐƯỢC:
+
+- Tạo lại website từ đầu.
+- Xóa tính năng đang hoạt động.
+- Reset tài khoản người chơi.
+- Thay đổi số dư tùy tiện.
+- Làm hỏng Stocks, Crypto, Forex, Futures, Meme Coin.
+- Làm hỏng bất động sản Việt Nam.
+- Thay thế Matching Engine bằng mock data.
+- Thay đổi backend của các module đang được agent khác phát triển.
+- Tự ý triển khai database bên ngoài.
+- Tích hợp API AI bên ngoài.
+- Tạo trợ lý AI.
+- Tạo chatbot tài chính.
+- Gọi Gemini API, OpenAI API hoặc Claude API trong ứng dụng.
+- Tự ý deploy production.
+- Force push hoặc merge vào main.
+
+Giữ nguyên hệ thống bot giao dịch hiện tại.
+
+Mọi logic mới phải sử dụng rule-based systems, deterministic algorithms và economic simulation có thể kiểm thử.
+
+# 2. BUSINESS EMPIRE — HỆ THỐNG DOANH NGHIỆP
+
+Đây là tính năng trọng tâm của bản nâng cấp.
+
+Người chơi có thể sử dụng CR để thành lập doanh nghiệp, vận hành, tuyển nhân viên, nâng cấp thiết bị, mở rộng công suất, xây dựng thương hiệu và mở chi nhánh.
+
+## 2.1. DANH MỤC DOANH NGHIỆP
+
+Tạo tối thiểu 30 loại hình doanh nghiệp.
+
+Các mức vốn dưới đây là thông số cân bằng gameplay ban đầu, có thể điều chỉnh dựa trên kết quả kiểm thử nền kinh tế.
+
+### F&B — Ăn uống
+
+- Xe cà phê: 8.000 CR.
+- Quán cà phê: 20.000 CR.
+- Tiệm trà sữa: 25.000 CR.
+- Quán ăn Việt Nam: 35.000 CR.
+- Nhà hàng: 80.000 CR.
+- Nhà hàng cao cấp: 250.000 CR.
+
+### RETAIL — Bán lẻ
+
+- Cửa hàng tiện lợi: 25.000 CR.
+- Cửa hàng thời trang: 35.000 CR.
+- Cửa hàng điện tử: 60.000 CR.
+- Showroom ô tô: 350.000 CR.
+- Siêu thị: 500.000 CR.
+- Trung tâm thương mại: 5.000.000 CR.
+
+### TECHNOLOGY — Công nghệ
+
+- Startup phần mềm: 30.000 CR.
+- Công ty thiết kế website: 20.000 CR.
+- Studio phát triển game: 50.000 CR.
+- Công ty thương mại điện tử: 150.000 CR.
+- Công ty phần mềm doanh nghiệp: 300.000 CR.
+- Trung tâm dữ liệu: 3.000.000 CR.
+
+### TRANSPORTATION — Vận tải
+
+- Dịch vụ giao hàng: 25.000 CR.
+- Công ty taxi: 100.000 CR.
+- Công ty vận tải đường bộ: 180.000 CR.
+- Công ty logistics: 400.000 CR.
+- Công ty vận tải biển: 2.500.000 CR.
+- Hãng hàng không: 20.000.000 CR.
+
+### MANUFACTURING — Sản xuất
+
+- Xưởng may: 60.000 CR.
+- Xưởng nội thất: 80.000 CR.
+- Nhà máy thực phẩm: 500.000 CR.
+- Nhà máy điện tử: 2.000.000 CR.
+- Nhà máy sản xuất ô tô: 10.000.000 CR.
+- Nhà máy bán dẫn: 50.000.000 CR.
+
+### HOSPITALITY — Du lịch và dịch vụ
+
+- Homestay: 45.000 CR.
+- Khách sạn mini: 180.000 CR.
+- Khách sạn 4 sao: 1.500.000 CR.
+- Khách sạn 5 sao: 5.000.000 CR.
+- Resort cao cấp: 10.000.000 CR.
+
+### REAL ESTATE — Bất động sản
+
+- Công ty quản lý căn hộ.
+- Công ty xây dựng.
+- Công ty phát triển bất động sản.
+- Tập đoàn bất động sản.
+
+### FINANCE — Tài chính
+
+- Công ty quản lý tài sản.
+- Công ty đầu tư.
+- Quỹ đầu tư.
+- Tập đoàn tài chính.
+
+Chỉ mở khóa các ngành tài chính phức tạp khi hệ thống sở hữu, ledger và quản lý rủi ro tương ứng đã được triển khai.
+
+## 2.2. BUSINESS CREATION FLOW
+
+Tạo quy trình thành lập doanh nghiệp:
+
+Bước 1: Chọn ngành nghề.
+
+Bước 2: Đặt tên doanh nghiệp.
+
+Bước 3: Chọn thành phố hoạt động.
+
+Bước 4: Chọn mô hình kinh doanh.
+
+Bước 5: Chọn mặt bằng nếu cần.
+
+Bước 6: Xem chi phí thành lập.
+
+Bước 7: Xem chi phí vận hành dự kiến.
+
+Bước 8: Xác nhận góp vốn.
+
+Bước 9: Server thực hiện đăng ký và ghi Ledger.
+
+Các thành phố ưu tiên:
+
+- TP.HCM.
+- Hà Nội.
+- Đà Nẵng.
+- Nha Trang.
+- Đà Lạt.
+- Phú Quốc.
+- Hải Phòng.
+- Cần Thơ.
+
+Tận dụng hệ thống bản đồ và bất động sản Việt Nam hiện có.
+
+Các công ty do người chơi tạo phải là doanh nghiệp giả tưởng trong game.
+
+Không giả mạo doanh nghiệp thật.
+
+## 2.3. BUSINESS DATA MODEL
+
+Mỗi doanh nghiệp có:
+
+- Business ID.
+- Company ID.
+- Founder ID.
+- Owner ID.
+- Business Name.
+- Industry.
+- Business Type.
+- City.
+- Location.
+- Business Level.
+- Initial Capital.
+- Company Cash.
+- Revenue.
+- Operating Expenses.
+- Net Profit.
+- Company Assets.
+- Company Liabilities.
+- Employee Count.
+- Production Capacity.
+- Inventory.
+- Customer Demand.
+- Market Share.
+- Reputation.
+- Customer Satisfaction.
+- Business Status.
+- Created At.
+
+Tài sản cá nhân và tài sản doanh nghiệp phải được tách biệt.
+
+Không cho người chơi tự rút tiền từ tài khoản doanh nghiệp nếu không có nghiệp vụ hợp lệ.
+
+## 2.4. BUSINESS UPGRADE SYSTEM
+
+Mỗi doanh nghiệp có 10 cấp nâng cấp.
+
+| Level | Tên cấp độ |
+|---|---|
+| 1 | Startup |
+| 2 | Small Business |
+| 3 | Local Business |
+| 4 | Established Business |
+| 5 | Regional Enterprise |
+| 6 | Large Enterprise |
+| 7 | National Corporation |
+| 8 | Major Corporation |
+| 9 | International Corporation |
+| 10 | Global Empire |
+
+Mỗi lần nâng cấp phải có:
+
+- Upgrade Cost.
+- Construction or Upgrade Duration.
+- Required Capital.
+- Required Reputation.
+- Required Business Performance.
+- New Production Capacity.
+- Additional Employee Requirements.
+- Additional Operating Costs.
+- New Features.
+
+Không nâng cấp bằng cách chỉ nhân doanh thu lên theo level.
+
+Ví dụ:
+
+Quán cà phê Level 1 có:
+
+- 20 chỗ ngồi.
+- 2 nhân viên.
+- Năng lực phục vụ tối đa 80 khách mỗi ngày game.
+
+Khi nâng lên Level 2:
+
+- Tăng số chỗ ngồi.
+- Nâng cấp thiết bị.
+- Tăng năng lực phục vụ.
+- Tăng chi phí nhân viên.
+- Tăng chi phí điện nước.
+- Có thể tăng doanh thu nếu đủ nhu cầu.
+
+Nếu khu vực không có đủ khách hàng, việc nâng cấp vẫn có thể khiến doanh nghiệp thua lỗ.
+
+## 2.5. UPGRADE TREE
+
+Cho phép nâng cấp từng hạng mục riêng biệt:
+
+FACILITIES:
+- Mặt bằng.
+- Nội thất.
+- Thiết bị.
+- Kho hàng.
+- Dây chuyền sản xuất.
+
+OPERATIONS:
+- Năng suất.
+- Chất lượng sản phẩm.
+- Quy trình quản lý.
+- Hiệu quả sử dụng năng lượng.
+
+PERSONNEL:
+- Tuyển thêm nhân viên.
+- Đào tạo nhân viên.
+- Nâng cấp quản lý.
+- Điều chỉnh lương.
+
+MARKETING:
+- Quảng cáo.
+- Nhận diện thương hiệu.
+- Chương trình khách hàng thân thiết.
+- Mở rộng phạm vi tiếp cận khách hàng.
+
+RESEARCH & DEVELOPMENT:
+- Sản phẩm mới.
+- Công nghệ mới.
+- Tối ưu sản xuất.
+- Giảm chi phí nguyên liệu.
+
+Mỗi lựa chọn phải ảnh hưởng đến các thông số kinh doanh thật trong simulation.
+
+Không tạo nút nâng cấp chỉ để trang trí.
+
+## 2.6. EMPLOYEE MANAGEMENT
+
+Doanh nghiệp có thể tuyển dụng nhân viên NPC.
+
+Các loại nhân viên:
+
+- Nhân viên phổ thông.
+- Nhân viên bán hàng.
+- Kỹ thuật viên.
+- Kỹ sư.
+- Nhân viên vận hành.
+- Quản lý.
+- Giám đốc chi nhánh.
+
+Mỗi nhân viên hoặc nhóm nhân viên có:
+
+- Salary.
+- Skill Level.
+- Productivity.
+- Training Cost.
+- Employee Satisfaction.
+- Employment Status.
+
+Tiền lương phải được chi trả từ tài khoản doanh nghiệp.
+
+Thiếu nhân viên làm giảm công suất.
+
+Tuyển quá nhiều nhân viên làm tăng chi phí.
+
+Không tự động cho doanh nghiệp đạt công suất tối đa.
+
+## 2.7. REALISTIC BUSINESS ECONOMY
+
+Xây dựng mô hình doanh thu và chi phí.
+
+Doanh thu phụ thuộc vào:
+
+- Nhu cầu thị trường.
+- Giá sản phẩm.
+- Công suất phục vụ.
+- Vị trí.
+- Chất lượng.
+- Danh tiếng.
+- Số lượng đối thủ.
+- Tình trạng kinh tế.
+- Thu nhập của khách hàng NPC.
+
+Công thức cơ bản:
+
+Actual Sales = Minimum of Demand, Available Capacity, Available Inventory.
+
+Revenue = Actual Sales × Selling Price.
+
+Net Profit = Revenue - Cost of Goods - Salaries - Rent - Utilities - Marketing - Maintenance - Interest - Taxes.
+
+Mỗi ngành phải có cơ chế vận hành phù hợp.
+
+Ví dụ:
+
+Nhà hàng phụ thuộc khách hàng, nguyên liệu, nhân viên và mặt bằng.
+
+Công ty logistics phụ thuộc số đơn vận chuyển, phương tiện, nhiên liệu và năng lực giao hàng.
+
+Nhà máy phụ thuộc nguyên liệu, công suất, nhu cầu thị trường và chi phí sản xuất.
+
+Công ty phần mềm phụ thuộc hợp đồng, đội ngũ phát triển và chi phí nhân sự.
+
+Không dùng một công thức lợi nhuận cố định cho tất cả ngành nghề.
+
+## 2.8. NPC CUSTOMER ECONOMY
+
+Tạo nhu cầu tiêu dùng mô phỏng trên server.
+
+NPC Customers hoặc Household Sector phải có:
+
+- Thu nhập.
+- Ngân sách tiêu dùng.
+- Nhu cầu từng nhóm sản phẩm.
+- Khả năng chi trả.
+- Mức độ nhạy cảm với giá.
+
+Doanh thu của công ty phải đến từ:
+
+- Khách hàng NPC có ngân sách.
+- Người chơi khác.
+- Doanh nghiệp khác.
+- Các hợp đồng kinh tế có nguồn tiền hợp lệ.
+
+Không cộng lợi nhuận mỗi giây từ hư không.
+
+Mọi khoản phát hành tiền của hệ thống phải được ghi nhận và có quy tắc rõ ràng.
+
+## 2.9. PLAYER BUSINESS COMPETITION
+
+Nhiều người chơi có thể mở doanh nghiệp cùng ngành trong cùng thành phố.
+
+Ví dụ:
+
+10 người cùng mở quán cà phê tại TP.HCM.
+
+Nhu cầu khách hàng là hữu hạn.
+
+Thị phần được phân bổ dựa trên:
+
+- Giá bán.
+- Vị trí.
+- Chất lượng.
+- Danh tiếng.
+- Công suất.
+- Marketing.
+- Trải nghiệm khách hàng.
+
+Không đảm bảo mỗi doanh nghiệp đều có lợi nhuận.
+
+Cho phép doanh nghiệp cạnh tranh thông qua quyết định kinh doanh, không thông qua hành vi phá hoại trái quy tắc.
+
+## 2.10. BRANCH & FRANCHISE SYSTEM
+
+Cho phép doanh nghiệp mở chi nhánh tại các thành phố khác nhau.
+
+Mỗi chi nhánh có:
+
+- Branch ID.
+- Location.
+- Local Demand.
+- Local Employees.
+- Branch Revenue.
+- Branch Expenses.
+- Branch Profit.
+- Branch Capacity.
+- Branch Reputation.
+
+Tổng doanh thu tập đoàn được tổng hợp từ các chi nhánh hợp lệ.
+
+Cho phép nhượng quyền thương hiệu sau khi doanh nghiệp đạt điều kiện.
+
+Hệ thống nhượng quyền bao gồm:
+
+- Franchise Agreement.
+- Initial Franchise Fee.
+- Royalty Rate.
+- Brand Standards.
+- Franchise Duration.
+- Contract Termination.
+
+Mọi khoản phí phải đi qua Ledger.
+
+## 2.11. BUSINESS FAILURE
+
+Doanh nghiệp có thể:
+
+- Thiếu vốn.
+- Thua lỗ.
+- Thiếu nguyên liệu.
+- Mất khách hàng.
+- Không đủ tiền trả lương.
+- Chậm trả nợ.
+- Tạm ngừng hoạt động.
+- Tái cơ cấu.
+- Phá sản.
+
+Không xóa doanh nghiệp ngay khi thua lỗ.
+
+Cho phép người chơi góp thêm vốn, bán tài sản, giảm chi phí, đóng chi nhánh hoặc tái cơ cấu.
+
+Không tự động tạo tiền để cứu doanh nghiệp.
+
+# 3. RANK & TITLES — CẤP BẬC VÀ DANH HIỆU
+
+Tạo hệ thống cấp bậc thể hiện sự phát triển của người chơi.
+
+## 3.1. WEALTH RANK
+
+Các mốc tài sản ròng đề xuất:
+
+| Rank | Net Worth |
+|---|---:|
+| Beginner | Dưới 100.000 CR |
+| Investor | 100.000 CR |
+| Established Investor | 250.000 CR |
+| Professional | 500.000 CR |
+| Millionaire | 1.000.000 CR |
+| Multi-Millionaire | 5.000.000 CR |
+| Business Tycoon | 10.000.000 CR |
+| Financial Magnate | 50.000.000 CR |
+| Elite Magnate | 100.000.000 CR |
+| Billionaire | 1.000.000.000 CR |
+| Global Mogul | 10.000.000.000 CR |
+| Empire Legend | 100.000.000.000 CR |
+
+Tài sản ròng phải trừ toàn bộ nghĩa vụ nợ.
+
+Không dùng doanh thu doanh nghiệp thay cho tài sản ròng.
+
+Không tính trùng cổ phần cá nhân và tài sản doanh nghiệp.
+
+Wealth Rank có thể tăng hoặc giảm tùy theo tài sản hiện tại.
+
+Danh hiệu thành tựu đã đạt có thể được giữ lại như một phần lịch sử sự nghiệp.
+
+## 3.2. CAREER TITLES
+
+Tạo tối thiểu 50 danh hiệu thuộc các nhóm:
+
+BUSINESS:
+- First Entrepreneur.
+- Local Business Owner.
+- Franchise Master.
+- Corporate Founder.
+- Manufacturing King.
+- Technology Pioneer.
+- Retail Mogul.
+- Hospitality Emperor.
+- Global CEO.
+
+INVESTMENT:
+- First Investor.
+- Diversified Investor.
+- Long-Term Investor.
+- Dividend Collector.
+- Portfolio Architect.
+- Risk Management Expert.
+- Market Analyst.
+
+REAL ESTATE:
+- First Property Owner.
+- Saigon Property Investor.
+- Hanoi Property Investor.
+- Coastal Property Owner.
+- Property Magnate.
+- Vietnam Real Estate Tycoon.
+
+FINANCE:
+- Fund Founder.
+- Fund Manager.
+- Debt-Free Investor.
+- Capital Preservation Expert.
+- Corporate Strategist.
+
+LIFESTYLE:
+- First Supercar.
+- Dream Penthouse.
+- Private Jet Owner.
+- Yacht Collector.
+- Luxury Collector.
+
+WORLD:
+- Recession Survivor.
+- Business Recovery Specialist.
+- Long-Term Business Leader.
+- Empire Legend.
+
+Mỗi danh hiệu phải có điều kiện mở khóa rõ ràng.
+
+Không tự động cấp danh hiệu dựa vào số lượt click hoặc số lệnh spam.
+
+## 3.3. BADGE DESIGN
+
+Thiết kế huy hiệu có bản sắc:
+
+- Bronze.
+- Silver.
+- Gold.
+- Platinum.
+- Diamond.
+- Obsidian.
+- Imperial.
+
+Tạo vector SVG hoặc component đồ họa chất lượng cao.
+
+Không dùng emoji đơn giản làm toàn bộ hệ thống cấp bậc.
+
+Danh hiệu có thể xuất hiện:
+
+- Profile.
+- World Chat.
+- Leaderboard.
+- Company Page.
+- Fund Page.
+
+Phần thưởng ưu tiên avatar frame, profile theme, title và vật phẩm trang trí.
+
+Không cấp lợi thế tài chính quá lớn chỉ vì đạt rank cao.
+
+# 4. CORPORATE EMPIRE — THÀNH LẬP VÀ THÂU TÓM CÔNG TY
+
+Xây dựng một hệ thống tập đoàn nhiều người chơi có cấu trúc sở hữu rõ ràng.
+
+## 4.1. COMPANY OWNERSHIP
+
+Một công ty có thể có:
+
+- Founder.
+- CEO.
+- Board of Directors.
+- Shareholders.
+- Total Issued Shares.
+- Treasury Shares.
+- Voting Rights.
+- Company Equity.
+- Company Assets.
+- Company Liabilities.
+
+Cổ đông có quyền sở hữu tỷ lệ tương ứng số cổ phần đang nắm giữ.
+
+Tổng tỷ lệ quyền sở hữu phải nhất quán với tổng số cổ phần đã phát hành.
+
+Không cho tổng tỷ lệ sở hữu vượt 100%.
+
+## 4.2. CAPITAL RAISING
+
+Cho phép công ty gọi vốn từ người chơi khác.
+
+Ví dụ:
+
+Công ty A có định giá trước gọi vốn 800.000 CR.
+
+Nhà đầu tư B góp 200.000 CR.
+
+Định giá sau gọi vốn là 1.000.000 CR theo điều khoản minh họa.
+
+B nhận 20% quyền sở hữu nếu thương vụ phát hành cổ phần sử dụng tỷ lệ này.
+
+Hệ thống phải tính:
+
+- Pre-Money Valuation.
+- Investment Amount.
+- Post-Money Valuation.
+- Shares Issued.
+- Ownership Dilution.
+- Voting Rights.
+
+Phải có xác nhận của các bên.
+
+Vốn được chuyển vào tài khoản công ty, không mặc định chuyển vào ví cá nhân Founder.
+
+## 4.3. PRIVATE SHARE MARKET
+
+Tạo thị trường cổ phần công ty chưa niêm yết.
+
+Người chơi có thể:
+
+- Chào bán cổ phần.
+- Mua cổ phần công ty.
+- Đề nghị giá mua.
+- Chấp nhận hoặc từ chối đề nghị.
+- Xem hồ sơ doanh nghiệp.
+- Xem báo cáo tài chính được công khai.
+
+Phải phân biệt:
+
+Primary Offering: phát hành cổ phần mới.
+
+Secondary Sale: chuyển nhượng cổ phần hiện hữu.
+
+Hai nghiệp vụ có dòng tiền và tác động pha loãng khác nhau.
+
+## 4.4. IPO SYSTEM
+
+Cho phép doanh nghiệp đủ điều kiện đưa cổ phiếu lên sàn chứng khoán Trading Empire.
+
+Điều kiện đề xuất:
+
+- Đạt Business Level tối thiểu.
+- Có báo cáo tài chính trong một số kỳ game.
+- Không đang trong tình trạng mất khả năng thanh toán.
+- Có lịch sử hoạt động hợp lệ.
+- Đáp ứng yêu cầu vốn và minh bạch.
+
+Quy trình:
+
+1. Nộp hồ sơ IPO.
+2. Kiểm tra điều kiện.
+3. Xác định số cổ phần.
+4. Xác định giá phát hành.
+5. Mở đăng ký mua.
+6. Phân bổ cổ phần.
+7. Chuyển tiền về công ty.
+8. Đăng ký mã chứng khoán duy nhất.
+9. Đưa cổ phiếu vào Matching Engine hiện tại.
+
+Không tự tạo sàn giao dịch thứ hai độc lập với hệ thống hiện có.
+
+Không được phát hành cổ phiếu vô hạn.
+
+## 4.5. MERGERS & ACQUISITIONS
+
+Tạo Corporate Deal Room.
+
+Người chơi có thể đề nghị mua:
+
+- 10% cổ phần.
+- 25% cổ phần.
+- 51% cổ phần.
+- 75% cổ phần.
+- 100% cổ phần.
+
+Các loại thương vụ:
+
+- Minority Investment.
+- Strategic Investment.
+- Controlling Stake.
+- Full Acquisition.
+- Company Merger.
+
+Quy trình:
+
+1. Người mua chọn công ty mục tiêu.
+2. Xem thông tin tài chính công khai.
+3. Gửi Acquisition Offer.
+4. Xác định số cổ phần và giá.
+5. Người bán hoặc cơ quan quản trị có thẩm quyền xem xét.
+6. Kiểm tra điều kiện chấp thuận.
+7. Kiểm tra nguồn vốn.
+8. Phong tỏa tiền nếu cần.
+9. Thực hiện settlement.
+10. Cập nhật quyền sở hữu.
+11. Cập nhật quyền biểu quyết.
+12. Công bố thông tin trong game.
+
+Không cho phép mua cổ phần không có người bán.
+
+Không cho phép thâu tóm công ty chỉ bằng một nút click nếu chưa đáp ứng điều kiện.
+
+Sở hữu trên 50% quyền biểu quyết có thể mang lại quyền kiểm soát theo điều lệ công ty trong game, nhưng không có nghĩa tự động sở hữu toàn bộ tài sản công ty.
+
+## 4.6. HOLDING COMPANY
+
+Cho phép người chơi thành lập tập đoàn mẹ.
+
+Tập đoàn có thể sở hữu nhiều công ty con thuộc các lĩnh vực:
+
+- Công nghệ.
+- Bất động sản.
+- Sản xuất.
+- Logistics.
+- Du lịch.
+- Bán lẻ.
+
+Tạo Corporate Ownership Tree.
+
+Hiển thị sơ đồ:
+
+Player → Holding Company → Subsidiaries → Business Branches.
+
+Mỗi công ty vẫn có tài khoản riêng.
+
+Cấm vòng lặp sở hữu làm sai định giá hoặc quyền kiểm soát.
+
+Báo cáo tài chính hợp nhất phải loại bỏ các giao dịch nội bộ cần loại trừ.
+
+## 4.7. CORPORATE GOVERNANCE
+
+Tạo hệ thống biểu quyết cho các quyết định quan trọng:
+
+- Bổ nhiệm CEO.
+- Phát hành thêm cổ phần.
+- Trả cổ tức.
+- Bán tài sản lớn.
+- Sáp nhập.
+- Thâu tóm công ty.
+- Giải thể.
+
+Quyền biểu quyết dựa trên cổ phần có quyền biểu quyết.
+
+Không cho CEO tự ý chiếm tài sản của cổ đông.
+
+Mọi quyết định quan trọng phải có audit log.
+
+# 5. BILLIONAIRE LIFESTYLE — CUỘC SỐNG TỶ PHÚ
+
+Tạo một khu vực có tên EMPIRE LUXURY CLUB.
+
+Đây là hệ thống giúp người chơi tận hưởng những thành quả kinh doanh thông qua việc sở hữu và trưng bày vật phẩm.
+
+## 5.1. SUPERCAR SHOWROOM
+
+Tạo showroom xe cao cấp.
+
+Các dòng xe có thể lấy cảm hứng từ:
+
+- Porsche 911.
+- Ferrari SF90.
+- Lamborghini Revuelto.
+- McLaren 750S.
+- Bugatti Chiron.
+- Rolls-Royce Phantom.
+- Bentley Continental GT.
+- Mercedes-AMG GT.
+
+Nếu sử dụng tên và hình ảnh thương hiệu thật, phải đánh giá quyền sử dụng phù hợp. Nếu không, tạo các mẫu xe giả tưởng có thiết kế riêng.
+
+Mỗi xe có:
+
+- Vehicle ID.
+- Model Name.
+- Category.
+- Rarity.
+- Purchase Price CR.
+- Maintenance Cost.
+- Resale Value.
+- Ownership History.
+- Vehicle Gallery.
+
+Cho phép:
+
+- Mua xe.
+- Bán xe.
+- Đổi màu.
+- Tùy chỉnh ngoại thất trong phạm vi hỗ trợ.
+- Đưa xe vào garage.
+- Trưng bày xe trên hồ sơ.
+
+Không cần xây dựng hệ thống lái xe 3D trong phiên bản đầu tiên.
+
+## 5.2. PRIVATE JETS
+
+Tạo thị trường máy bay riêng mô phỏng.
+
+Các phân khúc:
+
+- Light Jet.
+- Midsize Business Jet.
+- Long-Range Private Jet.
+- VIP Airliner.
+
+Mỗi tài sản có:
+
+- Giá mua.
+- Chi phí bảo trì.
+- Sức chứa mô phỏng.
+- Chi phí vận hành.
+- Giá trị bán lại.
+
+Cho phép người chơi tạo bộ sưu tập máy bay riêng.
+
+## 5.3. YACHT MARKET
+
+Các phân khúc:
+
+- Luxury Motor Yacht.
+- Superyacht.
+- Megayacht.
+- Expedition Yacht.
+
+Có showroom hình ảnh chất lượng cao.
+
+Mỗi du thuyền có chi phí sở hữu và bảo trì phù hợp với gameplay.
+
+## 5.4. LUXURY REAL ESTATE
+
+Tích hợp trực tiếp với bất động sản Việt Nam hiện tại.
+
+Cho phép sở hữu tài sản ảo lấy cảm hứng từ:
+
+- Penthouse Landmark 81.
+- Căn hộ cao cấp tại Thủ Thiêm.
+- Biệt thự khu đô thị Sala.
+- Penthouse tại Hà Nội.
+- Biệt thự nghỉ dưỡng Đà Nẵng.
+- Resort ven biển Phú Quốc.
+- Biệt thự tại Đà Lạt.
+
+Không mô tả quyền sở hữu trong game là quyền sở hữu bất động sản thật.
+
+Không bịa đặt giá hoặc thông tin chào bán ngoài đời.
+
+## 5.5. COLLECTIBLES
+
+Tạo danh mục vật phẩm sưu tập:
+
+- Đồng hồ cao cấp.
+- Tranh nghệ thuật.
+- Xe cổ.
+- Vật phẩm lịch sử giả tưởng.
+- Cúp thành tựu.
+- Vật phẩm trang trí văn phòng.
+
+Vật phẩm phải có giá niêm yết minh bạch.
+
+Không có loot box, vòng quay may mắn hoặc vật phẩm ngẫu nhiên trả phí.
+
+## 5.6. PERSONAL GARAGE & MANSION
+
+Tạo trang bộ sưu tập cá nhân.
+
+Các khu vực:
+
+- Personal Garage.
+- Private Hangar.
+- Yacht Collection.
+- Luxury Residence.
+- Art Gallery.
+- Trophy Room.
+
+Thiết kế giao diện có tính điện ảnh.
+
+Sử dụng:
+
+- Ảnh lớn.
+- Ánh sáng tinh tế.
+- Background chất lượng cao.
+- Hiệu ứng chuyển cảnh nhẹ.
+- Gallery tương tác.
+
+Không làm chậm toàn bộ website vì các hình ảnh kích thước lớn.
+
+Lazy load ảnh và sử dụng định dạng tối ưu.
+
+Nếu chưa có ảnh hợp lệ, sử dụng hình minh họa có nhãn rõ ràng.
+
+## 5.7. SECOND-HAND MARKETPLACE
+
+Cho phép người chơi bán lại tài sản lifestyle cho nhau.
+
+Server phải kiểm tra:
+
+- Ownership.
+- Listing Status.
+- Buyer Balance.
+- Asset Lock.
+- Transaction Fees.
+
+Không cho bán cùng vật phẩm cho hai người.
+
+Tạo cơ chế khấu hao có thể cấu hình.
+
+Không bảo đảm mọi vật phẩm xa xỉ tăng giá.
+
+# 6. INVESTMENT FUNDS — THÀNH LẬP QUỸ ĐẦU TƯ
+
+Tạo hệ thống quỹ đầu tư multiplayer.
+
+Cho phép nhiều người chơi góp CR để xây dựng danh mục đầu tư chung.
+
+## 6.1. FUND TYPES
+
+Hỗ trợ:
+
+- Stock Fund.
+- Crypto Spot Fund.
+- Forex Fund.
+- Real Estate Fund.
+- Dividend Fund.
+- Balanced Fund.
+- Money Market Fund.
+- Multi-Asset Fund.
+
+Giai đoạn đầu không cho quỹ sử dụng đòn bẩy hoặc vay chồng nhiều lớp.
+
+Chỉ mở rộng khi risk engine và cơ chế rút vốn được kiểm thử đầy đủ.
+
+## 6.2. FUND CREATION
+
+Người chơi nhập:
+
+- Fund Name.
+- Fund Logo.
+- Fund Description.
+- Fund Type.
+- Investment Objective.
+- Allowed Assets.
+- Risk Limits.
+- Initial Capital.
+- Maximum Management Fee.
+- Redemption Rules.
+- Public or Private Status.
+
+Mỗi quỹ có:
+
+- Fund ID.
+- Founder ID.
+- Fund Manager.
+- Member List.
+- Fund Wallet.
+- Fund Holdings.
+- Fund Units.
+- Total Assets.
+- Total Liabilities.
+- Net Asset Value.
+- NAV Per Unit.
+- Historical Performance.
+- Governance Rules.
+
+## 6.3. FUND ACCOUNTING
+
+Công thức:
+
+Fund NAV = Fair Value of Fund Assets - Fund Liabilities.
+
+NAV Per Unit = Fund NAV / Outstanding Fund Units.
+
+Ví dụ:
+
+Quỹ có NAV là 1.000.000 CR.
+
+Có 10.000 chứng chỉ quỹ.
+
+NAV mỗi chứng chỉ là 100 CR.
+
+Người chơi góp 10.000 CR tại NAV 100 CR sẽ nhận 100 chứng chỉ trước các khoản phí hợp lệ.
+
+Không tạo chứng chỉ quỹ không có tài sản bảo chứng theo quy tắc phát hành.
+
+Không tính trùng tài sản quỹ và tài sản cá nhân.
+
+Danh mục cá nhân của thành viên chỉ ghi giá trị chứng chỉ quỹ thuộc quyền sở hữu của họ.
+
+Định giá phải có chính sách xử lý tài sản thiếu thanh khoản và giá tham chiếu bị cũ.
+
+## 6.4. FUND MANAGEMENT
+
+Fund Manager có thể:
+
+- Đặt lệnh mua bán trong phạm vi tài sản cho phép.
+- Quản lý danh mục.
+- Cân bằng tỷ trọng.
+- Gửi báo cáo cho thành viên.
+- Đề xuất thay đổi chiến lược.
+
+Fund Manager không được:
+
+- Chuyển tài sản quỹ về ví cá nhân.
+- Tự tăng phí ngoài điều khoản.
+- Vay tiền trái quy định.
+- Che giấu giao dịch.
+- Tự giao dịch với quỹ nhằm rút tài sản.
+
+Mọi giao dịch của quỹ phải có audit log.
+
+## 6.5. FUND WITHDRAWAL
+
+Người chơi có thể yêu cầu rút vốn theo chính sách quỹ.
+
+Phải có:
+
+- Redemption Request.
+- NAV Calculation Time.
+- Available Liquidity.
+- Settlement Status.
+- Redemption Fee nếu có.
+- Units Burned.
+
+Không trả tiền vượt lượng tiền mặt khả dụng.
+
+Nếu quỹ thiếu thanh khoản, xử lý theo hàng đợi và quy tắc đã công bố.
+
+Không phát hành CR để thanh toán rút vốn.
+
+## 6.6. FUND GOVERNANCE
+
+Các thành viên có thể biểu quyết:
+
+- Thay đổi Fund Manager.
+- Thay đổi chiến lược.
+- Thay đổi giới hạn rủi ro.
+- Điều chỉnh phí.
+- Giải thể quỹ.
+
+Công khai quyền biểu quyết.
+
+Chống thao túng bằng tài khoản giả.
+
+## 6.7. FUND MARKETPLACE UI
+
+Tạo trang khám phá quỹ đầu tư.
+
+Hiển thị:
+
+- Fund Name.
+- Fund Type.
+- Manager.
+- NAV.
+- Assets Under Management.
+- Number of Members.
+- Historical Return.
+- Maximum Drawdown.
+- Asset Allocation.
+- Management Fee.
+- Liquidity Rules.
+
+Không quảng cáo lợi nhuận được bảo đảm.
+
+Tạo bộ lọc và biểu đồ so sánh hiệu suất.
+
+Quỹ công khai phải hiển thị cả giai đoạn thua lỗ.
+
+# 7. WORLD ECONOMIC EVENTS — NỀN KINH TẾ SỐNG
+
+Nâng cấp Economy Engine hiện có.
+
+Mục tiêu là khiến mọi doanh nghiệp, thị trường tài chính, ngân hàng, bất động sản và quỹ đầu tư cùng chịu ảnh hưởng từ một nền kinh tế thống nhất.
+
+## 7.1. ECONOMIC INDICATORS
+
+Tạo các chỉ số:
+
+- GDP Growth.
+- Inflation.
+- Interest Rate.
+- Unemployment.
+- Consumer Confidence.
+- Household Spending.
+- Business Investment.
+- Credit Growth.
+- Banking Liquidity.
+- Property Demand.
+- Energy Prices.
+- Manufacturing Costs.
+
+Mỗi chỉ số được cập nhật từ mô hình kinh tế hoặc dữ liệu hoạt động trong game.
+
+Không tạo số liệu ngẫu nhiên chỉ để hiển thị.
+
+## 7.2. ECONOMIC CYCLE
+
+Các giai đoạn:
+
+1. Recovery.
+2. Expansion.
+3. Boom.
+4. Slowdown.
+5. Recession.
+6. Crisis.
+
+Mỗi giai đoạn có tác động khác nhau đến:
+
+- Thu nhập NPC.
+- Nhu cầu tiêu dùng.
+- Doanh thu doanh nghiệp.
+- Chi phí nguyên liệu.
+- Nợ xấu.
+- Khả năng vay vốn.
+- Nhu cầu thuê bất động sản.
+- Hoạt động đặt lệnh của các bot hiện có.
+
+Không đảm bảo mọi ngành cùng tăng hoặc giảm.
+
+## 7.3. WORLD EVENTS LIBRARY
+
+Tạo tối thiểu 40 mẫu sự kiện kinh tế mô phỏng.
+
+MONETARY POLICY:
+- Ngân hàng trung ương tăng lãi suất.
+- Ngân hàng trung ương giảm lãi suất.
+- Thắt chặt tín dụng.
+- Nới lỏng thanh khoản.
+
+BUSINESS:
+- Nhu cầu tiêu dùng tăng.
+- Chi phí nguyên liệu tăng.
+- Thiếu hụt lao động.
+- Ngành công nghệ tăng trưởng.
+- Ngành bán lẻ suy giảm.
+- Chi phí vận chuyển tăng.
+- Doanh nghiệp lớn phá sản.
+
+REAL ESTATE:
+- Nhu cầu thuê nhà tăng.
+- Nguồn cung văn phòng dư thừa.
+- Thị trường bất động sản chậm lại.
+- Hạ tầng giao thông mô phỏng được mở rộng.
+- Chi phí xây dựng tăng.
+
+GLOBAL ECONOMY:
+- Khủng hoảng năng lượng.
+- Suy thoái kinh tế.
+- Phục hồi thương mại.
+- Đứt gãy chuỗi cung ứng.
+- Biến động tỷ giá.
+- Khủng hoảng thanh khoản.
+
+TOURISM:
+- Mùa du lịch cao điểm.
+- Nhu cầu khách sạn tăng.
+- Nhu cầu hàng không giảm.
+- Chi phí dịch vụ tăng.
+
+Tất cả sự kiện là giả tưởng trong game.
+
+Không tạo tin tức sai lệch về các doanh nghiệp hoặc địa điểm thật tại Việt Nam.
+
+## 7.4. EVENT IMPACT ENGINE
+
+Mỗi sự kiện có:
+
+- Event ID.
+- Title.
+- Description.
+- Economic Category.
+- Affected Industries.
+- Affected Cities.
+- Start Time.
+- Duration.
+- Severity.
+- Economic Variable Changes.
+- Recovery Conditions.
+- Public Announcement.
+- Historical Outcome.
+
+Ví dụ:
+
+SỰ KIỆN: Lãi suất tăng.
+
+Tác động có thể bao gồm:
+
+- Chi phí vay vốn mới tăng.
+- Nhu cầu vay giảm.
+- Một số doanh nghiệp trì hoãn mở rộng.
+- Nhu cầu bất động sản giảm.
+- Một số nhà đầu tư thay đổi danh mục.
+- Các trading bots điều chỉnh hành vi.
+
+Không trực tiếp giảm giá cổ phiếu 20% chỉ vì sự kiện xuất hiện.
+
+Giá thị trường phải hình thành thông qua lệnh mua bán được khớp.
+
+## 7.5. ECONOMIC CHAIN REACTION
+
+Mô phỏng phản ứng dây chuyền giữa các ngành.
+
+Ví dụ:
+
+Giá nhiên liệu tăng.
+
+→ Chi phí vận tải tăng.
+
+→ Chi phí nhập hàng của cửa hàng tăng.
+
+→ Biên lợi nhuận của siêu thị có thể giảm.
+
+→ Một số doanh nghiệp điều chỉnh giá bán.
+
+→ Nhu cầu tiêu dùng có thể suy yếu.
+
+→ Doanh thu doanh nghiệp thay đổi.
+
+→ Nhà đầu tư đánh giá lại cổ phiếu.
+
+Mọi tác động phải có giới hạn, thời gian và quy tắc rõ ràng.
+
+Không để vòng lặp kinh tế mất kiểm soát làm xuất hiện giá trị vô hạn hoặc âm trái quy tắc.
+
+## 7.6. ECONOMIC CALENDAR
+
+Tạo lịch kinh tế trong game.
+
+Các sự kiện định kỳ:
+
+- Báo cáo tài chính doanh nghiệp.
+- Quyết định lãi suất.
+- Công bố chỉ số lạm phát.
+- Kỳ trả cổ tức.
+- Kỳ trả nợ.
+- Kỳ thanh toán tiền lương.
+- Báo cáo GDP mô phỏng.
+
+Sử dụng đồng hồ server hiện tại.
+
+Phân biệt thời gian thật và thời gian game.
+
+Không cho người chơi thông thường xem trước sự kiện bí mật chưa được công bố.
+
+## 7.7. NEWS CENTER
+
+Tạo bản tin kinh tế theo template.
+
+Không sử dụng AI API.
+
+Tin tức được tạo từ dữ liệu thực tế của simulation.
+
+Ví dụ:
+
+Công ty X công bố lợi nhuận quý tăng 12% so với quý trước.
+
+Ngành vận tải ghi nhận chi phí nhiên liệu tăng.
+
+Thị trường bất động sản TP.HCM trong game xuất hiện nhu cầu thuê suy yếu.
+
+Tạo liên kết từ tin tức đến:
+
+- Cổ phiếu liên quan.
+- Doanh nghiệp liên quan.
+- Biểu đồ giá.
+- Bất động sản liên quan.
+- Chỉ số kinh tế.
+
+Mọi tin tức phải được ghi nhãn SIMULATED NEWS.
+
+# 8. CAREER MODE — CHẾ ĐỘ SỰ NGHIỆP
+
+Tạo hệ thống phát triển sự nghiệp dài hạn.
+
+Người chơi không bắt buộc chỉ đi theo một con đường.
+
+Có thể thay đổi hoặc kết hợp nhiều sự nghiệp.
+
+## 8.1. CAREER PATHS
+
+### THE ENTREPRENEUR
+
+Con đường doanh nhân.
+
+Các cột mốc:
+
+1. Thành lập doanh nghiệp đầu tiên.
+2. Vận hành có lợi nhuận.
+3. Nâng cấp doanh nghiệp.
+4. Mở chi nhánh.
+5. Sở hữu chuỗi cửa hàng.
+6. Thành lập tập đoàn.
+7. Gọi vốn.
+8. IPO.
+9. Điều hành nhiều công ty.
+10. Trở thành Business Empire.
+
+### THE INVESTOR
+
+Con đường nhà đầu tư.
+
+Các cột mốc:
+
+1. Mua cổ phiếu đầu tiên.
+2. Xây dựng danh mục đa dạng.
+3. Nhận cổ tức.
+4. Hiểu và quản lý rủi ro.
+5. Bảo toàn vốn qua giai đoạn biến động.
+6. Phát triển danh mục dài hạn.
+7. Đạt danh hiệu nhà đầu tư chuyên nghiệp.
+
+Không thưởng riêng cho sử dụng đòn bẩy cao hoặc giao dịch liên tục.
+
+### THE PROPERTY MOGUL
+
+Con đường bất động sản.
+
+Các cột mốc:
+
+1. Mua bất động sản đầu tiên.
+2. Cho thuê tài sản.
+3. Sở hữu nhiều căn hộ.
+4. Sở hữu tài sản tại nhiều thành phố.
+5. Phát triển danh mục bất động sản thương mại.
+6. Thành lập công ty bất động sản.
+
+### THE FUND MANAGER
+
+Con đường quản lý quỹ.
+
+Các cột mốc:
+
+1. Thành lập quỹ.
+2. Có thành viên đầu tiên.
+3. Xây dựng danh mục quỹ.
+4. Công bố báo cáo.
+5. Quản lý thanh khoản hợp lệ.
+6. Đáp ứng giới hạn rủi ro.
+7. Phát triển quỹ đầu tư chuyên nghiệp.
+
+### THE CORPORATE STRATEGIST
+
+Con đường quản trị tập đoàn.
+
+Các cột mốc:
+
+1. Mua cổ phần công ty.
+2. Tham gia biểu quyết.
+3. Đầu tư chiến lược.
+4. Kiểm soát doanh nghiệp theo quy định.
+5. Hoàn thành thương vụ thâu tóm.
+6. Xây dựng Holding Company.
+7. Phát triển tập đoàn đa ngành.
+
+### THE LUXURY COLLECTOR
+
+Con đường sưu tập tài sản.
+
+Các cột mốc:
+
+1. Mua xe đầu tiên.
+2. Sở hữu garage.
+3. Sở hữu bất động sản cao cấp.
+4. Sở hữu bộ sưu tập xe.
+5. Sở hữu du thuyền hoặc máy bay riêng.
+6. Hoàn thiện hồ sơ Luxury Collector.
+
+## 8.2. MISSION ENGINE
+
+Tạo nhiệm vụ theo tiến trình.
+
+Mỗi nhiệm vụ có:
+
+- Mission ID.
+- Career Path.
+- Description.
+- Prerequisites.
+- Target Metric.
+- Current Progress.
+- Completion Status.
+- Reward.
+- Completion Timestamp.
+
+Tiến độ được xác nhận bởi server.
+
+Không cho client tự gửi nhiệm vụ đã hoàn thành.
+
+Mỗi phần thưởng chỉ được cấp một lần.
+
+Không tạo phần thưởng CR quá lớn làm mất cân bằng nền kinh tế.
+
+Ưu tiên:
+
+- Danh hiệu.
+- Huy hiệu.
+- Avatar.
+- Profile Theme.
+- Vật phẩm trang trí.
+- Mở khóa tính năng phù hợp.
+
+## 8.3. SKILL TREE
+
+Tạo cây kỹ năng sự nghiệp.
+
+Các nhánh:
+
+BUSINESS MANAGEMENT:
+- Operations.
+- Personnel.
+- Marketing.
+- Expansion.
+- Financial Management.
+
+INVESTMENT KNOWLEDGE:
+- Portfolio Management.
+- Financial Reports.
+- Asset Allocation.
+- Risk Awareness.
+
+CORPORATE LEADERSHIP:
+- Governance.
+- Capital Raising.
+- Company Management.
+- Strategic Investment.
+
+PROPERTY MANAGEMENT:
+- Rental Management.
+- Maintenance.
+- Property Analysis.
+
+Các kỹ năng không được tự động giúp người chơi thắng thị trường hoặc nhận thông tin tương lai.
+
+Ưu tiên mở khóa công cụ quản lý, kiến thức và tính năng hơn là cộng lợi nhuận vô điều kiện.
+
+## 8.4. PLAYER JOURNEY
+
+Tạo trang hành trình của người chơi.
+
+Hiển thị các cột mốc theo thời gian:
+
+- Ngày tham gia.
+- Doanh nghiệp đầu tiên.
+- Cổ tức đầu tiên.
+- Bất động sản đầu tiên.
+- Công ty đầu tiên được thâu tóm.
+- Quỹ đầu tư đầu tiên.
+- Mốc tài sản ròng.
+- Danh hiệu đạt được.
+
+Dữ liệu lấy từ sự kiện đã ghi nhận trên server.
+
+Không tạo thành tựu giả.
+
+## 8.5. GAMEPLAY RETENTION
+
+Tạo mục tiêu phát triển dài hạn và những thử thách tự chọn.
+
+Không sử dụng:
+
+- Chuỗi đăng nhập bị mất khi nghỉ chơi.
+- Thông báo gây áp lực liên tục.
+- Phần thưởng ngẫu nhiên kích thích cá cược.
+- Hình phạt chỉ vì người chơi không đăng nhập thường xuyên.
+
+Người chơi có thể nghỉ game mà không bị ép mất tiến độ sự nghiệp.
+
+Các nghĩa vụ kinh tế của doanh nghiệp vẫn tuân theo thời gian game, nhưng cần có chính sách xử lý tài khoản không hoạt động hợp lý và minh bạch.
+
+# 9. NEW UI/UX — EMPIRE MANAGEMENT EXPERIENCE
+
+Giữ nguyên Design System premium hiện tại.
+
+Tạo các trang:
+
+1. Empire Hub.
+2. Business Marketplace.
+3. Business Management.
+4. Business Upgrade Center.
+5. Branch Management.
+6. Corporate Exchange.
+7. Mergers & Acquisitions.
+8. Shareholder Management.
+9. Holding Company Dashboard.
+10. Luxury Marketplace.
+11. Personal Garage.
+12. Private Hangar.
+13. Investment Fund Marketplace.
+14. Fund Management.
+15. World Economic Center.
+16. Career & Achievements.
+17. Player Profile.
+
+Không thêm tất cả 17 trang trực tiếp vào sidebar.
+
+Sử dụng navigation theo nhóm:
+
+MARKETS:
+Stocks, Crypto, Forex, Futures.
+
+MY EMPIRE:
+Businesses, Companies, Properties, Funds, Banking.
+
+LIFESTYLE:
+Marketplace, Collection.
+
+WORLD:
+Economy, News, Rankings.
+
+CAREER:
+Career Paths, Achievements, Profile.
+
+# 10. FLAGSHIP BUSINESS DASHBOARD
+
+Thiết kế màn hình quản lý doanh nghiệp cao cấp.
+
+Hiển thị:
+
+- Tên và logo doanh nghiệp.
+- Cấp độ.
+- Tiền mặt công ty.
+- Doanh thu.
+- Lợi nhuận.
+- Chi phí.
+- Nhân viên.
+- Số chi nhánh.
+- Thị phần.
+- Tình trạng kinh doanh.
+
+Tạo biểu đồ:
+
+- Revenue Over Time.
+- Profit Over Time.
+- Expense Breakdown.
+- Customer Demand.
+- Capacity Utilization.
+- Business Growth.
+
+Tab:
+
+Overview.
+
+Operations.
+
+Employees.
+
+Upgrade.
+
+Branches.
+
+Financial Reports.
+
+Ownership.
+
+Settings.
+
+Mỗi nút nâng cấp phải cho người chơi xem:
+
+- Chi phí.
+- Thời gian.
+- Tác động dự kiến.
+- Chi phí vận hành bổ sung.
+- Điều kiện nâng cấp.
+- Trạng thái xác nhận từ server.
+
+# 11. VISUAL DIRECTION
+
+Tạo trải nghiệm cao cấp, khác biệt với dashboard AI thông thường.
+
+BUSINESS MARKET:
+
+Sử dụng hình ảnh đẹp về nhà hàng, văn phòng, nhà máy, cửa hàng và khách sạn.
+
+CORPORATE MANAGEMENT:
+
+Thiết kế theo phong cách phần mềm quản trị tập đoàn chuyên nghiệp.
+
+LUXURY MARKETPLACE:
+
+Thiết kế theo phong cách showroom sang trọng với hình ảnh điện ảnh, nền tối và ánh sáng tinh tế.
+
+CAREER:
+
+Thiết kế cây tiến trình, huy hiệu, timeline và hồ sơ thành tựu.
+
+WORLD ECONOMY:
+
+Thiết kế theo phong cách trung tâm thông tin tài chính, có biểu đồ vĩ mô, bản tin và lịch kinh tế.
+
+INVESTMENT FUNDS:
+
+Thiết kế tối giản, dễ so sánh hiệu suất, mức độ rủi ro, thành viên và danh mục.
+
+Yêu cầu:
+
+- Dark fintech premium.
+- Typography rõ ràng.
+- Ít nút thừa.
+- Không lạm dụng gradient.
+- Không làm tất cả nội dung thành card nhỏ.
+- Responsive PC và điện thoại.
+- Animation nhẹ.
+- Loading states.
+- Empty states.
+- Error states.
+- Accessibility.
+
+Không dùng ảnh mockup làm giao diện tĩnh.
+
+Tạo các component thực tế.
+
+# 12. MULTIPLAYER ARCHITECTURE
+
+Tất cả người chơi trong một World phải chia sẻ:
+
+- Nhu cầu kinh tế.
+- Thị trường doanh nghiệp.
+- Thị trường cổ phần.
+- Thị trường vật phẩm.
+- Quỹ đầu tư.
+- Các sự kiện kinh tế.
+- Giá tài sản.
+- Bảng xếp hạng.
+
+Tất cả giao dịch và quyền sở hữu do server xác nhận.
+
+Tạo các event contracts phù hợp:
+
+- business.created
+- business.upgraded
+- business.revenue.updated
+- business.branch.opened
+- company.shares.transferred
+- company.acquisition.completed
+- company.dividend.paid
+- fund.created
+- fund.subscription.completed
+- fund.redemption.completed
+- luxury.asset.purchased
+- luxury.asset.sold
+- economy.event.started
+- economy.event.ended
+- career.mission.completed
+- achievement.unlocked
+- player.rank.changed
+
+Các event phải có ID, sequence, World ID và server timestamp.
+
+Không để client quyết định lợi nhuận, cấp độ, quyền sở hữu hoặc kết quả nhiệm vụ.
+
+Nếu database production chưa được tích hợp, tái sử dụng repository interfaces và authoritative server thử nghiệm.
+
+Không tuyên bố dữ liệu đã được lưu trữ lâu dài nếu hệ thống vẫn dùng in-memory state.
+
+# 13. FINANCIAL INTEGRITY
+
+Tất cả giao dịch phải tích hợp Wallet và Ledger hiện tại.
+
+Các nghiệp vụ cần transaction nhất quán:
+
+- Thành lập doanh nghiệp.
+- Nâng cấp doanh nghiệp.
+- Trả lương.
+- Mua nguyên liệu.
+- Thu doanh thu.
+- Gọi vốn.
+- Phát hành cổ phần.
+- Chuyển nhượng cổ phần.
+- Chia cổ tức.
+- Thâu tóm công ty.
+- Góp vốn quỹ.
+- Rút vốn quỹ.
+- Mua bán vật phẩm.
+- Trả chi phí bảo trì.
+
+Không được:
+
+- Nhân đôi CR.
+- Nhân đôi cổ phiếu.
+- Tạo quyền sở hữu trùng.
+- Chi tiền vượt số dư khả dụng.
+- Tính trùng tài sản.
+- Tạo doanh thu không có nguồn chi trả.
+- Tự cấp lợi nhuận khi người chơi reload.
+- Cấp lại phần thưởng nhiệm vụ đã hoàn thành.
+
+Mọi nghiệp vụ thay đổi tài sản phải hỗ trợ idempotency và kiểm tra concurrency.
+
+# 14. ECONOMY BALANCING
+
+Mục tiêu là nền kinh tế có nhiều con đường phát triển.
+
+Không để Futures hoặc một loại doanh nghiệp trở thành cách kiếm CR vượt trội vô hạn.
+
+Tạo bảng cấu hình cân bằng tập trung:
+
+- Startup Costs.
+- Upgrade Costs.
+- Operating Costs.
+- Salaries.
+- Taxes.
+- Market Demand.
+- Rental Costs.
+- Loan Rates.
+- Asset Maintenance.
+- Business Capacity.
+- Economic Event Frequency.
+- Progression Requirements.
+
+Sử dụng đồng hồ game thống nhất.
+
+Không tạo nhiều timer riêng biệt trên frontend để tính doanh thu.
+
+Có thể chạy economy tick theo lịch server được cấu hình.
+
+Mỗi tick phải có ID và được xử lý tối đa một lần.
+
+Khi mất kết nối hoặc restart, xử lý thời gian bỏ lỡ theo chính sách đã định, không tự cộng thu nhập trùng.
+
+Tạo simulation tests cho nền kinh tế qua 30, 90 và 365 ngày game.
+
+Đo:
+
+- Money Supply.
+- Wealth Distribution.
+- Business Failure Rate.
+- Average Profit Margins.
+- Industry Competition.
+- Fund Liquidity.
+- Property Demand.
+- Inflation.
+- Debt Levels.
+
+Điều chỉnh cấu hình dựa trên kết quả kiểm thử, không âm thầm sửa số dư người chơi.
+
+# 15. AUTOMATED TESTING
+
+Viết unit tests, integration tests và regression tests.
+
+BUSINESS:
+
+- Thành lập công ty.
+- Thiếu vốn.
+- Nâng cấp.
+- Nâng cấp đồng thời.
+- Trả lương.
+- Tính chi phí.
+- Tính doanh thu.
+- Thiếu khách hàng.
+- Công ty thua lỗ.
+- Mở chi nhánh.
+- Phá sản.
+
+CORPORATE:
+
+- Phát hành cổ phần.
+- Tính pha loãng.
+- Chuyển nhượng cổ phần.
+- Gọi vốn.
+- Biểu quyết.
+- Thâu tóm.
+- Mua cổ phần đồng thời.
+- Chia cổ tức.
+- Báo cáo hợp nhất.
+
+FUNDS:
+
+- Góp vốn.
+- Tính NAV.
+- Phát hành Fund Units.
+- Rút vốn.
+- Thiếu thanh khoản.
+- Tính phí.
+- Quyền quản lý.
+- Chặn rút tài sản trái phép.
+
+LIFESTYLE:
+
+- Mua xe.
+- Bán xe.
+- Trùng ownership.
+- Trùng listing.
+- Chi phí bảo trì.
+- Cập nhật Portfolio.
+
+ECONOMY:
+
+- Thay đổi lãi suất.
+- Biến động nhu cầu.
+- Chu kỳ suy thoái.
+- Chi phí nguyên liệu.
+- Phản ứng dây chuyền.
+- Không phát hành tiền tùy tiện.
+
+CAREER:
+
+- Hoàn thành nhiệm vụ.
+- Cấp rank.
+- Mở khóa danh hiệu.
+- Chặn nhận phần thưởng trùng.
+- Tính tài sản ròng chính xác.
+
+MULTIPLAYER:
+
+- Hai người mua cùng tài sản.
+- Hai người góp vốn cùng lúc.
+- Hai người chuyển nhượng cổ phần.
+- Reconnect.
+- Duplicate Events.
+- Không rò rỉ dữ liệu cá nhân.
+
+REGRESSION:
+
+Kiểm tra Stocks, Crypto, Forex, Futures, Wallet, Ledger, Banking và Real Estate hiện tại vẫn hoạt động.
+
+# 16. IMPLEMENTATION ROADMAP
+
+PHASE 1 — BUSINESS FOUNDATION
+
+- Danh mục doanh nghiệp.
+- Thành lập.
+- Tài khoản công ty.
+- Doanh thu và chi phí.
+- NPC Demand.
+- Business Dashboard.
+
+PHASE 2 — BUSINESS EXPANSION
+
+- Upgrade Tree.
+- Employees.
+- Branches.
+- Competition.
+- Marketing.
+- Franchise.
+
+PHASE 3 — CORPORATE EMPIRE
+
+- Share Ownership.
+- Capital Raising.
+- Private Share Market.
+- Governance.
+- Mergers & Acquisitions.
+- Holding Company.
+- IPO sau khi đủ điều kiện.
+
+PHASE 4 — INVESTMENT FUNDS
+
+- Fund Creation.
+- NAV Accounting.
+- Subscriptions.
+- Redemptions.
+- Governance.
+- Marketplace.
+
+PHASE 5 — WORLD ECONOMY
+
+- Economic Indicators.
+- Economic Cycles.
+- Event Engine.
+- Economic Calendar.
+- News Center.
+- Cross-Industry Effects.
+
+PHASE 6 — LIFESTYLE
+
+- Luxury Marketplace.
+- Supercars.
+- Private Jets.
+- Yachts.
+- Personal Collections.
+- Second-Hand Market.
+
+PHASE 7 — CAREER & RANKS
+
+- Career Paths.
+- Achievement Engine.
+- Titles.
+- Rank System.
+- Skill Tree.
+- Player Journey.
+
+PHASE 8 — FINAL INTEGRATION
+
+- Responsive.
+- UI Polish.
+- Realtime Verification.
+- Economy Balancing.
+- Performance.
+- Automated Tests.
+- Documentation.
+
+Không triển khai tất cả phase bằng placeholder.
+
+Nếu thiếu thời gian hoặc tài nguyên, hoàn thiện module đang làm trước khi chuyển module mới.
+
+# 17. FINAL DELIVERABLES
+
+Tạo mã nguồn thực tế.
+
+Tạo tài liệu:
+
+- docs/V4_ARCHITECTURE.md
+- docs/BUSINESS_SIMULATION.md
+- docs/BUSINESS_UPGRADES.md
+- docs/CORPORATE_OWNERSHIP.md
+- docs/MERGERS_ACQUISITIONS.md
+- docs/INVESTMENT_FUNDS.md
+- docs/LIFESTYLE_MARKET.md
+- docs/WORLD_ECONOMY.md
+- docs/CAREER_PROGRESSION.md
+- docs/ECONOMY_BALANCING.md
+- docs/V4_TEST_REPORT.md
+- docs/V4_BACKEND_HANDOFF.md
+
+Chạy:
+
+- TypeScript typecheck.
+- Unit tests.
+- Integration tests.
+- Production build.
+- Visual verification nếu môi trường hỗ trợ.
+
+Báo cáo từng chức năng theo trạng thái:
+
+VERIFIED WORKING.
+
+IMPLEMENTED BUT UNVERIFIED.
+
+DEMO ONLY.
+
+NOT IMPLEMENTED.
+
+FAILED.
+
+Không tự báo hoàn thành nếu chưa thực hiện kiểm thử.
+
+# FINAL VISION
+
+TRADING EMPIRE phải trở thành một thế giới kinh tế nơi người chơi có thể bắt đầu với một cửa hàng nhỏ tại Việt Nam, phát triển thành chuỗi cửa hàng, mở nhà máy, gọi vốn, IPO, thành lập tập đoàn, thâu tóm công ty, quản lý quỹ đầu tư và xây dựng bộ sưu tập tài sản cá nhân.
+
+Mọi sự phát triển phải đến từ quyết định kinh doanh, đầu tư, quản lý rủi ro và tương tác giữa các người chơi.
+
+Không tạo một game clicker chỉ tăng tiền theo thời gian.
+
+Không tích hợp trợ lý AI hoặc API AI bên ngoài.
+
+Hãy xây dựng một game kinh tế multiplayer thực sự có chiều sâu, có khả năng mở rộng và có chất lượng giao diện cao.
+
+BẮT ĐẦU KIỂM TRA REPOSITORY VÀ TRIỂN KHAI MÃ NGUỒN THEO TỪNG GIAI ĐOẠN.

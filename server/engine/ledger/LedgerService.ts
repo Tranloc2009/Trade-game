@@ -17,6 +17,11 @@ export const SYSTEM_ACCOUNTS = {
   FUTURES_MARGIN_POOL: 'SYS_FUTURES_MARGIN_POOL',
   FUTURES_INSURANCE_FUND: 'SYS_FUTURES_INSURANCE_FUND',
   FUTURES_FEE_REVENUE: 'SYS_FUTURES_FEE_REVENUE',
+  NPC_HOUSEHOLD_POOL: 'SYS_NPC_HOUSEHOLD_POOL',
+  TAX_AND_UTILITY_POOL: 'SYS_TAX_AND_UTILITY_POOL',
+  LUXURY_DEALER_RESERVE: 'SYS_LUXURY_DEALER_RESERVE',
+  MA_ESCROW_POOL: 'SYS_MA_ESCROW_POOL',
+  CAPITAL_ESCROW_POOL: 'SYS_CAPITAL_ESCROW_POOL',
 } as const;
 
 export const INITIAL_FUTURES_INSURANCE_RESERVE_MINOR = 5_000_000_00; // Finite 5,000,000 CR Insurance Fund reserve
@@ -177,6 +182,12 @@ export class LedgerService {
     this.systemBalances.set(SYSTEM_ACCOUNTS.FUTURES_MARGIN_POOL, 0);
     this.systemBalances.set(SYSTEM_ACCOUNTS.FUTURES_INSURANCE_FUND, INITIAL_FUTURES_INSURANCE_RESERVE_MINOR);
     this.systemBalances.set(SYSTEM_ACCOUNTS.FUTURES_FEE_REVENUE, 0);
+    // Finite V4 macro economy pools (strictly bounded; wages & taxes recycle back into household pool)
+    this.systemBalances.set(SYSTEM_ACCOUNTS.NPC_HOUSEHOLD_POOL, 500_000_000_00); // 500M CR finite NPC consumer budget
+    this.systemBalances.set(SYSTEM_ACCOUNTS.TAX_AND_UTILITY_POOL, 0);
+    this.systemBalances.set(SYSTEM_ACCOUNTS.LUXURY_DEALER_RESERVE, 100_000_000_00);
+    this.systemBalances.set(SYSTEM_ACCOUNTS.MA_ESCROW_POOL, 0);
+    this.systemBalances.set(SYSTEM_ACCOUNTS.CAPITAL_ESCROW_POOL, 0);
 
     for (const c of ALL_CURRENCIES) {
       this.fxSystemBalances.set(`${c}:${SYSTEM_ACCOUNTS.FX_ISSUANCE_PREFIX}${c}`, 0);
@@ -841,15 +852,28 @@ export class LedgerService {
     }
     const feeRevenueMinor = this.getCurrencyFeeRevenueMinor(currency);
     const issuedMinor = this.getTotalCurrencySupplyMinor(currency);
-    const futuresPoolMinor =
-      currency === 'CR' ? (this.systemBalances.get(SYSTEM_ACCOUNTS.FUTURES_MARGIN_POOL) ?? 0) : 0;
-    const insuranceDeltaMinor =
-      currency === 'CR'
-        ? (this.systemBalances.get(SYSTEM_ACCOUNTS.FUTURES_INSURANCE_FUND) ?? 0) -
-          INITIAL_FUTURES_INSURANCE_RESERVE_MINOR
-        : 0;
-    const discrepancyMinor =
-      totalWalletMinor + feeRevenueMinor + futuresPoolMinor + insuranceDeltaMinor - issuedMinor;
+    let systemDeltaMinor = 0;
+    if (currency === 'CR') {
+      const initialFiniteReservesMinor =
+        500_000_000_00 + // BANK_RESERVE
+        200_000_000_00 + // NPC_TENANT_BUDGET
+        INITIAL_FUTURES_INSURANCE_RESERVE_MINOR + // FUTURES_INSURANCE_FUND
+        500_000_000_00 + // NPC_HOUSEHOLD_POOL
+        100_000_000_00; // LUXURY_DEALER_RESERVE
+      let totalOtherSystemMinor = 0;
+      for (const [acctId, bal] of this.systemBalances.entries()) {
+        if (
+          acctId === SYSTEM_ACCOUNTS.TREASURY_ISSUANCE ||
+          acctId === SYSTEM_ACCOUNTS.FEE_REVENUE ||
+          acctId === SYSTEM_ACCOUNTS.FUTURES_FEE_REVENUE
+        ) {
+          continue;
+        }
+        totalOtherSystemMinor += bal;
+      }
+      systemDeltaMinor = totalOtherSystemMinor - initialFiniteReservesMinor;
+    }
+    const discrepancyMinor = totalWalletMinor + feeRevenueMinor + systemDeltaMinor - issuedMinor;
     return {
       currency,
       totalWalletMinor,
