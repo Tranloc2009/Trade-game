@@ -13,7 +13,6 @@ import { GlossaryDrawer } from './components/beginner/GlossaryTerm';
 import { TutorialOverlay } from './components/beginner/TutorialOverlay';
 import { AppShell } from './components/layout/AppShell';
 import { GuestLoginModal } from './features/auth/GuestLoginModal';
-import { BankingPage } from './features/banking/BankingPage';
 import { CareerJournalModal } from './features/career/components/CareerJournalModal';
 import { CinematicDialogueOverlay } from './features/career/components/CinematicDialogueOverlay';
 import { EndingCinematicModal } from './features/career/components/EndingCinematicModal';
@@ -24,28 +23,19 @@ import { CareerHomePage } from './features/career/pages/CareerHomePage';
 import { CareerSettingsPage } from './features/career/pages/CareerSettingsPage';
 import { CareerWorldExplorePage } from './features/career/pages/CareerWorldExplorePage';
 import { careerSound } from './features/career/soundEngine';
-import { CapitalHubPage } from './features/cofounder/CapitalHubPage';
-import { CompanyHeadquartersPage } from './features/cofounder/CompanyHeadquartersPage';
 import { OverviewPage } from './features/dashboard/OverviewPage';
-import { AssetDiscoveryPage } from './features/discover/AssetDiscoveryPage';
 import { EntertainmentPage } from './features/entertainment/EntertainmentPage';
-import { ExchangePage } from './features/exchange/ExchangePage';
-import { ForexPage } from './features/forex/ForexPage';
-import { FuturesPage } from './features/futures/FuturesPage';
 import { LeaderboardPage } from './features/leaderboard/LeaderboardPage';
 import { EconomyNewsPage } from './features/news/EconomyNewsPage';
-import { PortfolioPage } from './features/portfolio/PortfolioPage';
-import { PropertyPage } from './features/property/PropertyPage';
 import { SettingsPage } from './features/settings/SettingsPage';
 import { SocialPage } from './features/social/SocialPage';
-import { BusinessEmpirePage } from './features/v4/BusinessEmpirePage';
+import { MyAssetsPage } from './features/unified/MyAssetsPage';
+import { MyEmpirePage } from './features/unified/MyEmpirePage';
+import { UnifiedExchangePage } from './features/unified/UnifiedExchangePage';
 import { CareerProfilePage } from './features/v4/CareerProfilePage';
-import { CorporateEmpirePage } from './features/v4/CorporateEmpirePage';
-import { EmpireHubPage } from './features/v4/EmpireHubPage';
-import { InvestmentFundsPage } from './features/v4/InvestmentFundsPage';
-import { LuxuryClubPage } from './features/v4/LuxuryClubPage';
 import { queryClient } from './lib/queryClient';
 import {
+  ApiClientError,
   PracticeService,
   WorldService,
   getAuthToken,
@@ -60,6 +50,9 @@ import { useAppStore, type NavPage } from './store/useAppStore';
 
 const VALID_PAGES = new Set<NavPage>([
   'overview',
+  'unified_exchange',
+  'my_empire',
+  'my_assets',
   'discover',
   'exchange',
   'forex',
@@ -270,6 +263,27 @@ function TradingEmpireWorkspace() {
     };
   }, [playMode, worldMode, applyWorldSnapshot]);
 
+  // Pause Career World immediately when user closes tab, reloads, or backgrounds the page
+  useEffect(() => {
+    if (playMode !== 'CAREER' || !player) return;
+    const pauseOnLeave = () => {
+      CareerStoryService.pauseCareerKeepalive();
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        CareerStoryService.pauseCareerKeepalive();
+      }
+    };
+    window.addEventListener('pagehide', pauseOnLeave);
+    window.addEventListener('beforeunload', pauseOnLeave);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      window.removeEventListener('pagehide', pauseOnLeave);
+      window.removeEventListener('beforeunload', pauseOnLeave);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [playMode, player?.id]);
+
   // Gentle isolated Career World state poll (never reads WORLD-01)
   useEffect(() => {
     if (playMode !== 'CAREER' || !player) return;
@@ -286,15 +300,42 @@ function TradingEmpireWorkspace() {
         setPlayer(payload.profile);
         setCareerStory(payload.careerStory);
         setAccountOverview(payload.account);
-      } catch {
-        // ignore transient network errors
+      } catch (err) {
+        if (err instanceof ApiClientError && err.status === 401) {
+          active = false;
+          setAuthToken(null, 'LIVE');
+          setCareerAuthToken(null);
+          setApiPlayContext('ONLINE', null);
+          setPlayMode('ONLINE');
+          setCareerStory(null);
+          setAccountOverview(null);
+          setActiveCareerSaveId(null);
+          setSession(null, null);
+          setLoginModalOpen(true);
+          pushToast({
+            tone: 'warning',
+            title: 'Phiên đăng nhập đã hết hạn',
+            description: 'Vui lòng đăng nhập lại bằng mật khẩu để tiếp tục Career Mode.',
+          });
+        }
       }
     }, 6_000);
     return () => {
       active = false;
       window.clearInterval(timer);
     };
-  }, [playMode, player?.id, applyWorldSnapshot, setAccountOverview, setCareerStory, setPlayer]);
+  }, [
+    playMode,
+    player?.id,
+    applyWorldSnapshot,
+    pushToast,
+    setAccountOverview,
+    setActiveCareerSaveId,
+    setCareerStory,
+    setPlayMode,
+    setPlayer,
+    setSession,
+  ]);
 
   // Auto-sync Career story missions whenever player executes real gameplay actions in Career World
   useEffect(() => {
@@ -316,6 +357,7 @@ function TradingEmpireWorkspace() {
 
   const handleUnifiedLogin = async (params: {
     username: string;
+    password?: string;
     preset: 'ALICE' | 'BOB' | 'CUSTOM';
     difficulty?: CareerDifficulty;
     preferredInitialMode?: GamePlayMode;
@@ -712,6 +754,11 @@ function TradingEmpireWorkspace() {
 
   const handleLogout = async () => {
     try {
+      await CareerStoryService.logout();
+    } catch {
+      // ignore if already expired
+    }
+    try {
       if (playMode === 'ONLINE') {
         await WorldService.logout();
       }
@@ -763,34 +810,26 @@ function TradingEmpireWorkspace() {
             busy={careerBusy}
           />
         );
+      case 'unified_exchange':
       case 'discover':
-        return <AssetDiscoveryPage />;
       case 'exchange':
-        return <ExchangePage />;
       case 'futures':
-        return <FuturesPage />;
       case 'forex':
-        return <ForexPage />;
-      case 'business':
-        return <BusinessEmpirePage />;
-      case 'corporate':
-        return <CorporateEmpirePage />;
-      case 'capital_hub':
-        return <CapitalHubPage />;
-      case 'company_hq':
-        return <CompanyHeadquartersPage />;
+        return <UnifiedExchangePage />;
+      case 'my_empire':
       case 'empire_hub':
-        return <EmpireHubPage />;
-      case 'portfolio':
-        return <PortfolioPage />;
-      case 'property':
-        return <PropertyPage />;
+      case 'business':
+      case 'corporate':
+      case 'capital_hub':
+      case 'company_hq':
       case 'funds':
-        return <InvestmentFundsPage />;
+        return <MyEmpirePage />;
+      case 'my_assets':
+      case 'portfolio':
+      case 'property':
       case 'banking':
-        return <BankingPage />;
       case 'luxury':
-        return <LuxuryClubPage />;
+        return <MyAssetsPage />;
       default:
         return (
           <CareerHomePage
@@ -808,36 +847,28 @@ function TradingEmpireWorkspace() {
     switch (activePage) {
       case 'overview':
         return <OverviewPage onEnterPracticeMode={() => handleSwitchWorldMode('PRACTICE')} />;
+      case 'unified_exchange':
       case 'discover':
-        return <AssetDiscoveryPage />;
       case 'exchange':
-        return <ExchangePage />;
       case 'futures':
-        return <FuturesPage />;
       case 'forex':
-        return <ForexPage />;
-      case 'portfolio':
-        return <PortfolioPage />;
-      case 'property':
-        return <PropertyPage />;
-      case 'business':
-        return <BusinessEmpirePage />;
+        return <UnifiedExchangePage />;
+      case 'my_empire':
       case 'empire_hub':
-        return <EmpireHubPage />;
-      case 'capital_hub':
-        return <CapitalHubPage />;
-      case 'company_hq':
-        return <CompanyHeadquartersPage />;
+      case 'business':
       case 'corporate':
-        return <CorporateEmpirePage />;
+      case 'capital_hub':
+      case 'company_hq':
       case 'funds':
-        return <InvestmentFundsPage />;
+        return <MyEmpirePage />;
+      case 'my_assets':
+      case 'portfolio':
+      case 'property':
+      case 'banking':
       case 'luxury':
-        return <LuxuryClubPage />;
+        return <MyAssetsPage />;
       case 'career':
         return <CareerProfilePage />;
-      case 'banking':
-        return <BankingPage />;
       case 'social':
         return <SocialPage />;
       case 'leaderboard':

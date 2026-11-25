@@ -62,8 +62,15 @@ export function resetSeenRealtimeEvents(): void {
   seenEventIds.clear();
 }
 
+export type UnifiedExchangeTab = 'discover' | 'spot' | 'futures' | 'forex';
+export type MyEmpireTab = 'hub' | 'business' | 'corporate' | 'cofounder' | 'hq' | 'funds';
+export type MyAssetsTab = 'portfolio' | 'property' | 'banking' | 'luxury';
+
 export type NavPage =
   | 'overview'
+  | 'unified_exchange'
+  | 'my_empire'
+  | 'my_assets'
   | 'discover'
   | 'exchange'
   | 'forex'
@@ -87,6 +94,46 @@ export type NavPage =
   | 'career_home'
   | 'career_world'
   | 'career_settings';
+
+export function resolveLegacyPageRedirect(page: NavPage): {
+  activePage: NavPage;
+  exchangeTab?: UnifiedExchangeTab;
+  empireTab?: MyEmpireTab;
+  assetsTab?: MyAssetsTab;
+} {
+  switch (page) {
+    case 'discover':
+      return { activePage: 'unified_exchange', exchangeTab: 'discover' };
+    case 'exchange':
+      return { activePage: 'unified_exchange', exchangeTab: 'spot' };
+    case 'futures':
+      return { activePage: 'unified_exchange', exchangeTab: 'futures' };
+    case 'forex':
+      return { activePage: 'unified_exchange', exchangeTab: 'forex' };
+    case 'empire_hub':
+      return { activePage: 'my_empire', empireTab: 'hub' };
+    case 'business':
+      return { activePage: 'my_empire', empireTab: 'business' };
+    case 'corporate':
+      return { activePage: 'my_empire', empireTab: 'corporate' };
+    case 'capital_hub':
+      return { activePage: 'my_empire', empireTab: 'cofounder' };
+    case 'company_hq':
+      return { activePage: 'my_empire', empireTab: 'hq' };
+    case 'funds':
+      return { activePage: 'my_empire', empireTab: 'funds' };
+    case 'portfolio':
+      return { activePage: 'my_assets', assetsTab: 'portfolio' };
+    case 'property':
+      return { activePage: 'my_assets', assetsTab: 'property' };
+    case 'banking':
+      return { activePage: 'my_assets', assetsTab: 'banking' };
+    case 'luxury':
+      return { activePage: 'my_assets', assetsTab: 'luxury' };
+    default:
+      return { activePage: page };
+  }
+}
 
 export type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'polling';
 
@@ -181,6 +228,9 @@ function saveUiPrefs(prefs: UiPrefs): void {
 interface AppState {
   // Navigation & UI Prefs
   activePage: NavPage;
+  exchangeTab: UnifiedExchangeTab;
+  empireTab: MyEmpireTab;
+  assetsTab: MyAssetsTab;
   exchangeClassFilter: 'ALL' | 'CRYPTO' | 'STOCK';
   selectedSymbol: string;
   selectedForexSymbol: string;
@@ -250,6 +300,9 @@ interface AppState {
 
   // Actions
   setActivePage: (page: NavPage) => void;
+  setExchangeTab: (tab: UnifiedExchangeTab) => void;
+  setEmpireTab: (tab: MyEmpireTab) => void;
+  setAssetsTab: (tab: MyAssetsTab) => void;
   openCompanyHq: (companyId: string) => void;
   setSelectedHqCompanyId: (companyId: string | null) => void;
   setConnectUnreadCounts: (notifications: number, messages: number) => void;
@@ -319,6 +372,9 @@ function persistFromState(s: AppState, overrides: Partial<UiPrefs> = {}): void {
 
 export const useAppStore = create<AppState>((set, get) => ({
   activePage: 'overview',
+  exchangeTab: 'spot',
+  empireTab: 'business',
+  assetsTab: 'portfolio',
   exchangeClassFilter: 'ALL',
   selectedSymbol: 'NOVA',
   selectedForexSymbol: 'EUR-SIM/USD-SIM',
@@ -383,8 +439,21 @@ export const useAppStore = create<AppState>((set, get) => ({
   connectUnreadNotifications: 0,
   connectUnreadMessages: 0,
 
-  setActivePage: (page) => set({ activePage: page }),
-  openCompanyHq: (companyId) => set({ selectedHqCompanyId: companyId, activePage: 'company_hq' }),
+  setActivePage: (page) =>
+    set((state) => {
+      const resolved = resolveLegacyPageRedirect(page);
+      return {
+        activePage: resolved.activePage,
+        exchangeTab: resolved.exchangeTab ?? state.exchangeTab,
+        empireTab: resolved.empireTab ?? state.empireTab,
+        assetsTab: resolved.assetsTab ?? state.assetsTab,
+      };
+    }),
+  setExchangeTab: (exchangeTab) => set({ activePage: 'unified_exchange', exchangeTab }),
+  setEmpireTab: (empireTab) => set({ activePage: 'my_empire', empireTab }),
+  setAssetsTab: (assetsTab) => set({ activePage: 'my_assets', assetsTab }),
+  openCompanyHq: (companyId) =>
+    set({ selectedHqCompanyId: companyId, activePage: 'my_empire', empireTab: 'hq' }),
   setSelectedHqCompanyId: (selectedHqCompanyId) => set({ selectedHqCompanyId }),
   setConnectUnreadCounts: (connectUnreadNotifications, connectUnreadMessages) =>
     set({ connectUnreadNotifications, connectUnreadMessages }),
@@ -393,19 +462,22 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       selectedSymbol: symbol,
       exchangeClassFilter: marketClass ?? 'ALL',
-      activePage: 'exchange',
+      activePage: 'unified_exchange',
+      exchangeTab: 'spot',
     }),
 
   openForexPair: (symbol) =>
     set({
       selectedForexSymbol: symbol,
-      activePage: 'forex',
+      activePage: 'unified_exchange',
+      exchangeTab: 'forex',
     }),
 
   openFuturesContract: (symbol) =>
     set({
       selectedFuturesSymbol: symbol,
-      activePage: 'futures',
+      activePage: 'unified_exchange',
+      exchangeTab: 'futures',
     }),
 
   setExchangeClassFilter: (filter) => set({ exchangeClassFilter: filter }),

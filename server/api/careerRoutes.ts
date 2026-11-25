@@ -1,6 +1,12 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import { z } from 'zod';
-import { API_CONTRACT_VERSION, ERROR_MESSAGES_VI, type ApiFailure, type ApiSuccess, type ErrorCode } from '../../shared/contracts/types';
+import {
+  API_CONTRACT_VERSION,
+  ERROR_MESSAGES_VI,
+  type ApiFailure,
+  type ApiSuccess,
+  type ErrorCode,
+} from '../../shared/contracts/types';
 import { DomainError } from '../domain/DomainError';
 import { CareerWorldManager } from '../engine/career/CareerWorldManager';
 
@@ -29,6 +35,7 @@ function fail(res: Response, code: ErrorCode, message?: string, status = 400): v
 
 const AccountLoginSchema = z.object({
   username: z.string().trim().min(2, 'Tên tài khoản cần tối thiểu 2 ký tự.').max(24),
+  password: z.string().max(72).optional(),
   preset: z.enum(['ALICE', 'BOB', 'CUSTOM']).optional(),
   difficulty: z.enum(['EASY', 'NORMAL', 'HARD']).optional(),
   characterName: z.string().trim().min(2).max(24).optional(),
@@ -79,14 +86,18 @@ export function createCareerImmersionRouter(manager: CareerWorldManager): Router
   const router = Router();
 
   const requireAccountKey = (req: Request): string => {
-    const key = manager.resolveAccountKeyFromHeader(req.header('authorization'));
-    if (!key) {
-      throw new DomainError('UNAUTHORIZED', 'Vui lòng đăng nhập tài khoản trước khi thực hiện thao tác này.', 401);
+    const session = manager.resolveSessionFromHeader(req.header('authorization'));
+    if (!session) {
+      throw new DomainError(
+        'UNAUTHORIZED',
+        'Phiên đăng nhập không hợp lệ, đã hết hạn hoặc bị thu hồi. Vui lòng đăng nhập lại.',
+        401,
+      );
     }
-    return key;
+    return session.accountKey;
   };
 
-  // === ACCOUNT AUTH & MODE SWITCHING ===
+  // === ACCOUNT AUTH, LOGOUT & MODE SWITCHING ===
   router.post('/account/login', (req, res, next) => {
     try {
       const parsed = AccountLoginSchema.safeParse(req.body);
@@ -95,6 +106,15 @@ export function createCareerImmersionRouter(manager: CareerWorldManager): Router
       }
       const data = manager.loginOrRegisterAccount(parsed.data);
       ok(res, data, 201);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/account/logout', (req, res, next) => {
+    try {
+      const result = manager.logoutSession(req.header('authorization'));
+      ok(res, result);
     } catch (err) {
       next(err);
     }
@@ -123,7 +143,7 @@ export function createCareerImmersionRouter(manager: CareerWorldManager): Router
     }
   });
 
-  // === CAREER STORY DIRECTOR & SAVES ===
+  // === CAREER STORY DIRECTOR, LIFECYCLE & SAVES ===
   router.get('/career/state', (req, res, next) => {
     try {
       const key = requireAccountKey(req);
@@ -135,6 +155,16 @@ export function createCareerImmersionRouter(manager: CareerWorldManager): Router
         worldSnapshot: save.world.getWorldSnapshot(save.playerId),
         profile: save.world.getPlayerProfile(save.playerId),
       });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/career/pause', (req, res, next) => {
+    try {
+      const key = requireAccountKey(req);
+      const result = manager.pauseActiveCareerSave(key);
+      ok(res, result);
     } catch (err) {
       next(err);
     }
@@ -152,14 +182,18 @@ export function createCareerImmersionRouter(manager: CareerWorldManager): Router
         parsed.data.characterName,
         parsed.data.difficulty ?? 'NORMAL',
       );
-      ok(res, {
-        account: overview,
-        saveId: save.saveId,
-        careerToken: save.careerToken,
-        careerStory: save.director.getSnapshot(),
-        worldSnapshot: save.world.getWorldSnapshot(save.playerId),
-        profile: save.world.getPlayerProfile(save.playerId),
-      }, 201);
+      ok(
+        res,
+        {
+          account: overview,
+          saveId: save.saveId,
+          careerToken: save.careerToken,
+          careerStory: save.director.getSnapshot(),
+          worldSnapshot: save.world.getWorldSnapshot(save.playerId),
+          profile: save.world.getPlayerProfile(save.playerId),
+        },
+        201,
+      );
     } catch (err) {
       next(err);
     }
@@ -174,6 +208,7 @@ export function createCareerImmersionRouter(manager: CareerWorldManager): Router
       }
       const save = manager.requireActiveSave(key);
       save.director.setCharacterName(parsed.data.characterName);
+      manager.persistNow();
       ok(res, {
         careerStory: save.director.getSnapshot(),
         account: manager.getAccountOverview(key),
@@ -223,6 +258,7 @@ export function createCareerImmersionRouter(manager: CareerWorldManager): Router
       }
       const save = manager.requireActiveSave(key);
       const result = save.director.advanceDialogue(parsed.data.choiceId);
+      manager.persistNow();
       ok(res, {
         ...result,
         careerStory: save.director.getSnapshot(),
@@ -239,6 +275,7 @@ export function createCareerImmersionRouter(manager: CareerWorldManager): Router
       const key = requireAccountKey(req);
       const save = manager.requireActiveSave(key);
       save.director.skipOpeningScene();
+      manager.persistNow();
       ok(res, {
         careerStory: save.director.getSnapshot(),
         account: manager.getAccountOverview(key),
@@ -259,6 +296,7 @@ export function createCareerImmersionRouter(manager: CareerWorldManager): Router
       }
       const save = manager.requireActiveSave(key);
       save.director.triggerScene(parsed.data.sceneId, parsed.data.forceImmediate ?? true);
+      manager.persistNow();
       ok(res, {
         careerStory: save.director.getSnapshot(),
         profile: save.world.getPlayerProfile(save.playerId),
@@ -278,6 +316,7 @@ export function createCareerImmersionRouter(manager: CareerWorldManager): Router
       }
       const save = manager.requireActiveSave(key);
       save.director.dismissCornerEncounter(parsed.data.cornerId);
+      manager.persistNow();
       ok(res, { careerStory: save.director.getSnapshot() });
     } catch (err) {
       next(err);
@@ -293,6 +332,7 @@ export function createCareerImmersionRouter(manager: CareerWorldManager): Router
       }
       const save = manager.requireActiveSave(key);
       const resData = save.director.replyPhoneMessage(parsed.data.messageId, parsed.data.replyOptionId);
+      manager.persistNow();
       ok(res, {
         ...resData,
         careerStory: save.director.getSnapshot(),
@@ -309,24 +349,20 @@ export function createCareerImmersionRouter(manager: CareerWorldManager): Router
       const key = requireAccountKey(req);
       const save = manager.requireActiveSave(key);
       save.director.markAllPhoneRead();
+      manager.persistNow();
       ok(res, { careerStory: save.director.getSnapshot() });
     } catch (err) {
       next(err);
     }
   });
 
+  // V6.1 Req 7: Strictly server-verified gameplay sync ONLY — NO client-trusted actionFlag allowed!
   router.post('/career/mission/sync', (req, res, next) => {
     try {
       const key = requireAccountKey(req);
       const save = manager.requireActiveSave(key);
-      const actionFlag = typeof req.body?.actionFlag === 'string' ? req.body.actionFlag : undefined;
-      if (actionFlag === 'RESTRUCTURE') {
-        save.director.markRestructureConfirmed();
-      } else if (actionFlag === 'LEGACY_ACTION') {
-        save.director.markLegacyActionConfirmed();
-      } else {
-        save.director.syncGameplayProgress();
-      }
+      save.director.syncGameplayProgress();
+      manager.persistNow();
       ok(res, {
         careerStory: save.director.getSnapshot(),
         worldSnapshot: save.world.getWorldSnapshot(save.playerId),
@@ -346,6 +382,7 @@ export function createCareerImmersionRouter(manager: CareerWorldManager): Router
       }
       const save = manager.requireActiveSave(key);
       const careerStory = save.director.confirmEnding(parsed.data.endingId);
+      manager.persistNow();
       ok(res, {
         careerStory,
         account: manager.getAccountOverview(key),
@@ -358,18 +395,48 @@ export function createCareerImmersionRouter(manager: CareerWorldManager): Router
   });
 
   // === STRICTLY ISOLATED PER-SAVE CAREER WORLD PROXY (/api/career-world/:saveId/*) ===
-  // Verifies both account ownership AND valid Career Save Bearer token before forwarding into save.router
+  // Enforces unexpired/unrevoked Bearer session + exact account ownership (401/403) and persists mutations.
   router.use('/career-world/:saveId', (req: Request, res: Response, next: NextFunction) => {
     const saveId = req.params.saveId;
     const save = manager.getSaveById(saveId);
     if (!save) {
       return fail(res, 'VALIDATION_ERROR', 'Không tìm thấy thế giới Career tương ứng.', 404);
     }
-    const accountKey = manager.resolveAccountKeyFromHeader(req.header('authorization'));
-    if (!accountKey || accountKey !== save.accountKey) {
-      return fail(res, 'FORBIDDEN', 'Bạn không có quyền truy cập dữ liệu tài chính của tệp lưu Career này.', 403);
+    const session = manager.resolveSessionFromHeader(req.header('authorization'));
+    if (!session) {
+      return fail(
+        res,
+        'UNAUTHORIZED',
+        'Phiên đăng nhập không hợp lệ, đã hết hạn hoặc bị thu hồi.',
+        401,
+      );
     }
-    // Forward into the save's isolated WorldEngine router
+    if (session.accountKey !== save.accountKey) {
+      return fail(
+        res,
+        'FORBIDDEN',
+        'Bạn không có quyền truy cập dữ liệu tài chính của tệp lưu Career này.',
+        403,
+      );
+    }
+
+    // Bind save's authoritative internal career token so proxied routes authenticate cleanly
+    req.headers.authorization = `Bearer ${save.careerToken}`;
+    save.lastActivityAtMs = Date.now();
+
+    if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS') {
+      res.on('finish', () => {
+        if (res.statusCode < 400) {
+          try {
+            save.director.syncGameplayProgress();
+            manager.persistNow();
+          } catch {
+            // Non-fatal post-response sync guard
+          }
+        }
+      });
+    }
+
     return save.router(req, res, next);
   });
 

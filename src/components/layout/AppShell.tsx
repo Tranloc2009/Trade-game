@@ -92,6 +92,9 @@ export function AppShell({
 }: AppShellProps) {
   const {
     activePage,
+    exchangeTab,
+    empireTab,
+    assetsTab,
     setActivePage,
     sidebarCollapsed,
     toggleSidebar,
@@ -112,6 +115,37 @@ export function AppShell({
     setGlossaryDrawerOpen,
     setTutorialOpen,
   } = useAppStore();
+
+  const isNavActive = (id: NavPage): boolean => {
+    if (activePage === id) return true;
+    if (activePage === 'unified_exchange') {
+      return (
+        (id === 'discover' && exchangeTab === 'discover') ||
+        (id === 'exchange' && exchangeTab === 'spot') ||
+        (id === 'futures' && exchangeTab === 'futures') ||
+        (id === 'forex' && exchangeTab === 'forex')
+      );
+    }
+    if (activePage === 'my_empire') {
+      return (
+        (id === 'empire_hub' && empireTab === 'hub') ||
+        (id === 'business' && empireTab === 'business') ||
+        (id === 'corporate' && empireTab === 'corporate') ||
+        (id === 'capital_hub' && empireTab === 'cofounder') ||
+        (id === 'company_hq' && empireTab === 'hq') ||
+        (id === 'funds' && empireTab === 'funds')
+      );
+    }
+    if (activePage === 'my_assets') {
+      return (
+        (id === 'portfolio' && assetsTab === 'portfolio') ||
+        (id === 'property' && assetsTab === 'property') ||
+        (id === 'banking' && assetsTab === 'banking') ||
+        (id === 'luxury' && assetsTab === 'luxury')
+      );
+    }
+    return false;
+  };
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
@@ -171,7 +205,7 @@ export function AppShell({
         <nav className="flex-1 py-3 px-2 space-y-1 overflow-y-auto" aria-label="Điều hướng chính">
           {NAV_ITEMS.map((item, idx) => {
             const Icon = item.icon;
-            const active = activePage === item.id;
+            const active = isNavActive(item.id);
             const showDivider = idx > 0 && NAV_ITEMS[idx - 1].group !== item.group;
             return (
               <div key={item.id}>
@@ -506,7 +540,7 @@ export function AppShell({
             <nav className="flex-1 p-2 space-y-1 overflow-y-auto">
               {NAV_ITEMS.map((item) => {
                 const Icon = item.icon;
-                const active = activePage === item.id;
+                const active = isNavActive(item.id);
                 return (
                   <button
                     key={item.id}
@@ -556,7 +590,7 @@ export function AppShell({
           ] as const
         ).map((tab) => {
           const Icon = tab.icon;
-          const active = activePage === tab.id;
+          const active = isNavActive(tab.id);
           return (
             <button
               key={tab.id}

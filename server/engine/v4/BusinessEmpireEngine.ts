@@ -2680,6 +2680,55 @@ export class BusinessEmpireEngine {
     };
   }
 
+  public exportSnapshot(): {
+    businesses: BusinessEntity[];
+    holdings: HoldingCompany[];
+    privateListings: PrivateShareListing[];
+    maOffers: AcquisitionOffer[];
+    franchises: FranchiseAgreement[];
+    operatingCycleSeq: number;
+  } {
+    return {
+      businesses: Array.from(this.businesses.values()).map((b) => structuredClone(b)),
+      holdings: Array.from(this.holdings.values()).map((h) => structuredClone(h)),
+      privateListings: Array.from(this.privateListings.values()).map((l) => structuredClone(l)),
+      maOffers: Array.from(this.maOffers.values()).map((o) => structuredClone(o)),
+      franchises: Array.from(this.franchises.values()).map((f) => structuredClone(f)),
+      operatingCycleSeq: this.operatingCycleSeq,
+    };
+  }
+
+  public importSnapshot(snapshot: {
+    businesses: BusinessEntity[];
+    holdings: HoldingCompany[];
+    privateListings: PrivateShareListing[];
+    maOffers: AcquisitionOffer[];
+    franchises: FranchiseAgreement[];
+    operatingCycleSeq: number;
+  }): void {
+    this.businesses.clear();
+    for (const b of snapshot.businesses ?? []) {
+      this.businesses.set(b.id, structuredClone(b));
+    }
+    this.holdings.clear();
+    for (const h of snapshot.holdings ?? []) {
+      this.holdings.set(h.id, structuredClone(h));
+    }
+    this.privateListings.clear();
+    for (const l of snapshot.privateListings ?? []) {
+      this.privateListings.set(l.id, structuredClone(l));
+    }
+    this.maOffers.clear();
+    for (const o of snapshot.maOffers ?? []) {
+      this.maOffers.set(o.id, structuredClone(o));
+    }
+    this.franchises.clear();
+    for (const f of snapshot.franchises ?? []) {
+      this.franchises.set(f.id, structuredClone(f));
+    }
+    this.operatingCycleSeq = typeof snapshot.operatingCycleSeq === 'number' ? snapshot.operatingCycleSeq : 0;
+  }
+
   private cloneBusiness(b: BusinessEntity): BusinessEntity {
     return {
       ...b,

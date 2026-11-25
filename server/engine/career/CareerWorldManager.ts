@@ -12,8 +12,19 @@ import type {
 } from '../../../shared/contracts/careerStory';
 import { DomainError } from '../../domain/DomainError';
 import { createApiRouter } from '../../api/routes';
+import { hashPassword, verifyPassword } from '../../security/SecurityGuard';
 import { WorldEngine } from '../WorldEngine';
-import { StoryDirector } from './StoryDirector';
+import {
+  CareerPersistenceStore,
+  type PersistedCareerDatabase,
+  type PersistedSessionRecord,
+} from './CareerPersistenceStore';
+import {
+  NPC_DUC_HUY_WALLET_ID,
+  NPC_GIA_HAN_WALLET_ID,
+  NPC_HOANG_NAM_WALLET_ID,
+  StoryDirector,
+} from './StoryDirector';
 
 export interface IsolatedCareerSave {
   saveId: string;
@@ -24,13 +35,35 @@ export interface IsolatedCareerSave {
   careerToken: string;
   director: StoryDirector;
   tickTimer?: NodeJS.Timeout;
+  idleTimer?: NodeJS.Timeout;
+  lastActivityAtMs: number;
 }
 
 interface AccountRecord {
   preferences: AccountModePreferences;
+  passwordHash: string | null;
+  isPublicDemoPreset: boolean;
   onlinePlayerId: string;
   onlineToken: string;
   saveIds: string[];
+}
+
+export interface ResolvedSessionInfo {
+  accountKey: string;
+  tokenHash: string;
+  scope: 'ONLINE' | 'CAREER';
+  careerSaveId: string | null;
+  expiresAtMs: number;
+}
+
+export interface CareerWorldManagerOptions {
+  enableTimers?: boolean;
+  /** File path for durable atomic JSON persistence. Pass null to disable disk I/O (in-memory only). */
+  storagePath?: string | null;
+  /** Session token lifetime in ms (default: 8 hours). */
+  sessionTtlMs?: number;
+  /** Idle duration in ms before an unattended Career clock auto-pauses (default: 90s). */
+  maxIdlePauseMs?: number;
 }
 
 const SPEED_INTERVAL_MS: Record<Exclude<CareerClockSpeed, 'PAUSE'>, number> = {
@@ -40,96 +73,281 @@ const SPEED_INTERVAL_MS: Record<Exclude<CareerClockSpeed, 'PAUSE'>, number> = {
   '10x': 2_500,
 };
 
+const DEFAULT_SESSION_TTL_MS = 8 * 60 * 60 * 1000; // 8 hours
+const DEFAULT_MAX_IDLE_PAUSE_MS = 90_000; // 90 seconds
+
 function normalizeAccountKey(username: string, preset?: 'ALICE' | 'BOB' | 'CUSTOM'): string {
   if (preset === 'ALICE') return 'preset_alice';
   if (preset === 'BOB') return 'preset_bob';
   return `acct_${username.trim().toLowerCase().replace(/[^a-z0-9\u00C0-\u1EF9]+/g, '_')}`;
 }
 
+function sha256Hex(raw: string): string {
+  return crypto.createHash('sha256').update(raw).digest('hex');
+}
+
+function extractRawBearer(authHeader: string | undefined): string | null {
+  if (!authHeader) return null;
+  const raw = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : authHeader.trim();
+  return raw || null;
+}
+
 /**
- * Authoritative Account & Career World Isolation Manager.
- * - Persists server-side AccountModePreferences (lastPlayedMode, activeCareerSaveId, lastOnlineWorldId, hasCompletedFirstLaunch, lastPlayedAt)
- * - Spawns strictly isolated WorldEngine instances per Career Save (never sharing Wallet, Ledger, Orders, Companies, Funds, Properties, or Clock with Online WORLD-01 or other saves)
- * - Enforces single-creation of initial Career Save for new accounts (zero duplicate capital on re-login or mode switching)
- * - Supports Pause / 1x / 2x / 5x / 10x Career Game Clock independently of Online World
+ * Authoritative Account, Session Security & Career World Isolation Manager (V6.1 Stabilized).
+ * - Durable atomic disk persistence across server restarts (accounts, credentials, saves, wallets, holdings, businesses, macro, story).
+ * - Server-side scrypt password ownership protection for custom accounts (cannot hijack by username alone).
+ * - Expiring & revocable session tokens with strict cross-account 403 isolation.
+ * - Safe Career scheduler lifecycle: pauses & clears timers on mode switch, logout, disconnect/tab-close, or idle watchdog.
  */
 export class CareerWorldManager {
   private readonly onlineWorld: WorldEngine;
   private readonly enableTimers: boolean;
+  private readonly sessionTtlMs: number;
+  private readonly maxIdlePauseMs: number;
+  private readonly store: CareerPersistenceStore | null;
+
   private accounts = new Map<string, AccountRecord>();
   private saves = new Map<string, IsolatedCareerSave>();
-  private tokenToAccountKey = new Map<string, string>();
+  private sessionsByHash = new Map<string, PersistedSessionRecord>();
 
-  constructor(onlineWorld: WorldEngine, options?: { enableTimers?: boolean }) {
+  constructor(onlineWorld: WorldEngine, options?: CareerWorldManagerOptions) {
     this.onlineWorld = onlineWorld;
     this.enableTimers = options?.enableTimers ?? true;
+    this.sessionTtlMs = options?.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS;
+    this.maxIdlePauseMs = options?.maxIdlePauseMs ?? DEFAULT_MAX_IDLE_PAUSE_MS;
+    this.store = options?.storagePath ? new CareerPersistenceStore(options.storagePath) : null;
+
+    if (this.store) {
+      this.hydrateFromPersistence();
+    }
+  }
+
+  public persistNow(): void {
+    if (!this.store) return;
+    const now = Date.now();
+    // Prune long-expired sessions while keeping recently revoked entries out of active map
+    const activeSessions: PersistedSessionRecord[] = [];
+    for (const sess of this.sessionsByHash.values()) {
+      if (!sess.revoked && sess.expiresAtMs > now) {
+        activeSessions.push({ ...sess });
+      }
+    }
+
+    const db: PersistedCareerDatabase = {
+      schemaVersion: 1,
+      savedAt: new Date().toISOString(),
+      accounts: Array.from(this.accounts.values()).map((acc) => ({
+        preferences: { ...acc.preferences },
+        passwordHash: acc.passwordHash,
+        isPublicDemoPreset: acc.isPublicDemoPreset,
+        onlinePlayerId: acc.onlinePlayerId,
+        saveIds: [...acc.saveIds],
+      })),
+      saves: Array.from(this.saves.values()).map((save) => ({
+        saveId: save.saveId,
+        accountKey: save.accountKey,
+        worldId: save.world.worldId,
+        playerId: save.playerId,
+        director: save.director.exportState(),
+        worldState: save.world.exportCareerStateSnapshot(save.playerId, [
+          NPC_HOANG_NAM_WALLET_ID,
+          NPC_DUC_HUY_WALLET_ID,
+          NPC_GIA_HAN_WALLET_ID,
+        ]),
+      })),
+      sessions: activeSessions,
+    };
+
+    this.store.save(db);
+  }
+
+  private hydrateFromPersistence(): void {
+    if (!this.store) return;
+    const db = this.store.load();
+    if (!db) return;
+
+    const now = Date.now();
+
+    for (const accData of db.accounts) {
+      // Ensure Online World binds the persisted playerId cleanly (does not create duplicate balances)
+      this.onlineWorld.auth.bindExistingPlayer(accData.preferences.username, accData.onlinePlayerId);
+      const onlineAuth = this.onlineWorld.loginGuest(
+        accData.preferences.username,
+        accData.isPublicDemoPreset
+          ? accData.preferences.accountKey === 'preset_alice'
+            ? 'ALICE'
+            : 'BOB'
+          : 'CUSTOM',
+      );
+      this.accounts.set(accData.preferences.accountKey, {
+        preferences: { ...accData.preferences },
+        passwordHash: accData.passwordHash ?? null,
+        isPublicDemoPreset: Boolean(accData.isPublicDemoPreset),
+        onlinePlayerId: onlineAuth.profile.id,
+        onlineToken: onlineAuth.session.token,
+        saveIds: [...accData.saveIds],
+      });
+    }
+
+    for (const saveData of db.saves) {
+      const world = new WorldEngine({
+        worldId: saveData.worldId,
+        worldName: `CAREER · ${saveData.director.characterName}`,
+        calendarMode: 'ACCELERATED',
+        enableBackgroundLoops: false,
+        devToolsEnabled: true,
+        providers: this.onlineWorld.providers,
+      });
+
+      // Import exact persisted player wallet, NPC wallets, company treasuries, holdings, businesses & macro
+      world.importCareerStateSnapshot(saveData.worldState);
+
+      // Re-issue internal auth session for the exact restored playerId
+      const session = world.auth.issueSessionForPlayer(
+        saveData.playerId,
+        saveData.director.characterName,
+      );
+      const router = createApiRouter(world);
+
+      const director = new StoryDirector({
+        saveId: saveData.saveId,
+        world,
+        playerId: saveData.playerId,
+        characterName: saveData.director.characterName,
+        difficulty: saveData.director.difficulty,
+        skipInitialSeeding: true,
+      });
+      director.hydrateState(saveData.director);
+
+      const isolated: IsolatedCareerSave = {
+        saveId: saveData.saveId,
+        accountKey: saveData.accountKey,
+        world,
+        router,
+        playerId: saveData.playerId,
+        careerToken: session.token,
+        director,
+        lastActivityAtMs: now,
+      };
+      // Always boot paused until owner logs back in / resumes (Req 10)
+      isolated.director.pauseForModeSwitch();
+      this.saves.set(saveData.saveId, isolated);
+    }
+
+    // Restore valid unexpired sessions (Note: raw tokens are hashed; sessions remain valid across restart if caller retains token)
+    for (const sess of db.sessions) {
+      if (!sess.revoked && sess.expiresAtMs > now && this.accounts.has(sess.accountKey)) {
+        this.sessionsByHash.set(sess.tokenHash, { ...sess });
+      }
+    }
   }
 
   public dispose(): void {
     for (const save of this.saves.values()) {
-      if (save.tickTimer) {
-        clearInterval(save.tickTimer);
-        save.tickTimer = undefined;
-      }
+      this.clearSaveClockTimer(save);
+      save.director.pauseForModeSwitch();
       save.world.stopBackgroundLoops();
     }
+    this.persistNow();
   }
 
-  public resolveAccountKeyFromHeader(authHeader: string | undefined): string | null {
-    if (!authHeader) return null;
-    const raw = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : authHeader.trim();
+  private registerSessionToken(
+    rawToken: string,
+    accountKey: string,
+    scope: 'ONLINE' | 'CAREER',
+    careerSaveId: string | null = null,
+    ttlOverrideMs?: number,
+  ): void {
+    const now = Date.now();
+    const tokenHash = sha256Hex(rawToken);
+    this.sessionsByHash.set(tokenHash, {
+      tokenHash,
+      accountKey,
+      scope,
+      careerSaveId,
+      createdAtMs: now,
+      expiresAtMs: now + (ttlOverrideMs ?? this.sessionTtlMs),
+      revoked: false,
+    });
+  }
+
+  /**
+   * Resolves & validates Bearer session token, enforcing expiration and revocation (V6.1 Req 11).
+   */
+  public resolveSessionFromHeader(authHeader: string | undefined): ResolvedSessionInfo | null {
+    const raw = extractRawBearer(authHeader);
     if (!raw) return null;
+    const tokenHash = sha256Hex(raw);
+    const now = Date.now();
 
-    const direct = this.tokenToAccountKey.get(raw);
-    if (direct) return direct;
+    const sess = this.sessionsByHash.get(tokenHash);
+    if (sess) {
+      if (sess.revoked || sess.expiresAtMs <= now) {
+        return null;
+      }
+      if (!this.accounts.has(sess.accountKey)) {
+        return null;
+      }
+      // Touch active save activity timestamp so idle watchdog knows the player is live
+      const acc = this.accounts.get(sess.accountKey);
+      const saveId = sess.careerSaveId ?? acc?.preferences.activeCareerSaveId;
+      if (saveId) {
+        const save = this.saves.get(saveId);
+        if (save) save.lastActivityAtMs = now;
+      }
+      return {
+        accountKey: sess.accountKey,
+        tokenHash,
+        scope: sess.scope,
+        careerSaveId: sess.careerSaveId,
+        expiresAtMs: sess.expiresAtMs,
+      };
+    }
 
-    // Fallback: verify against Online World session if user authenticated via legacy /api/auth/guest
+    // Fallback: verify against Online World direct legacy guest token ONLY if not previously revoked
     const onlineSession = this.onlineWorld.auth.verifyToken(authHeader);
     if (onlineSession) {
       for (const [key, rec] of this.accounts.entries()) {
         if (rec.onlinePlayerId === onlineSession.playerId) {
-          this.tokenToAccountKey.set(raw, key);
-          return key;
+          // Do not resurrect tokens for password-protected accounts outside issued sessions
+          if (rec.passwordHash) return null;
+          this.registerSessionToken(raw, key, 'ONLINE', null);
+          return {
+            accountKey: key,
+            tokenHash,
+            scope: 'ONLINE',
+            careerSaveId: null,
+            expiresAtMs: now + this.sessionTtlMs,
+          };
         }
       }
-      // Auto-bootstrap account preferences for legacy direct /api/auth/guest tokens
-      const key = normalizeAccountKey(onlineSession.username);
-      const nowIso = new Date().toISOString();
-      const record: AccountRecord = {
-        preferences: {
-          accountKey: key,
-          username: onlineSession.username,
-          lastPlayedMode: 'ONLINE',
-          activeCareerSaveId: null,
-          lastOnlineWorldId: this.onlineWorld.worldId,
-          hasCompletedFirstLaunch: true,
-          isLegacyAccount: true,
-          lastPlayedAt: nowIso,
-        },
-        onlinePlayerId: onlineSession.playerId,
-        onlineToken: raw,
-        saveIds: [],
-      };
-      this.accounts.set(key, record);
-      this.tokenToAccountKey.set(raw, key);
-      return key;
     }
 
     return null;
+  }
+
+  public resolveAccountKeyFromHeader(authHeader: string | undefined): string | null {
+    return this.resolveSessionFromHeader(authHeader)?.accountKey ?? null;
   }
 
   public getSaveById(saveId: string): IsolatedCareerSave | null {
     return this.saves.get(saveId) ?? null;
   }
 
+  public hasActiveTimer(saveId: string): boolean {
+    const save = this.saves.get(saveId);
+    return Boolean(save?.tickTimer);
+  }
+
   /**
-   * Unified Register / Login flow (§02):
-   * - Brand-new account: creates Online account + 1 Career Save ONCE, auto-sets lastPlayedMode = 'CAREER', isFirstLaunch = true.
-   * - Returning account: restores lastPlayedMode & activeCareerSaveId without replaying intro or re-granting starting capital.
-   * - Legacy preset/existing online account with existing activity: preserves existing Online assets and remembers last mode.
+   * V6.1 Req 2, 10 & 11: Unified Register / Login flow with real password ownership protection.
+   * - Custom accounts require a password (min 4 chars) on creation; returning login MUST match stored scrypt hash (401 otherwise).
+   * - Quick demo presets ('ALICE' / 'BOB') remain accessible for 2-window Online testing.
+   * - Restores exact persisted Career progress & Online balances without re-granting starting capital.
    */
   public loginOrRegisterAccount(params: {
     username: string;
+    password?: string;
     preset?: 'ALICE' | 'BOB' | 'CUSTOM';
     difficulty?: CareerDifficulty;
     characterName?: string;
@@ -140,16 +358,28 @@ export class CareerWorldManager {
       throw new DomainError('VALIDATION_ERROR', 'Tên tài khoản phải từ 2 ký tự trở lên.', 400);
     }
 
+    const isDemoPreset = params.preset === 'ALICE' || params.preset === 'BOB';
+    const rawPassword = typeof params.password === 'string' ? params.password : '';
     const accountKey = normalizeAccountKey(cleanUsername, params.preset);
     const existing = this.accounts.get(accountKey);
     const nowIso = new Date().toISOString();
 
     if (existing) {
-      // Returning account — refresh Online session cleanly without resetting balances or saves
+      // Enforce ownership password verification for all password-protected accounts (Req 2)
+      if (existing.passwordHash) {
+        if (!rawPassword || !verifyPassword(rawPassword, existing.passwordHash)) {
+          throw new DomainError(
+            'UNAUTHORIZED',
+            'Tài khoản này đã được bảo vệ bằng mật khẩu. Vui lòng nhập đúng mật khẩu để đăng nhập.',
+            401,
+          );
+        }
+      }
+
       const onlineAuth = this.onlineWorld.loginGuest(existing.preferences.username, params.preset);
       existing.onlineToken = onlineAuth.session.token;
       existing.onlinePlayerId = onlineAuth.profile.id;
-      this.tokenToAccountKey.set(existing.onlineToken, accountKey);
+      this.registerSessionToken(existing.onlineToken, accountKey, 'ONLINE', null);
       existing.preferences.lastPlayedAt = nowIso;
 
       const resolvedMode: GamePlayMode =
@@ -168,9 +398,18 @@ export class CareerWorldManager {
       }
 
       if (resolvedMode === 'CAREER' && activeSave) {
+        // Issue fresh expiring Career token for this login session
+        const freshCareerSess = activeSave.world.auth.issueSessionForPlayer(
+          activeSave.playerId,
+          activeSave.director.characterName,
+        );
+        activeSave.careerToken = freshCareerSess.token;
+        this.registerSessionToken(activeSave.careerToken, accountKey, 'CAREER', activeSave.saveId);
+        activeSave.lastActivityAtMs = Date.now();
         activeSave.director.resumeFromModeSwitch();
         this.syncSaveClockTimer(activeSave);
         activeSave.director.syncGameplayProgress();
+        this.persistNow();
         const profile = activeSave.world.getPlayerProfile(activeSave.playerId)!;
         return {
           account: this.buildAccountOverview(existing),
@@ -185,11 +424,12 @@ export class CareerWorldManager {
         };
       }
 
-      // Returning directly into ONLINE mode
+      // Returning directly into ONLINE mode — ensure Career clock stays paused
       if (activeSave) {
         activeSave.director.pauseForModeSwitch();
         this.clearSaveClockTimer(activeSave);
       }
+      this.persistNow();
       return {
         account: this.buildAccountOverview(existing),
         resolvedMode: 'ONLINE',
@@ -203,12 +443,19 @@ export class CareerWorldManager {
       };
     }
 
-    // Check if this username already had legacy Online progress before Project Immersion
+    // Brand-new custom account MUST supply a password >= 4 chars (Req 2)
+    if (!isDemoPreset && rawPassword.length < 4) {
+      throw new DomainError(
+        'VALIDATION_ERROR',
+        'Vui lòng đặt mật khẩu tối thiểu 4 ký tự để bảo vệ quyền sở hữu tài khoản của bạn.',
+        400,
+      );
+    }
+
     const hadOnlinePlayerAlready = this.onlineWorld.hasPlayerUsername(cleanUsername);
     const onlineAuth = this.onlineWorld.loginGuest(cleanUsername, params.preset);
-    const isLegacyPreset = params.preset === 'ALICE' || params.preset === 'BOB';
     const initialMode: GamePlayMode =
-      params.preferredInitialMode ?? (hadOnlinePlayerAlready && isLegacyPreset ? 'ONLINE' : 'CAREER');
+      params.preferredInitialMode ?? (hadOnlinePlayerAlready && isDemoPreset ? 'ONLINE' : 'CAREER');
 
     const account: AccountRecord = {
       preferences: {
@@ -218,17 +465,18 @@ export class CareerWorldManager {
         activeCareerSaveId: null,
         lastOnlineWorldId: this.onlineWorld.worldId,
         hasCompletedFirstLaunch: initialMode === 'ONLINE',
-        isLegacyAccount: hadOnlinePlayerAlready || isLegacyPreset,
+        isLegacyAccount: hadOnlinePlayerAlready || isDemoPreset,
         lastPlayedAt: nowIso,
       },
+      passwordHash: isDemoPreset && !rawPassword ? null : hashPassword(rawPassword),
+      isPublicDemoPreset: isDemoPreset,
       onlinePlayerId: onlineAuth.profile.id,
       onlineToken: onlineAuth.session.token,
       saveIds: [],
     };
     this.accounts.set(accountKey, account);
-    this.tokenToAccountKey.set(account.onlineToken, accountKey);
+    this.registerSessionToken(account.onlineToken, accountKey, 'ONLINE', null);
 
-    // Always initialize first Career Save ONCE for new accounts entering Career
     let careerSave: IsolatedCareerSave | null = null;
     if (initialMode === 'CAREER') {
       careerSave = this.createIsolatedCareerSave({
@@ -238,6 +486,7 @@ export class CareerWorldManager {
       });
       account.preferences.hasCompletedFirstLaunch = true;
       this.syncSaveClockTimer(careerSave);
+      this.persistNow();
       const careerProfile = careerSave.world.getPlayerProfile(careerSave.playerId)!;
       return {
         account: this.buildAccountOverview(account),
@@ -252,6 +501,7 @@ export class CareerWorldManager {
       };
     }
 
+    this.persistNow();
     return {
       account: this.buildAccountOverview(account),
       resolvedMode: 'ONLINE',
@@ -263,6 +513,60 @@ export class CareerWorldManager {
       profile: onlineAuth.profile,
       careerStory: null,
     };
+  }
+
+  /**
+   * V6.1 Reqs 10 & 11: Logout revokes ALL active tokens for the caller's session/account,
+   * immediately pauses & clears Career scheduler timers, persists state, and leaves Online WORLD-01 untouched.
+   */
+  public logoutSession(authHeader: string | undefined): { loggedOut: boolean; pausedSaveId: string | null } {
+    const resolved = this.resolveSessionFromHeader(authHeader);
+    if (!resolved) {
+      return { loggedOut: false, pausedSaveId: null };
+    }
+    const account = this.accounts.get(resolved.accountKey);
+    let pausedSaveId: string | null = null;
+
+    // Revoke all tokens belonging to this account so stolen/stale tokens cannot be reused after logout
+    for (const sess of this.sessionsByHash.values()) {
+      if (sess.accountKey === resolved.accountKey) {
+        sess.revoked = true;
+      }
+    }
+
+    if (account) {
+      this.onlineWorld.auth.revokeToken(account.onlineToken);
+      for (const saveId of account.saveIds) {
+        const save = this.saves.get(saveId);
+        if (save) {
+          save.world.auth.revokeToken(save.careerToken);
+          save.director.pauseForModeSwitch();
+          this.clearSaveClockTimer(save);
+          if (save.saveId === account.preferences.activeCareerSaveId) {
+            pausedSaveId = save.saveId;
+          }
+        }
+      }
+    }
+
+    this.persistNow();
+    return { loggedOut: true, pausedSaveId };
+  }
+
+  /**
+   * V6.1 Req 10: Pauses active Career Save cleanly on browser close / tab hide / disconnect without revoking session.
+   */
+  public pauseActiveCareerSave(accountKey: string): { paused: boolean; saveId: string | null } {
+    const account = this.accounts.get(accountKey);
+    if (!account) return { paused: false, saveId: null };
+    const activeId = account.preferences.activeCareerSaveId;
+    if (!activeId) return { paused: false, saveId: null };
+    const save = this.saves.get(activeId);
+    if (!save) return { paused: false, saveId: null };
+    save.director.pauseForModeSwitch();
+    this.clearSaveClockTimer(save);
+    this.persistNow();
+    return { paused: true, saveId: save.saveId };
   }
 
   public createIsolatedCareerSave(params: {
@@ -277,7 +581,7 @@ export class CareerWorldManager {
       worldId,
       worldName: `CAREER · ${params.characterName}`,
       calendarMode: 'ACCELERATED',
-      enableBackgroundLoops: false, // Driven deterministically by Career Game Clock speed!
+      enableBackgroundLoops: false,
       devToolsEnabled: true,
       providers: this.onlineWorld.providers,
     });
@@ -300,10 +604,11 @@ export class CareerWorldManager {
       playerId: loginRes.profile.id,
       careerToken: loginRes.session.token,
       director,
+      lastActivityAtMs: Date.now(),
     };
 
     this.saves.set(saveId, save);
-    this.tokenToAccountKey.set(save.careerToken, params.account.preferences.accountKey);
+    this.registerSessionToken(save.careerToken, params.account.preferences.accountKey, 'CAREER', saveId);
     params.account.saveIds.push(saveId);
     params.account.preferences.activeCareerSaveId = saveId;
     params.account.preferences.lastPlayedAt = new Date().toISOString();
@@ -321,7 +626,6 @@ export class CareerWorldManager {
     if (account.saveIds.length >= 4) {
       throw new DomainError('VALIDATION_ERROR', 'Mỗi tài khoản hỗ trợ tối đa 4 tệp lưu Career độc lập.', 400);
     }
-    // Pause previous save
     if (account.preferences.activeCareerSaveId) {
       const prev = this.saves.get(account.preferences.activeCareerSaveId);
       if (prev) {
@@ -336,15 +640,10 @@ export class CareerWorldManager {
     });
     account.preferences.lastPlayedMode = 'CAREER';
     this.syncSaveClockTimer(save);
+    this.persistNow();
     return { save, overview: this.buildAccountOverview(account) };
   }
 
-  /**
-   * Seamless mode switch (§03) without logout or re-authentication:
-   * - Career -> Online: saves story/dialogue state, pauses Career clock, preserves Online open orders & positions.
-   * - Online -> Career: keeps Online world running untouched, restores exact active Career Save (or creates 1st save if legacy account never started Career).
-   * - Updates lastPlayedMode ONLY after target mode is successfully prepared.
-   */
   public switchMode(
     accountKey: string,
     targetMode: GamePlayMode,
@@ -356,7 +655,6 @@ export class CareerWorldManager {
     }
 
     if (targetMode === 'ONLINE') {
-      // Save & pause current Career save cleanly
       const activeSave = account.preferences.activeCareerSaveId
         ? this.saves.get(account.preferences.activeCareerSaveId) ?? null
         : null;
@@ -372,10 +670,18 @@ export class CareerWorldManager {
       }
       const worldSnapshot = this.onlineWorld.getWorldSnapshot(account.onlinePlayerId);
 
-      // Persist lastPlayedMode ONLY after Online load succeeds
+      // Ensure onlineToken has an active unexpired session
+      const freshOnlineSess = this.onlineWorld.auth.issueSessionForPlayer(
+        account.onlinePlayerId,
+        account.preferences.username,
+      );
+      account.onlineToken = freshOnlineSess.token;
+      this.registerSessionToken(account.onlineToken, accountKey, 'ONLINE', null);
+
       account.preferences.lastPlayedMode = 'ONLINE';
       account.preferences.lastOnlineWorldId = this.onlineWorld.worldId;
       account.preferences.lastPlayedAt = new Date().toISOString();
+      this.persistNow();
 
       return {
         mode: 'ONLINE',
@@ -395,7 +701,6 @@ export class CareerWorldManager {
       if (!candidate || candidate.accountKey !== accountKey) {
         throw new DomainError('FORBIDDEN', 'Bạn không có quyền truy cập tệp lưu Career này.', 403);
       }
-      // Pause previous save if switching between two saves
       if (account.preferences.activeCareerSaveId && account.preferences.activeCareerSaveId !== targetCareerSaveId) {
         const prev = this.saves.get(account.preferences.activeCareerSaveId);
         if (prev) {
@@ -417,6 +722,14 @@ export class CareerWorldManager {
       });
     }
 
+    const freshCareerSess = targetSave.world.auth.issueSessionForPlayer(
+      targetSave.playerId,
+      targetSave.director.characterName,
+    );
+    targetSave.careerToken = freshCareerSess.token;
+    this.registerSessionToken(targetSave.careerToken, accountKey, 'CAREER', targetSave.saveId);
+
+    targetSave.lastActivityAtMs = Date.now();
     targetSave.director.resumeFromModeSwitch();
     targetSave.director.syncGameplayProgress();
     this.syncSaveClockTimer(targetSave);
@@ -427,6 +740,7 @@ export class CareerWorldManager {
     account.preferences.lastPlayedMode = 'CAREER';
     account.preferences.hasCompletedFirstLaunch = true;
     account.preferences.lastPlayedAt = new Date().toISOString();
+    this.persistNow();
 
     return {
       mode: 'CAREER',
@@ -461,7 +775,9 @@ export class CareerWorldManager {
         characterName: account.preferences.username,
         difficulty: 'NORMAL',
       });
+      this.persistNow();
     }
+    save.lastActivityAtMs = Date.now();
     return save;
   }
 
@@ -469,6 +785,7 @@ export class CareerWorldManager {
     const save = this.requireActiveSave(accountKey);
     save.director.setClockSpeed(speed);
     this.syncSaveClockTimer(save);
+    this.persistNow();
     return save;
   }
 
@@ -476,6 +793,7 @@ export class CareerWorldManager {
     const save = this.requireActiveSave(accountKey);
     save.world.runV4MacroAndOperatingCycle();
     save.director.syncGameplayProgress();
+    this.persistNow();
     return save;
   }
 
@@ -484,6 +802,30 @@ export class CareerWorldManager {
       clearInterval(save.tickTimer);
       save.tickTimer = undefined;
     }
+    if (save.idleTimer) {
+      clearTimeout(save.idleTimer);
+      save.idleTimer = undefined;
+    }
+  }
+
+  private armIdleWatchdog(save: IsolatedCareerSave): void {
+    if (save.idleTimer) {
+      clearTimeout(save.idleTimer);
+      save.idleTimer = undefined;
+    }
+    if (!this.enableTimers || save.director.paused || save.director.clockSpeed === 'PAUSE') {
+      return;
+    }
+    save.idleTimer = setTimeout(() => {
+      if (Date.now() - save.lastActivityAtMs >= this.maxIdlePauseMs) {
+        save.director.pauseForModeSwitch();
+        this.clearSaveClockTimer(save);
+        this.persistNow();
+      } else {
+        this.armIdleWatchdog(save);
+      }
+    }, this.maxIdlePauseMs + 25);
+    save.idleTimer.unref?.();
   }
 
   private syncSaveClockTimer(save: IsolatedCareerSave): void {
@@ -491,12 +833,21 @@ export class CareerWorldManager {
     if (!this.enableTimers || save.director.paused || save.director.clockSpeed === 'PAUSE') {
       return;
     }
+    this.armIdleWatchdog(save);
     const intervalMs = SPEED_INTERVAL_MS[save.director.clockSpeed];
     save.tickTimer = setInterval(() => {
+      // Idle watchdog (V6.1 Req 10): stop scheduler automatically if client disconnected or went idle
+      if (Date.now() - save.lastActivityAtMs >= this.maxIdlePauseMs) {
+        save.director.pauseForModeSwitch();
+        this.clearSaveClockTimer(save);
+        this.persistNow();
+        return;
+      }
       if (save.director.paused || save.director.activeSceneId) return;
       try {
         save.world.runV4MacroAndOperatingCycle();
         save.director.syncGameplayProgress();
+        this.persistNow();
       } catch {
         // Never crash background career clock loop
       }

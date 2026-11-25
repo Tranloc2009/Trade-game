@@ -63,8 +63,13 @@ async function startServer() {
     providers,
   });
 
-  // Boot strictly isolated Career Mode manager (separate WorldEngine per Career Save)
-  const careerManager = new CareerWorldManager(world, { enableTimers: true });
+  // Boot strictly isolated Career Mode manager with durable atomic persistence
+  const careerStoragePath =
+    process.env.CAREER_STORAGE_PATH || path.resolve(__dirname, 'data', 'career-state.json');
+  const careerManager = new CareerWorldManager(world, {
+    enableTimers: true,
+    storagePath: careerStoragePath,
+  });
 
   // Attach authoritative Socket.IO gateway on same HTTP server/port for WORLD-01
   new SocketGateway(httpServer, world);
@@ -92,6 +97,15 @@ async function startServer() {
       res.sendFile(path.join(distDir, 'index.html'));
     });
   }
+
+  const handleShutdown = () => {
+    careerManager.dispose();
+    world.stopBackgroundLoops();
+    practiceWorld.stopBackgroundLoops();
+    httpServer.close(() => process.exit(0));
+  };
+  process.once('SIGINT', handleShutdown);
+  process.once('SIGTERM', handleShutdown);
 
   httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`[Trading Empire] Authoritative WORLD-01 server running on http://0.0.0.0:${PORT}`);

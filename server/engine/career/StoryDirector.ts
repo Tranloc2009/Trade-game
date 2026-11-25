@@ -34,6 +34,64 @@ import { WorldEngine } from '../WorldEngine';
 
 export const NPC_HOANG_NAM_WALLET_ID = 'npc_career_hoang_nam';
 export const NPC_DUC_HUY_WALLET_ID = 'npc_career_duc_huy';
+export const NPC_GIA_HAN_WALLET_ID = 'npc_career_gia_han';
+
+export interface MissionBaseline {
+  capturedForMissionId: string;
+  businessesCount: number;
+  totalEmployees: number;
+  totalUpgrades: number;
+  totalCycles: number;
+  totalBranches: number;
+  totalAuditLogs: number;
+  maxBizLevel: number;
+  filledOrdersCount: number;
+  ownedProperties: number;
+  ownedFunds: number;
+  ownedHoldings: number;
+  stockHoldings: number;
+  macroHistoryLen: number;
+  savingsMinor: number;
+  cashMinor: number;
+}
+
+export interface SerializedStoryDirectorState {
+  saveId: string;
+  worldId: string;
+  playerId: string;
+  characterName: string;
+  difficulty: CareerDifficulty;
+  createdAt: string;
+  lastSavedAt: string;
+  directorState: StoryDirectorState;
+  currentChapter: number;
+  activeMissionId: string;
+  activeSceneId: string | null;
+  activeNodeId: string | null;
+  sceneQueue: string[];
+  cornerQueue: CornerEncounterItem[];
+  clockSpeed: CareerClockSpeed;
+  paused: boolean;
+  storyFlags: Record<string, string | boolean>;
+  completedSceneIds: string[];
+  completedMissionIds: string[];
+  completedSideMissionIds: string[];
+  missionCompletedAt: Record<string, string>;
+  relationships: Record<NpcCharacterId, NpcRelationshipState>;
+  phoneMessages: PhoneMessage[];
+  appointments: PhoneAppointment[];
+  decisions: DecisionRecord[];
+  unlockedStoryTitles: string[];
+  rivalCompanyId: string | null;
+  rivalCompanyName: string;
+  namOfferValuationMinor: number;
+  namOfferInvestmentMinor: number;
+  namOfferEquityPct: number;
+  selectedEndingId: CareerEndingId | null;
+  freePlayUnlocked: boolean;
+  recessionTriggeredAtCycle: number;
+  missionBaseline: MissionBaseline;
+}
 
 const DIFFICULTY_STARTING_CAPITAL_CR: Record<CareerDifficulty, number> = {
   EASY: 150_000,
@@ -59,7 +117,7 @@ export class StoryDirector {
   public readonly playerId: string;
   public characterName: string;
   public readonly difficulty: CareerDifficulty;
-  public readonly createdAt: string;
+  public createdAt: string;
 
   public directorState: StoryDirectorState = 'OPENING_SCENE';
   public currentChapter = 1;
@@ -83,7 +141,7 @@ export class StoryDirector {
   public unlockedStoryTitles = new Set<string>(['Người Khởi Hành']);
 
   public rivalCompanyId: string | null = null;
-  public rivalCompanyName = 'Apex Horizon Coffee';
+  public rivalCompanyName = 'Apex Horizon Specialty';
   public namOfferValuationMinor = toMinor(600_000);
   public namOfferInvestmentMinor = toMinor(200_000);
   public namOfferEquityPct = 25;
@@ -93,11 +151,8 @@ export class StoryDirector {
   public lastSavedAt: string;
 
   private readonly world: WorldEngine;
-  private baselineOrdersCount = 0;
-  private baselineCyclesCount = 0;
   private recessionTriggeredAtCycle = -1;
-  private restructuredDone = false;
-  private legacyProjectDone = false;
+  private missionBaseline: MissionBaseline;
 
   constructor(params: {
     saveId: string;
@@ -105,6 +160,7 @@ export class StoryDirector {
     playerId: string;
     characterName: string;
     difficulty: CareerDifficulty;
+    skipInitialSeeding?: boolean;
   }) {
     this.saveId = params.saveId;
     this.world = params.world;
@@ -164,9 +220,12 @@ export class StoryDirector {
       },
     };
 
-    this.seedCareerWorldNpcs();
-    this.seedInitialPhoneInbox();
-    this.adjustStartingCapitalForDifficulty();
+    if (!params.skipInitialSeeding) {
+      this.seedCareerWorldNpcs();
+      this.seedInitialPhoneInbox();
+      this.adjustStartingCapitalForDifficulty();
+    }
+    this.missionBaseline = this.captureMissionBaseline(this.activeMissionId);
   }
 
   private adjustStartingCapitalForDifficulty(): void {
@@ -208,6 +267,13 @@ export class StoryDirector {
         NPC_DUC_HUY_WALLET_ID,
         toMinor(450_000),
         'Vốn doanh nghiệp Apex Horizon — Phạm Đức Huy (Career World)',
+      );
+    }
+    if (!this.world.ledger.wallets.getWallet(NPC_GIA_HAN_WALLET_ID)) {
+      this.world.ledger.createWallet(
+        NPC_GIA_HAN_WALLET_ID,
+        toMinor(150_000),
+        'Vốn đồng sáng lập — Trần Gia Hân (Career World)',
       );
     }
 
@@ -381,12 +447,68 @@ export class StoryDirector {
   }
 
   /**
+   * Server-side scene access gate (V6.1 Req 3):
+   * Only allows currently active/queued scenes, scenes belonging to the active mission,
+   * or unlocked appointments/messages within chapters <= currentChapter.
+   * Rejects future-chapter or unreached mission scenes.
+   */
+  public isSceneAccessible(sceneId: string): boolean {
+    const scene = STORY_SCENES[sceneId];
+    if (!scene) return false;
+    if (this.activeSceneId === sceneId || this.sceneQueue.includes(sceneId)) {
+      return true;
+    }
+    if (scene.chapterNumber > this.currentChapter) {
+      return false;
+    }
+    const activeMission = getMissionSpec(this.activeMissionId);
+    if (activeMission.introSceneId === sceneId) {
+      return true;
+    }
+    // Allow uncompleted completion scenes of missions already completed
+    for (const mId of this.completedMissionIds) {
+      const m = getMissionSpec(mId);
+      if (m.completionSceneId === sceneId && !this.completedSceneIds.has(sceneId)) {
+        return true;
+      }
+    }
+    // Allow scenes tied to active unlocked appointments in unlocked chapters
+    if (
+      this.appointments.some(
+        (a) => a.sceneId === sceneId && !a.completed && a.chapterNumber <= this.currentChapter,
+      )
+    ) {
+      return true;
+    }
+    // Allow scenes tied to received phone messages in unlocked chapters (if not yet completed)
+    if (
+      !this.completedSceneIds.has(sceneId) &&
+      this.phoneMessages.some(
+        (m) =>
+          m.chapterNumber <= this.currentChapter &&
+          (m.triggerSceneId === sceneId || m.replyOptions.some((o) => o.triggerSceneId === sceneId)),
+      )
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
    * Open a scene (idempotent if already active, queued if another dialogue is active).
+   * Enforces strict progression gating so future chapters cannot be accessed early.
    */
   public triggerScene(sceneId: string, forceImmediate = false): void {
     const scene = STORY_SCENES[sceneId];
     if (!scene) {
       throw new DomainError('VALIDATION_ERROR', 'Không tìm thấy cảnh hội thoại yêu cầu.', 404);
+    }
+    if (!this.isSceneAccessible(sceneId)) {
+      throw new DomainError(
+        'FORBIDDEN',
+        'Cảnh hội thoại này thuộc chương hoặc nhiệm vụ chưa được mở khóa.',
+        403,
+      );
     }
     if (scene.featuredNpcId) {
       this.relationships[scene.featuredNpcId].met = true;
@@ -504,12 +626,40 @@ export class StoryDirector {
     sceneTitle: string,
     choice: DialogueChoice,
   ): { navigateToRoute?: string; executedActionNote?: string } {
+    let navigateToRoute: string | undefined;
+    let executedActionNote: string | undefined;
+
+    // 1. Execute authoritative business/economic actions FIRST (V6.1 Reqs 5 & 6).
+    // If a real financial/corporate transaction fails, throw BEFORE mutating storyFlags, trust, or completing missions!
+    if (choice.executeAction === 'OPEN_BUSINESS_FLOW') {
+      navigateToRoute = 'business';
+    } else if (choice.executeAction === 'OPEN_EXCHANGE_FLOW') {
+      navigateToRoute = 'exchange';
+    } else if (choice.executeAction === 'ACCEPT_NAM_OFFER' || choice.executeAction === 'NEGOTIATE_NAM_OFFER') {
+      executedActionNote = this.executeNamInvestmentDeal(choice.executeAction === 'NEGOTIATE_NAM_OFFER');
+    } else if (choice.executeAction === 'REJECT_NAM_OFFER') {
+      executedActionNote = 'Bạn đã từ chối gọi vốn và giữ nguyên 100% tỷ lệ sở hữu hiện tại.';
+    } else if (choice.executeAction === 'TRIGGER_RECESSION') {
+      executedActionNote = this.triggerChapter4Recession();
+    } else if (choice.executeAction === 'HUY_ALLIANCE_DEAL') {
+      executedActionNote = this.executeHuyAllianceDeal();
+    } else if (choice.executeAction === 'COMPLETE_ENDING') {
+      this.directorState = 'CAMPAIGN_COMPLETED';
+    }
+
+    // 2. Only apply story flags, NPC roles, trust, memories & mission completion AFTER action succeeded
     if (choice.setFlags) {
       Object.assign(this.storyFlags, choice.setFlags);
       if (choice.setFlags.giaHanRole === 'COFOUNDER') {
-        this.relationships.gia_han.roleInPlayerStory = 'Đồng sáng lập & COO';
-        this.relationships.gia_han.companyMember = true;
+        this.storyFlags.giaHanCoFounderPending = true;
+        this.relationships.gia_han.roleInPlayerStory = 'Đồng sáng lập (chờ góp vốn công ty)';
+        this.relationships.gia_han.companyMember = false;
+        const settledNote = this.trySettleGiaHanCoFounderEquity();
+        if (settledNote) {
+          executedActionNote = executedActionNote ? `${executedActionNote} ${settledNote}` : settledNote;
+        }
       } else if (choice.setFlags.giaHanRole === 'FRIEND_ADVISOR') {
+        this.storyFlags.giaHanCoFounderPending = false;
         this.relationships.gia_han.roleInPlayerStory = 'Cố vấn độc lập';
         this.relationships.gia_han.companyMember = false;
       }
@@ -548,27 +698,6 @@ export class StoryDirector {
       }
     }
 
-    let navigateToRoute: string | undefined;
-    let executedActionNote: string | undefined;
-
-    if (choice.executeAction === 'OPEN_BUSINESS_FLOW') {
-      navigateToRoute = 'business';
-    } else if (choice.executeAction === 'OPEN_EXCHANGE_FLOW') {
-      navigateToRoute = 'exchange';
-    } else if (choice.executeAction === 'ACCEPT_NAM_OFFER' || choice.executeAction === 'NEGOTIATE_NAM_OFFER') {
-      executedActionNote = this.executeNamInvestmentDeal(choice.executeAction === 'NEGOTIATE_NAM_OFFER');
-    } else if (choice.executeAction === 'REJECT_NAM_OFFER') {
-      executedActionNote = 'Bạn đã từ chối gọi vốn và giữ nguyên 100% tỷ lệ sở hữu hiện tại.';
-    } else if (choice.executeAction === 'TRIGGER_RECESSION') {
-      executedActionNote = this.triggerChapter4Recession();
-    } else if (choice.executeAction === 'HUY_ALLIANCE_DEAL') {
-      this.relationships.duc_huy.roleInPlayerStory = 'Đối tác liên minh chiến lược';
-      executedActionNote = 'Liên minh chiến lược với Apex Horizon của Phạm Đức Huy đã được ký kết.';
-    } else if (choice.executeAction === 'COMPLETE_ENDING') {
-      this.directorState = 'CAMPAIGN_COMPLETED';
-      this.freePlayUnlocked = true;
-    }
-
     if (choice.completeMissionId) {
       this.completeMissionIdempotent(choice.completeMissionId);
     }
@@ -579,38 +708,123 @@ export class StoryDirector {
 
   /**
    * Executes Lê Hoàng Nam's primary equity investment strictly through BusinessEmpireEngine & LedgerService.
-   * Cash enters the COMPANY account (never personal wallet) and shares dilute accurately.
+   * V6.1 Req 5: NEVER sets namDealSettled=true on failure or missing company; propagates real engine errors
+   * so shares, NPC role, and M13 mission progress only update after confirmed settlement.
    */
   private executeNamInvestmentDeal(negotiated: boolean): string {
     if (this.storyFlags.namDealSettled) {
       return 'Thương vụ gọi vốn cùng Lê Hoàng Nam đã được ghi nhận trước đó.';
     }
     this.refreshDynamicNamOffer();
-    const company = this.getPlayerPrimaryCompany();
+    const company = this.getPlayerBusinesses().find((b) => b.status === 'ACTIVE') ?? null;
     if (!company) {
-      this.storyFlags.namDealSettled = true;
-      return 'Chưa có doanh nghiệp để nhận vốn; quyết định đã được ghi nhận vào hồ sơ.';
+      throw new DomainError(
+        'VALIDATION_ERROR',
+        'Bạn cần sở hữu ít nhất 1 doanh nghiệp đang hoạt động (ACTIVE) để thực hiện thương vụ gọi vốn cùng Lê Hoàng Nam.',
+        400,
+      );
     }
 
     const baseInvestCR = Math.max(20_000, Math.round(this.namOfferInvestmentMinor / 100));
     const investmentCR = negotiated ? Math.round(baseInvestCR * 0.72) : baseInvestCR;
 
-    try {
-      const res = this.world.businessEmpire.raiseCapital({
-        businessId: company.id,
-        approvedByFounderId: this.playerId,
-        investorId: NPC_HOANG_NAM_WALLET_ID,
-        investorName: 'Lê Hoàng Nam (Indochina Growth Capital)',
-        investmentCR,
-      });
-      this.storyFlags.namDealSettled = true;
-      this.relationships.hoang_nam.companyMember = true;
-      this.relationships.hoang_nam.roleInPlayerStory = 'Cổ đông chiến lược';
-      return `Đã giải ngân ${investmentCR.toLocaleString('vi-VN')} CR vào tài khoản công ty ${res.business.businessName} (định giá sau gọi vốn ${Math.round(res.postMoneyValuationMinor / 100).toLocaleString('vi-VN')} CR).`;
-    } catch {
-      this.storyFlags.namDealSettled = true;
-      return 'Quyết định đàm phán đã được ghi nhận vào hồ sơ công ty.';
+    const namWallet = this.world.ledger.wallets.getWallet(NPC_HOANG_NAM_WALLET_ID);
+    if (!namWallet || namWallet.availableMinor < toMinor(investmentCR)) {
+      throw new DomainError(
+        'INSUFFICIENT_FUNDS',
+        'Quỹ Indochina Growth Capital hiện không đủ thanh khoản để giải ngân thương vụ này.',
+        400,
+      );
     }
+
+    const res = this.world.businessEmpire.raiseCapital({
+      businessId: company.id,
+      approvedByFounderId: this.playerId,
+      investorId: NPC_HOANG_NAM_WALLET_ID,
+      investorName: 'Lê Hoàng Nam (Indochina Growth Capital)',
+      investmentCR,
+    });
+
+    // Confirmed settlement ONLY after raiseCapital succeeds
+    this.storyFlags.namDealSettled = true;
+    this.storyFlags.namDealBusinessId = company.id;
+    this.relationships.hoang_nam.companyMember = true;
+    this.relationships.hoang_nam.roleInPlayerStory = 'Cổ đông chiến lược';
+    return `Đã giải ngân ${investmentCR.toLocaleString('vi-VN')} CR vào tài khoản công ty ${res.business.businessName} (định giá sau gọi vốn ${Math.round(res.postMoneyValuationMinor / 100).toLocaleString('vi-VN')} CR).`;
+  }
+
+  /**
+   * V6.1 Req 6: Settles Trần Gia Hân's Co-Founder real equity contribution into the player's first active company.
+   */
+  private trySettleGiaHanCoFounderEquity(): string | null {
+    if (!this.storyFlags.giaHanCoFounderPending || this.storyFlags.giaHanCoFounderSettled) {
+      return null;
+    }
+    const company = this.getPlayerBusinesses().find((b) => b.status === 'ACTIVE') ?? null;
+    if (!company) return null;
+
+    const giaHanWallet = this.world.ledger.wallets.getWallet(NPC_GIA_HAN_WALLET_ID);
+    const contribCR = 10_000;
+    if (!giaHanWallet || giaHanWallet.availableMinor < toMinor(contribCR)) {
+      return null;
+    }
+
+    const res = this.world.businessEmpire.raiseCapital({
+      businessId: company.id,
+      approvedByFounderId: this.playerId,
+      investorId: NPC_GIA_HAN_WALLET_ID,
+      investorName: 'Trần Gia Hân (Đồng sáng lập & COO)',
+      investmentCR: contribCR,
+    });
+
+    this.storyFlags.giaHanCoFounderPending = false;
+    this.storyFlags.giaHanCoFounderSettled = true;
+    this.storyFlags.giaHanBusinessId = company.id;
+    this.relationships.gia_han.companyMember = true;
+    this.relationships.gia_han.roleInPlayerStory = 'Đồng sáng lập & COO (Cổ đông)';
+    return `Trần Gia Hân đã góp vốn đồng sáng lập ${contribCR.toLocaleString('vi-VN')} CR vào ${res.business.businessName} và tham gia sổ cổ đông thực tế.`;
+  }
+
+  /**
+   * V6.1 Req 6: Executes Phạm Đức Huy's Strategic Alliance as a real corporate equity partnership in BusinessEmpireEngine.
+   * Throws if player has no active business or Huy's wallet lacks funds, preventing false story settlement.
+   */
+  private executeHuyAllianceDeal(): string {
+    if (this.storyFlags.huyAllianceDealSettled) {
+      return 'Liên minh chiến lược với Apex Horizon của Phạm Đức Huy đã được ký kết trước đó.';
+    }
+    const company = this.getPlayerBusinesses().find((b) => b.status === 'ACTIVE') ?? null;
+    if (!company) {
+      throw new DomainError(
+        'VALIDATION_ERROR',
+        'Bạn cần sở hữu ít nhất 1 doanh nghiệp đang hoạt động (ACTIVE) để ký kết liên minh chiến lược với Apex Horizon.',
+        400,
+      );
+    }
+
+    const allianceCR = 25_000;
+    const huyWallet = this.world.ledger.wallets.getWallet(NPC_DUC_HUY_WALLET_ID);
+    if (!huyWallet || huyWallet.availableMinor < toMinor(allianceCR)) {
+      throw new DomainError(
+        'INSUFFICIENT_FUNDS',
+        'Apex Horizon của Phạm Đức Huy hiện không đủ thanh khoản cho thương vụ liên minh.',
+        400,
+      );
+    }
+
+    const res = this.world.businessEmpire.raiseCapital({
+      businessId: company.id,
+      approvedByFounderId: this.playerId,
+      investorId: NPC_DUC_HUY_WALLET_ID,
+      investorName: 'Phạm Đức Huy (Apex Horizon Alliance)',
+      investmentCR: allianceCR,
+    });
+
+    this.storyFlags.huyAllianceDealSettled = true;
+    this.storyFlags.huyAllianceBusinessId = company.id;
+    this.relationships.duc_huy.companyMember = true;
+    this.relationships.duc_huy.roleInPlayerStory = 'Đối tác liên minh chiến lược (Cổ đông)';
+    return `Liên minh chiến lược Apex Horizon đã giải ngân ${allianceCR.toLocaleString('vi-VN')} CR vào ${res.business.businessName} và ghi nhận cổ phần chiến lược thực tế.`;
   }
 
   private triggerChapter4Recession(): string {
@@ -658,7 +872,7 @@ export class StoryDirector {
 
     if (this.completedMissionIds.has('M30')) {
       this.directorState = this.selectedEndingId ? 'FREE_PLAY' : 'CAMPAIGN_COMPLETED';
-      this.freePlayUnlocked = true;
+      this.freePlayUnlocked = Boolean(this.selectedEndingId);
     } else {
       this.directorState = 'MISSION_IN_PROGRESS';
     }
@@ -720,12 +934,62 @@ export class StoryDirector {
     this.touchSaved();
   }
 
+  private captureMissionBaseline(missionId: string): MissionBaseline {
+    const businesses = this.getPlayerBusinesses();
+    const profile = this.world.getPlayerProfile(this.playerId);
+    const playerOrders = this.world.matching.listPlayerOrders(this.playerId);
+    return {
+      capturedForMissionId: missionId,
+      businessesCount: businesses.length,
+      totalEmployees: businesses.reduce((sum, b) => sum + b.employeeCount, 0),
+      totalUpgrades: businesses.reduce(
+        (sum, b) => sum + Object.values(b.upgradeTree).filter((rank) => rank > 0).length,
+        0,
+      ),
+      totalCycles: businesses.reduce((sum, b) => sum + b.financialHistory.length, 0),
+      totalBranches: businesses.reduce((sum, b) => sum + b.branches.length, 0),
+      totalAuditLogs: businesses.reduce((sum, b) => sum + b.auditLogs.length, 0),
+      maxBizLevel: businesses.reduce((m, b) => Math.max(m, b.level), 0),
+      filledOrdersCount: playerOrders.filter((o) => o.status === 'FILLED' || o.filledQuantity > 0).length,
+      ownedProperties: this.world.properties.listProperties().filter((p) => p.ownerId === this.playerId).length,
+      ownedFunds: this.world.funds
+        .listFunds()
+        .filter((f) => f.founderId === this.playerId || f.members.some((m) => m.playerId === this.playerId)).length,
+      ownedHoldings: this.world.businessEmpire
+        .listHoldings()
+        .filter((h) => h.founderId === this.playerId).length,
+      stockHoldings: (profile?.holdings ?? []).filter((h) => h.availableQty + h.lockedQty > 0).length,
+      macroHistoryLen: this.world.macroV4.indicatorHistory.length,
+      savingsMinor: profile?.wallet.savingsMinor ?? 0,
+      cashMinor: profile?.wallet.availableMinor ?? 0,
+    };
+  }
+
   /**
-   * Authoritative gameplay evaluation: checks real Career WorldEngine state
-   * (businesses, cycles, employees, upgrades, orders, holdings, funds, cash, macro phase)
-   * to advance real gameplay-linked missions & side missions idempotently.
+   * Authoritative gameplay evaluation (V6.1 Reqs 6, 7 & 8):
+   * - Evaluates real post-unlock deltas against missionBaseline to prevent accidental mission cascades.
+   * - Automatically settles pending Gia Hân Co-Founder equity when player establishes their first company.
+   * - Stops cascading whenever a newly unlocked mission has an uncompleted introSceneId.
    */
   public syncGameplayProgress(): void {
+    // Settle pending Gia Hân Co-Founder real equity contribution once the player's company exists
+    if (this.storyFlags.giaHanCoFounderPending && !this.storyFlags.giaHanCoFounderSettled) {
+      try {
+        const note = this.trySettleGiaHanCoFounderEquity();
+        if (note) {
+          this.enqueueCorner({
+            npcId: 'gia_han',
+            headline: 'Trần Gia Hân đã góp vốn đồng sáng lập',
+            message: note,
+            ctaLabel: 'Xem doanh nghiệp',
+            targetRoute: 'business',
+          });
+        }
+      } catch {
+        // Retry on next sync when company is eligible
+      }
+    }
+
     const businesses = this.getPlayerBusinesses();
     const profile = this.world.getPlayerProfile(this.playerId);
     const totalEmployees = businesses.reduce((sum, b) => sum + b.employeeCount, 0);
@@ -735,6 +999,7 @@ export class StoryDirector {
     );
     const totalCycles = businesses.reduce((sum, b) => sum + b.financialHistory.length, 0);
     const totalBranches = businesses.reduce((sum, b) => sum + b.branches.length, 0);
+    const totalAuditLogs = businesses.reduce((sum, b) => sum + b.auditLogs.length, 0);
     const maxBizLevel = businesses.reduce((m, b) => Math.max(m, b.level), 0);
     const companyCashMax = businesses.reduce((m, b) => Math.max(m, b.companyCashMinor), 0);
     const hasProfitableCycle = businesses.some((b) => b.netProfitLastCycleMinor > 0);
@@ -760,117 +1025,137 @@ export class StoryDirector {
       .listHoldings()
       .filter((h) => h.founderId === this.playerId).length;
     const stockHoldings = (profile?.holdings ?? []).filter((h) => h.availableQty + h.lockedQty > 0).length;
-    const hasStrategyAdjustment = businesses.some(
-      (b) =>
-        Object.values(b.upgradeTree).some((rank) => rank > 0) ||
-        b.branches.length >= 2 ||
-        b.auditLogs.some((a) => a.action.includes('SETTINGS') || a.action.includes('UPGRADE') || a.action.includes('EMPLOYEE')),
-    );
-    const hasGovernanceOrDividend = businesses.some(
-      (b) =>
-        b.auditLogs.some(
-          (a) =>
-            a.action.includes('DIVIDEND') ||
-            a.action.includes('PROPOSAL') ||
-            a.action.includes('CAPITAL') ||
-            a.action.includes('UPGRADE'),
-        ) || b.reputation >= 55,
-    );
+    const macroHistoryLen = this.world.macroV4.indicatorHistory.length;
+    const savingsMinor = profile?.wallet.savingsMinor ?? 0;
 
-    // Evaluate active mission chain until no further auto-completion applies
+    // Ensure baseline matches current active mission
+    if (!this.missionBaseline || this.missionBaseline.capturedForMissionId !== this.activeMissionId) {
+      this.missionBaseline = this.captureMissionBaseline(this.activeMissionId);
+    }
+
+    // Evaluate active mission chain with strict post-unlock deltas & anti-cascade guard
     let safety = 0;
-    while (safety < 12) {
+    while (safety < 6) {
       safety += 1;
       const m = getMissionSpec(this.activeMissionId);
       if (this.completedMissionIds.has(m.id)) {
         if (m.nextMissionId) {
           this.activeMissionId = m.nextMissionId;
           this.currentChapter = getMissionSpec(m.nextMissionId).chapterNumber;
+          this.missionBaseline = this.captureMissionBaseline(this.activeMissionId);
           continue;
         }
         break;
       }
 
+      const base = this.missionBaseline;
       let satisfied = false;
       switch (m.objectiveType) {
         case 'COMPLETE_SCENE':
           satisfied = Boolean(m.introSceneId && this.completedSceneIds.has(m.introSceneId));
           break;
         case 'OWN_BUSINESS_COUNT':
-          satisfied = businesses.length >= m.targetValue || (m.id === 'M05' && filledOrdersCount >= 1);
+          if (m.id === 'M05') {
+            satisfied =
+              businesses.length >= m.targetValue || filledOrdersCount > base.filledOrdersCount;
+          } else {
+            // M06 (Opening Day): requires witnessing Chapter 2 opening scene AND owning an active business
+            satisfied =
+              (!m.introSceneId || this.completedSceneIds.has(m.introSceneId)) &&
+              businesses.filter((b) => b.status === 'ACTIVE').length >= m.targetValue;
+          }
           break;
         case 'HIRE_EMPLOYEES_OR_UPGRADE':
-          satisfied = totalEmployees >= 3 || totalUpgrades >= 1;
+          satisfied = totalEmployees > base.totalEmployees || totalUpgrades > base.totalUpgrades;
           break;
         case 'COMPLETE_BUSINESS_CYCLE':
-          satisfied = totalCycles >= 1;
+          satisfied = totalCycles > base.totalCycles;
           break;
         case 'BUSINESS_STRATEGY_ACTION':
           satisfied =
             this.completedSceneIds.has('scene_ch2_duc_huy_rival') &&
-            (hasStrategyAdjustment || totalCycles >= 2);
+            (totalAuditLogs > base.totalAuditLogs ||
+              totalUpgrades > base.totalUpgrades ||
+              totalBranches > base.totalBranches);
           break;
         case 'POSITIVE_CASHFLOW_OR_CASH_TARGET':
-          satisfied = hasProfitableCycle || companyCashMax >= toMinor(15_000);
+          satisfied =
+            totalCycles > base.totalCycles && (hasProfitableCycle || companyCashMax >= toMinor(15_000));
           break;
         case 'REVIEW_OR_VALUE_COMPANY':
           satisfied = this.completedSceneIds.has('scene_ch3_valuation_review');
           break;
         case 'RESOLVE_INVESTOR_OFFER':
-          satisfied = Boolean(this.storyFlags.namOfferDecision);
+          satisfied =
+            this.storyFlags.namOfferDecision === 'REJECTED' ||
+            (Boolean(this.storyFlags.namOfferDecision) && Boolean(this.storyFlags.namDealSettled));
           break;
         case 'EXPAND_BRANCH_OR_UPGRADE':
-          satisfied = totalBranches >= 1 || maxBizLevel >= 2 || businesses.length >= 2 || totalUpgrades >= 2;
+          satisfied =
+            totalBranches > base.totalBranches ||
+            maxBizLevel > base.maxBizLevel ||
+            businesses.length > base.businessesCount ||
+            totalUpgrades > base.totalUpgrades;
           break;
         case 'EXPERIENCE_RECESSION_CYCLE':
           satisfied =
             this.recessionTriggeredAtCycle >= 0 &&
-            (this.world.macroV4.indicatorHistory.length > this.recessionTriggeredAtCycle || totalCycles >= this.baselineCyclesCount + 1);
+            (macroHistoryLen > base.macroHistoryLen || totalCycles > base.totalCycles);
           break;
         case 'RESTRUCTURE_OR_RESERVE':
+          // Strictly server-verified corporate/financial restructuring action performed AFTER M19 unlocked (no actionFlag!)
           satisfied =
-            this.restructuredDone ||
-            (profile?.wallet.availableMinor ?? 0) >= toMinor(20_000) ||
-            companyCashMax >= toMinor(20_000) ||
-            businesses.some((b) =>
-              b.auditLogs.some((a) => a.action.includes('RESTRUCTURE') || a.action.includes('INJECT')),
-            );
+            totalAuditLogs > base.totalAuditLogs ||
+            savingsMinor > base.savingsMinor ||
+            filledOrdersCount > base.filledOrdersCount ||
+            totalUpgrades > base.totalUpgrades;
           break;
         case 'SURVIVE_STORM_OR_COMEBACK':
           satisfied =
             this.completedMissionIds.has('M19') &&
-            (businesses.some((b) => b.status === 'ACTIVE') || (profile?.wallet.availableMinor ?? 0) >= toMinor(10_000));
+            totalCycles > base.totalCycles &&
+            (businesses.some((b) => b.status === 'ACTIVE') ||
+              (profile?.wallet.availableMinor ?? 0) >= toMinor(10_000));
           break;
         case 'POST_CRISIS_TRADE_OR_INVEST':
           satisfied =
             this.completedSceneIds.has('scene_ch5_awakening') &&
-            (filledOrdersCount > this.baselineOrdersCount ||
-              ownedProperties >= 1 ||
-              ownedFunds >= 1 ||
-              businesses.length >= 2 ||
-              totalCycles > this.baselineCyclesCount);
+            (filledOrdersCount > base.filledOrdersCount ||
+              ownedProperties > base.ownedProperties ||
+              ownedFunds > base.ownedFunds ||
+              businesses.length > base.businessesCount ||
+              totalCycles > base.totalCycles);
           break;
         case 'RESOLVE_HUY_ALLIANCE':
-          satisfied = Boolean(this.storyFlags.huyAlliance);
+          satisfied =
+            this.storyFlags.huyAlliance === 'INDEPENDENT' ||
+            (this.storyFlags.huyAlliance === 'ALLIED' && Boolean(this.storyFlags.huyAllianceDealSettled));
           break;
-        case 'EXPAND_EMPIRE_ASSET': {
-          const categories =
-            (businesses.length >= 1 ? 1 : 0) +
-            (ownedProperties >= 1 ? 1 : 0) +
-            (ownedFunds >= 1 ? 1 : 0) +
-            (ownedHoldings >= 1 ? 1 : 0) +
-            (stockHoldings >= 1 ? 1 : 0);
-          satisfied = categories >= 2 || businesses.length >= 2;
+        case 'EXPAND_EMPIRE_ASSET':
+          satisfied =
+            businesses.length > base.businessesCount ||
+            ownedProperties > base.ownedProperties ||
+            ownedFunds > base.ownedFunds ||
+            ownedHoldings > base.ownedHoldings ||
+            stockHoldings > base.stockHoldings ||
+            totalBranches > base.totalBranches;
           break;
-        }
         case 'GOVERNANCE_OR_DIVIDEND_ACTION':
-          satisfied = hasGovernanceOrDividend || totalCycles >= this.baselineCyclesCount + 1;
+          satisfied = totalAuditLogs > base.totalAuditLogs;
           break;
         case 'LEGACY_PROJECT_ACTION':
-          satisfied = this.legacyProjectDone || totalCycles > this.baselineCyclesCount || totalUpgrades >= 2 || ownedHoldings >= 1;
+          // Strictly server-verified legacy milestone action performed AFTER M29 unlocked (no actionFlag!)
+          satisfied =
+            ownedHoldings > base.ownedHoldings ||
+            ownedFunds > base.ownedFunds ||
+            ownedProperties > base.ownedProperties ||
+            totalUpgrades > base.totalUpgrades ||
+            totalBranches > base.totalBranches ||
+            maxBizLevel > base.maxBizLevel ||
+            businesses.some((b) => Boolean(b.ipoSymbol));
           break;
         case 'COMPLETE_ENDING':
-          satisfied = this.completedSceneIds.has('scene_ch6_legacy_finale');
+          satisfied = this.completedSceneIds.has('scene_ch6_legacy_finale') && Boolean(this.selectedEndingId);
           break;
         default:
           satisfied = false;
@@ -878,6 +1163,14 @@ export class StoryDirector {
 
       if (satisfied) {
         this.completeMissionIdempotent(m.id);
+        // Anti-cascade: stop if newly unlocked mission has an intro scene not yet viewed,
+        // or if the newly unlocked mission is a gameplay mission waiting for fresh post-unlock actions
+        const nextMission = getMissionSpec(this.activeMissionId);
+        if (nextMission.id === m.id) break;
+        if (nextMission.introSceneId && !this.completedSceneIds.has(nextMission.introSceneId)) {
+          break;
+        }
+        // Baseline was freshly captured for nextMission, so subsequent delta-based missions will naturally wait
       } else {
         break;
       }
@@ -929,28 +1222,22 @@ export class StoryDirector {
     this.missionCompletedAt[missionId] = new Date().toISOString();
     this.unlockedStoryTitles.add(mission.rewardTitle);
 
-    // Snapshot baseline counters for next stage
-    const businesses = this.getPlayerBusinesses();
-    this.baselineCyclesCount = businesses.reduce((sum, b) => sum + b.financialHistory.length, 0);
-    this.baselineOrdersCount = this.world.matching
-      .listPlayerOrders(this.playerId)
-      .filter((o) => o.status === 'FILLED' || o.filledQuantity > 0).length;
-
     // Queue completion scene if present
     if (mission.completionSceneId && !this.completedSceneIds.has(mission.completionSceneId)) {
       this.sceneQueue.push(mission.completionSceneId);
     }
 
-    // Advance pointer to next mission & unlock chapter hooks/phone messages
+    // Advance pointer to next mission & capture fresh baseline for the next mission
     if (mission.nextMissionId) {
       const next = getMissionSpec(mission.nextMissionId);
       const prevChapter = this.currentChapter;
       this.activeMissionId = next.id;
       this.currentChapter = next.chapterNumber;
+      this.missionBaseline = this.captureMissionBaseline(next.id);
       this.onMissionUnlocked(next, next.chapterNumber > prevChapter);
     } else {
-      this.directorState = 'CAMPAIGN_COMPLETED';
-      this.freePlayUnlocked = true;
+      this.directorState = this.selectedEndingId ? 'FREE_PLAY' : 'CAMPAIGN_COMPLETED';
+      this.freePlayUnlocked = Boolean(this.selectedEndingId);
     }
 
     this.touchSaved();
@@ -1136,22 +1423,14 @@ export class StoryDirector {
     }
   }
 
-  public markRestructureConfirmed(): void {
-    this.restructuredDone = true;
-    this.syncGameplayProgress();
-  }
-
-  public markLegacyActionConfirmed(): void {
-    this.legacyProjectDone = true;
-    this.syncGameplayProgress();
-  }
-
   public evaluateAvailableEndings(): EndingSummary[] {
     const businesses = this.getPlayerBusinesses();
+    const profile = this.world.getPlayerProfile(this.playerId);
     const holdings = this.world.businessEmpire.listHoldings().filter((h) => h.founderId === this.playerId);
     const funds = this.world.funds
       .listFunds()
       .filter((f) => f.founderId === this.playerId || f.members.some((m) => m.playerId === this.playerId));
+    const stockHoldings = (profile?.holdings ?? []).filter((h) => h.availableQty + h.lockedQty > 0).length;
     const totalUpgrades = businesses.reduce(
       (s, b) => s + Object.values(b.upgradeTree).filter((rank) => rank > 0).length,
       0,
@@ -1180,9 +1459,12 @@ export class StoryDirector {
         description:
           'Bạn đọc vị nhịp thở thị trường qua cả tăng trưởng lẫn suy thoái, bảo toàn vốn kỷ luật và kiến tạo dòng vốn thông minh dài hạn.',
         unlockedTitle: 'The Investor — Nhà Quản Trị Vốn',
-        eligible: true,
+        eligible:
+          funds.length >= 1 ||
+          stockHoldings >= 1 ||
+          (profile?.wallet.availableMinor ?? 0) >= toMinor(80_000),
         recommended: preferred === 'THE_INVESTOR' || funds.length >= 1,
-        reason: `Tham gia ${funds.length} quỹ đầu tư và xây dựng danh mục phân bổ rủi ro.`,
+        reason: `Tham gia ${funds.length} quỹ đầu tư, nắm ${stockHoldings} mã tài sản và xây dựng dự trữ dòng vốn.`,
       },
       {
         id: 'THE_INNOVATOR',
@@ -1191,7 +1473,7 @@ export class StoryDirector {
         description:
           'Thay vì chạy theo hào nhoáng, bạn liên tục nâng cấp quy trình, chất lượng và công nghệ để tạo ra giá trị thực sự cho khách hàng.',
         unlockedTitle: 'The Innovator — Tiên Phong Đổi Mới',
-        eligible: true,
+        eligible: totalUpgrades >= 1,
         recommended: preferred === 'THE_INNOVATOR' || totalUpgrades >= 2,
         reason: `Triển khai ${totalUpgrades} hạng mục nâng cấp vận hành & chất lượng.`,
       },
@@ -1202,9 +1484,9 @@ export class StoryDirector {
         description:
           'Minh Quân, Gia Hân, Thảo Linh và cả Đức Huy đều nhìn thấy ở bạn hình mẫu lãnh đạo đặt chữ tín và con người lên trên những con số ngắn hạn.',
         unlockedTitle: 'The Legend — Biểu Tượng Uy Tín',
-        eligible: true,
+        eligible: avgTrust >= 50,
         recommended: preferred === 'THE_LEGEND' || avgTrust >= 60,
-        reason: `Độ tín nhiệm trung bình của 5 nhân vật đạt ${Math.round(avgTrust)}/100.`,
+        reason: `Độ tín nhiệm trung bình của 5 nhân vật đạt ${Math.round(avgTrust)}/100 (yêu cầu ≥ 50).`,
       },
       {
         id: 'THE_COMEBACK',
@@ -1224,12 +1506,39 @@ export class StoryDirector {
     return endings;
   }
 
+  /**
+   * V6.1 Req 4: Requires completing campaign prerequisites (Chapter 6 / M29 / Finale)
+   * AND verifying target.eligible === true before unlocking Free Play.
+   */
   public confirmEnding(endingId: CareerEndingId): CareerStoryState {
+    const reachedEndingGate =
+      this.currentChapter >= 6 &&
+      (this.completedMissionIds.has('M29') ||
+        this.completedSceneIds.has('scene_ch6_legacy_finale') ||
+        this.directorState === 'CAMPAIGN_COMPLETED' ||
+        this.freePlayUnlocked);
+
+    if (!reachedEndingGate) {
+      throw new DomainError(
+        'FORBIDDEN',
+        'Bạn cần hoàn thành cốt truyện đến Chương VI (hoàn tất M29 / cảnh kết Di Sản) trước khi mở khóa Free Play.',
+        403,
+      );
+    }
+
     const endings = this.evaluateAvailableEndings();
     const target = endings.find((e) => e.id === endingId);
     if (!target) {
       throw new DomainError('VALIDATION_ERROR', 'Hướng kết thúc không hợp lệ.', 400);
     }
+    if (!target.eligible) {
+      throw new DomainError(
+        'VALIDATION_ERROR',
+        `Bạn chưa đủ điều kiện cho kết thúc ${target.title}. (${target.reason})`,
+        400,
+      );
+    }
+
     this.selectedEndingId = target.id;
     this.freePlayUnlocked = true;
     this.directorState = 'FREE_PLAY';
@@ -1237,6 +1546,84 @@ export class StoryDirector {
     this.completeMissionIdempotent('M30');
     this.touchSaved();
     return this.getSnapshot();
+  }
+
+  public exportState(): SerializedStoryDirectorState {
+    return {
+      saveId: this.saveId,
+      worldId: this.worldId,
+      playerId: this.playerId,
+      characterName: this.characterName,
+      difficulty: this.difficulty,
+      createdAt: this.createdAt,
+      lastSavedAt: this.lastSavedAt,
+      directorState: this.directorState,
+      currentChapter: this.currentChapter,
+      activeMissionId: this.activeMissionId,
+      activeSceneId: this.activeSceneId,
+      activeNodeId: this.activeNodeId,
+      sceneQueue: [...this.sceneQueue],
+      cornerQueue: structuredClone(this.cornerQueue),
+      clockSpeed: this.clockSpeed,
+      paused: this.paused,
+      storyFlags: { ...this.storyFlags },
+      completedSceneIds: Array.from(this.completedSceneIds),
+      completedMissionIds: Array.from(this.completedMissionIds),
+      completedSideMissionIds: Array.from(this.completedSideMissionIds),
+      missionCompletedAt: { ...this.missionCompletedAt },
+      relationships: structuredClone(this.relationships),
+      phoneMessages: structuredClone(this.phoneMessages),
+      appointments: structuredClone(this.appointments),
+      decisions: structuredClone(this.decisions),
+      unlockedStoryTitles: Array.from(this.unlockedStoryTitles),
+      rivalCompanyId: this.rivalCompanyId,
+      rivalCompanyName: this.rivalCompanyName,
+      namOfferValuationMinor: this.namOfferValuationMinor,
+      namOfferInvestmentMinor: this.namOfferInvestmentMinor,
+      namOfferEquityPct: this.namOfferEquityPct,
+      selectedEndingId: this.selectedEndingId,
+      freePlayUnlocked: this.freePlayUnlocked,
+      recessionTriggeredAtCycle: this.recessionTriggeredAtCycle,
+      missionBaseline: { ...this.missionBaseline },
+    };
+  }
+
+  public hydrateState(state: SerializedStoryDirectorState): void {
+    this.characterName = state.characterName;
+    this.createdAt = state.createdAt;
+    this.lastSavedAt = state.lastSavedAt;
+    this.directorState = state.directorState;
+    this.currentChapter = state.currentChapter;
+    this.activeMissionId = state.activeMissionId;
+    this.activeSceneId = state.activeSceneId;
+    this.activeNodeId = state.activeNodeId;
+    this.sceneQueue = [...(state.sceneQueue ?? [])];
+    this.cornerQueue = structuredClone(state.cornerQueue ?? []);
+    this.clockSpeed = state.clockSpeed ?? '1x';
+    // Always hydrate paused after restart so idle background schedulers never run unowned
+    this.paused = true;
+    this.storyFlags = { ...(state.storyFlags ?? {}) };
+    this.completedSceneIds = new Set(state.completedSceneIds ?? []);
+    this.completedMissionIds = new Set(state.completedMissionIds ?? []);
+    this.completedSideMissionIds = new Set(state.completedSideMissionIds ?? []);
+    this.missionCompletedAt = { ...(state.missionCompletedAt ?? {}) };
+    this.relationships = structuredClone(state.relationships);
+    this.phoneMessages = structuredClone(state.phoneMessages ?? []);
+    this.appointments = structuredClone(state.appointments ?? []);
+    this.decisions = structuredClone(state.decisions ?? []);
+    this.unlockedStoryTitles = new Set(state.unlockedStoryTitles ?? ['Người Khởi Hành']);
+    this.rivalCompanyId = state.rivalCompanyId ?? null;
+    this.rivalCompanyName = state.rivalCompanyName ?? 'Apex Horizon Specialty';
+    this.namOfferValuationMinor = state.namOfferValuationMinor ?? toMinor(600_000);
+    this.namOfferInvestmentMinor = state.namOfferInvestmentMinor ?? toMinor(200_000);
+    this.namOfferEquityPct = state.namOfferEquityPct ?? 25;
+    this.selectedEndingId = state.selectedEndingId ?? null;
+    this.freePlayUnlocked = Boolean(state.freePlayUnlocked);
+    this.recessionTriggeredAtCycle =
+      typeof state.recessionTriggeredAtCycle === 'number' ? state.recessionTriggeredAtCycle : -1;
+    this.missionBaseline = state.missionBaseline
+      ? { ...state.missionBaseline }
+      : this.captureMissionBaseline(this.activeMissionId);
   }
 
   private buildMissionProgressMap(): Record<string, MissionProgressSnapshot> {

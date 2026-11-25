@@ -3156,4 +3156,70 @@ export class WorldEngine {
       channel,
     });
   }
+
+  /**
+   * Exports a serializable snapshot of an isolated Career World's authoritative player & economy state
+   * so balances, holdings, businesses, cap tables, and macro phase restore faithfully across restarts.
+   */
+  public exportCareerStateSnapshot(playerId: string, extraWalletIds: string[] = []) {
+    const playerRecord = this.players.get(playerId);
+    const bizSnap = this.businessEmpire.exportSnapshot();
+    const walletIds = new Set<string>([playerId, ...extraWalletIds]);
+    for (const b of bizSnap.businesses) {
+      walletIds.add(this.businessEmpire.companyAccountId(b.id));
+    }
+    for (const h of bizSnap.holdings) {
+      walletIds.add(this.businessEmpire.holdingAccountId(h.id));
+    }
+    const wallets = Array.from(walletIds)
+      .map((id) => this.ledger.wallets.getWallet(id))
+      .filter((w): w is NonNullable<typeof w> => Boolean(w))
+      .map((w) => cloneWallet(w));
+
+    const holdings = this.ledger.wallets.listHoldings(playerId).map((h) => ({ ...h }));
+
+    return {
+      playerRecord: playerRecord ? structuredClone(playerRecord) : null,
+      wallets,
+      holdings,
+      businessEmpire: bizSnap,
+      macroV4: {
+        indicators: structuredClone(this.macroV4.indicators),
+        indicatorHistory: structuredClone(this.macroV4.indicatorHistory.slice(-120)),
+        activeEvents: structuredClone(this.macroV4.activeEvents),
+        historicalEvents: structuredClone(this.macroV4.historicalEvents.slice(-40)),
+      },
+    };
+  }
+
+  /**
+   * Hydrates an isolated Career World from a previously exported snapshot after server restart.
+   */
+  public importCareerStateSnapshot(
+    snapshot: ReturnType<WorldEngine['exportCareerStateSnapshot']>,
+  ): void {
+    if (snapshot.playerRecord) {
+      const rec = structuredClone(snapshot.playerRecord);
+      this.players.set(rec.id, rec);
+      this.auth.bindExistingPlayer(rec.username, rec.id);
+    }
+    for (const wallet of snapshot.wallets ?? []) {
+      this.ledger.wallets.saveWallet(cloneWallet(wallet));
+    }
+    if (snapshot.playerRecord) {
+      for (const holding of snapshot.holdings ?? []) {
+        this.ledger.wallets.saveHolding(snapshot.playerRecord.id, { ...holding });
+      }
+    }
+    if (snapshot.businessEmpire) {
+      this.businessEmpire.importSnapshot(snapshot.businessEmpire);
+    }
+    if (snapshot.macroV4) {
+      this.macroV4.indicators = structuredClone(snapshot.macroV4.indicators);
+      this.macroV4.indicatorHistory = structuredClone(snapshot.macroV4.indicatorHistory ?? []);
+      this.macroV4.activeEvents = structuredClone(snapshot.macroV4.activeEvents ?? []);
+      this.macroV4.historicalEvents = structuredClone(snapshot.macroV4.historicalEvents ?? []);
+    }
+    this.economy.syncLedgerMetrics(this.ledger);
+  }
 }

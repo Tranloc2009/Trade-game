@@ -57,19 +57,19 @@ const CAREER_NAV_ITEMS: CareerNavItem[] = [
     id: 'exchange',
     label: 'Sàn giao dịch',
     icon: CandlestickChart,
-    matchPages: ['exchange', 'discover', 'futures', 'forex'],
+    matchPages: ['unified_exchange', 'exchange', 'discover', 'futures', 'forex'],
   },
   {
     id: 'business',
     label: 'Doanh nghiệp',
     icon: Building2,
-    matchPages: ['business', 'corporate', 'capital_hub', 'company_hq', 'empire_hub'],
+    matchPages: ['my_empire', 'business', 'corporate', 'capital_hub', 'company_hq', 'empire_hub', 'funds'],
   },
   {
     id: 'portfolio',
     label: 'Tài sản',
     icon: PieChart,
-    matchPages: ['portfolio', 'property', 'funds', 'banking', 'luxury'],
+    matchPages: ['my_assets', 'portfolio', 'property', 'banking', 'luxury'],
   },
   { id: 'career_world', label: 'Khám phá thế giới', icon: Compass },
   { id: 'career_settings', label: 'Cài đặt', icon: Settings },
@@ -89,6 +89,9 @@ export function CareerShell({
 }: CareerShellProps) {
   const {
     activePage,
+    exchangeTab,
+    empireTab,
+    assetsTab,
     setActivePage,
     sidebarCollapsed,
     toggleSidebar,
@@ -194,12 +197,12 @@ export function CareerShell({
               </div>
               {(
                 [
-                  { id: 'exchange', label: 'Thị trường Spot' },
-                  { id: 'business', label: 'Quản trị Doanh nghiệp' },
-                  { id: 'corporate', label: 'Tập đoàn & M&A' },
-                  { id: 'funds', label: 'Quỹ đầu tư' },
-                  { id: 'property', label: 'Bất động sản VN' },
-                  { id: 'banking', label: 'Ngân hàng & Vay vốn' },
+                  { id: 'exchange', label: 'Thị trường Spot', active: activePage === 'unified_exchange' && exchangeTab === 'spot' },
+                  { id: 'business', label: 'Quản trị Doanh nghiệp', active: activePage === 'my_empire' && empireTab === 'business' },
+                  { id: 'corporate', label: 'Tập đoàn & M&A', active: activePage === 'my_empire' && empireTab === 'corporate' },
+                  { id: 'funds', label: 'Quỹ đầu tư', active: activePage === 'my_empire' && empireTab === 'funds' },
+                  { id: 'property', label: 'Bất động sản VN', active: activePage === 'my_assets' && assetsTab === 'property' },
+                  { id: 'banking', label: 'Ngân hàng & Vay vốn', active: activePage === 'my_assets' && assetsTab === 'banking' },
                 ] as const
               ).map((sub) => (
                 <button
@@ -207,7 +210,7 @@ export function CareerShell({
                   type="button"
                   onClick={() => handleNav(sub.id)}
                   className={`w-full text-left px-3 py-1.5 rounded text-[11px] transition-colors cursor-pointer whitespace-nowrap ${
-                    activePage === sub.id
+                    sub.active || activePage === sub.id
                       ? 'text-[#D4AF6A] font-semibold bg-[#24201B]'
                       : 'text-[#9E9280] hover:text-[#F5EFE6]'
                   }`}
@@ -549,15 +552,15 @@ export function CareerShell({
       >
         {(
           [
-            { id: 'career_home', label: 'Hành trình', icon: BookOpen },
-            { id: 'business', label: 'Doanh nghiệp', icon: Building2 },
-            { id: 'exchange', label: 'Sàn', icon: CandlestickChart },
-            { id: 'portfolio', label: 'Tài sản', icon: PieChart },
-            { id: 'career_world', label: 'Nhân vật', icon: Compass },
+            { id: 'career_home', label: 'Hành trình', icon: BookOpen, match: ['career_home'] },
+            { id: 'business', label: 'Doanh nghiệp', icon: Building2, match: ['my_empire', 'business', 'corporate', 'funds'] },
+            { id: 'exchange', label: 'Sàn', icon: CandlestickChart, match: ['unified_exchange', 'exchange', 'discover', 'futures', 'forex'] },
+            { id: 'portfolio', label: 'Tài sản', icon: PieChart, match: ['my_assets', 'portfolio', 'property', 'banking', 'luxury'] },
+            { id: 'career_world', label: 'Nhân vật', icon: Compass, match: ['career_world'] },
           ] as const
         ).map((tab) => {
           const Icon = tab.icon;
-          const active = activePage === tab.id;
+          const active = (tab.match as readonly string[]).includes(activePage);
           return (
             <button
               key={tab.id}

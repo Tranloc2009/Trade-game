@@ -50,6 +50,7 @@ async function careerRequest<T>(path: string, init: RequestInit = {}, auth = tru
 export const CareerStoryService = {
   login: (params: {
     username: string;
+    password?: string;
     preset?: 'ALICE' | 'BOB' | 'CUSTOM';
     difficulty?: CareerDifficulty;
     characterName?: string;
@@ -63,6 +64,34 @@ export const CareerStoryService = {
       },
       false,
     ),
+
+  logout: () =>
+    careerRequest<{ loggedOut: boolean; pausedCareerSaveIds: string[] }>('/api/account/logout', {
+      method: 'POST',
+    }),
+
+  pauseCareer: () =>
+    careerRequest<{ paused: boolean; saveId: string | null }>('/api/career/pause', {
+      method: 'POST',
+    }),
+
+  pauseCareerKeepalive: () => {
+    const token = getAccountAuthToken();
+    if (!token || typeof fetch === 'undefined') return;
+    try {
+      void fetch('/api/career/pause', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: '{}',
+        keepalive: true,
+      });
+    } catch {
+      // ignore unload network errors
+    }
+  },
 
   getAccountState: () => careerRequest<AccountOverviewPayload>('/api/account/state'),
 
