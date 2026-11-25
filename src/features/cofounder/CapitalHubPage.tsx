@@ -47,15 +47,17 @@ type HubTab =
   | 'MY_INVESTMENTS'
   | 'INVITES';
 
-const HUB_TABS: Array<{ id: HubTab; label: string }> = [
-  { id: 'DISCOVER', label: 'Khám phá dự án' },
-  { id: 'COFOUNDER_WIZARD', label: 'Tìm đồng sáng lập' },
-  { id: 'ROUNDS', label: 'Doanh nghiệp đang gọi vốn' },
+const PRIMARY_HUB_TABS: Array<{ id: HubTab; label: string }> = [
+  { id: 'DISCOVER', label: 'Tìm dự án' },
+  { id: 'COFOUNDER_WIZARD', label: 'Tạo dự án' },
+  { id: 'MY_INVESTMENTS', label: 'Khoản góp vốn của tôi' },
+];
+
+const ADVANCED_HUB_TABS: Array<{ id: HubTab; label: string }> = [
+  { id: 'ROUNDS', label: 'Vòng gọi vốn' },
   { id: 'FUNDS', label: 'Quỹ đầu tư' },
   { id: 'EQUITY_MARKET', label: 'Thị trường cổ phần' },
-  { id: 'JOINT_VENTURES', label: 'Thương vụ liên doanh' },
-  { id: 'MY_INVESTMENTS', label: 'Khoản đầu tư của tôi' },
-  { id: 'INVITES', label: 'Lời mời hợp tác' },
+  { id: 'JOINT_VENTURES', label: 'Liên doanh' },
 ];
 
 const CITY_OPTIONS: Array<{ code: V4CityCode; label: string }> = [
@@ -115,10 +117,26 @@ function formatError(err: unknown): string {
 }
 
 export function CapitalHubPage() {
-  const { player, cofounderSyncSeq, v4SyncSeq, openCompanyHq, setActivePage, pushToast } = useAppStore();
+  const {
+    player,
+    playMode,
+    cofounderSyncSeq,
+    v4SyncSeq,
+    openCompanyHq,
+    setActivePage,
+    pushToast,
+    showGameFeedback,
+  } = useAppStore();
 
-  const [worldMode, setWorldMode] = useState<WorldMode>('ONLINE');
+  const [worldMode, setWorldMode] = useState<WorldMode>(
+    playMode === 'CAREER' ? 'CAREER' : 'ONLINE',
+  );
   const [activeTab, setActiveTab] = useState<HubTab>('DISCOVER');
+  const [showAdvancedMarkets, setShowAdvancedMarkets] = useState(false);
+
+  useEffect(() => {
+    setWorldMode(playMode === 'CAREER' ? 'CAREER' : 'ONLINE');
+  }, [playMode]);
   const [hub, setHub] = useState<CoFounderCapitalHubPayload | null>(null);
   const [myInv, setMyInv] = useState<MyInvestmentsPayload | null>(null);
   const [allBusinesses, setAllBusinesses] = useState<BusinessEntity[]>([]);
@@ -333,6 +351,18 @@ export function CapitalHubPage() {
       async () => {
         const res = await CoFounderService.activateProject(project.id, `ui_act_${project.id}_${Date.now()}`);
         openCompanyHq(res.company.id);
+        showGameFeedback({
+          kind: 'DEAL_SUCCESS',
+          title: `Thương vụ Đồng sáng lập thành công: ${project.businessName}`,
+          subtitle: 'Toàn bộ vốn Capital Escrow đã được giải ngân vào quỹ doanh nghiệp và phát hành cổ phần minh bạch cho các nhà sáng lập.',
+          metrics: [
+            { label: 'Tổng vốn giải ngân', value: formatCR(project.committedCapitalMinor), tone: 'positive' },
+            { label: 'Số cổ phần phát hành', value: `${project.initialTotalShares.toLocaleString('en-US')} CP`, tone: 'accent' },
+            { label: 'Trạng thái công ty', value: 'Đang hoạt động', tone: 'neutral' },
+          ],
+          nextObjective: 'Vào Trụ sở Công ty để phân bổ vai trò điều hành, bỏ phiếu nghị quyết và theo dõi lợi nhuận.',
+          ctaLabel: 'Mở Trụ sở công ty',
+        });
       },
       `Đã kích hoạt ${project.businessName}`,
       'Toàn bộ vốn Escrow đã chuyển vào Quỹ Công ty và phát hành cổ phần chính xác theo tỷ lệ.',
@@ -540,33 +570,87 @@ export function CapitalHubPage() {
         </div>
       </div>
 
-      {/* 8 Horizontal Tabs */}
-      <div
-        role="tablist"
-        aria-label="Các mục Capital Hub"
-        className="flex items-center gap-1 overflow-x-auto border-b border-[var(--border-subtle)] pb-px"
-      >
-        {HUB_TABS.map((tab) => {
-          const active = activeTab === tab.id;
-          const badge = tab.id === 'INVITES' && pendingInvitesCount > 0 ? ` (${pendingInvitesCount})` : '';
-          return (
+      {/* 3 Primary Co-Founder Tabs + Invites Button + Collapsible Advanced Markets */}
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border-subtle)] pb-px">
+          <div
+            role="tablist"
+            aria-label="Các mục chính Capital Hub"
+            className="flex items-center gap-1 overflow-x-auto no-scrollbar"
+          >
+            {PRIMARY_HUB_TABS.map((tab) => {
+              const active = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  data-testid={`cofounder-tab-${tab.id}`}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`px-3.5 py-2.5 text-xs sm:text-sm font-semibold border-b-2 transition-colors cursor-pointer whitespace-nowrap min-h-[44px] ${
+                    active
+                      ? 'border-[var(--accent)] text-[var(--accent)]'
+                      : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center gap-2 pb-1.5">
             <button
-              key={tab.id}
               type="button"
-              role="tab"
-              aria-selected={active}
-              onClick={() => setActiveTab(tab.id)}
-              className={`px-3 py-2 text-xs font-medium border-b-2 transition-colors cursor-pointer whitespace-nowrap ${
-                active
-                  ? 'border-[var(--accent)] text-[var(--accent)]'
-                  : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+              data-testid="cofounder-invites-btn"
+              onClick={() => setActiveTab('INVITES')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 border transition-colors cursor-pointer whitespace-nowrap ${
+                activeTab === 'INVITES'
+                  ? 'border-[var(--accent)] bg-[var(--accent)]/15 text-[var(--accent)]'
+                  : 'border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-primary)] hover:border-[var(--accent)]/60'
               }`}
             >
-              {tab.label}
-              {badge}
+              <Mail className="w-3.5 h-3.5 text-[var(--accent)]" />
+              <span>Lời mời hợp tác</span>
+              {pendingInvitesCount > 0 && (
+                <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-[var(--accent)] text-[var(--text-on-accent)]">
+                  {pendingInvitesCount}
+                </span>
+              )}
             </button>
-          );
-        })}
+
+            <button
+              type="button"
+              onClick={() => setShowAdvancedMarkets((v) => !v)}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer whitespace-nowrap"
+            >
+              {showAdvancedMarkets ? 'Ẩn thị trường mở rộng' : 'Vòng vốn, Quỹ & Liên doanh'}
+            </button>
+          </div>
+        </div>
+
+        {(showAdvancedMarkets || ADVANCED_HUB_TABS.some((t) => t.id === activeTab)) && (
+          <div className="flex flex-wrap items-center gap-1.5 pt-1">
+            {ADVANCED_HUB_TABS.map((tab) => {
+              const active = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors cursor-pointer whitespace-nowrap ${
+                    active
+                      ? 'border-[var(--accent)] bg-[var(--accent)]/15 text-[var(--accent)]'
+                      : 'border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* TAB 1: DISCOVER PROJECTS */}

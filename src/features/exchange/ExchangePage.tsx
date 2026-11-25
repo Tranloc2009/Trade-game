@@ -184,13 +184,13 @@ export function ExchangePage() {
         <TradingModeToggle />
 
         {/* Beginner Asset Header */}
-        <div className="rounded-xl border border-slate-800/90 bg-slate-900/75 p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-panel)] p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-3">
             <button
               type="button"
               onClick={() => toggleWatchlist(selectedAsset.symbol)}
               aria-label="Theo dõi mã tài sản"
-              className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-800 bg-slate-950 text-slate-400 hover:text-amber-300"
+              className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-muted)] hover:text-[var(--accent)] cursor-pointer"
             >
               <Star
                 className={`h-4 w-4 ${
@@ -200,20 +200,20 @@ export function ExchangePage() {
             </button>
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-lg font-bold text-white">{selectedAsset.name}</h1>
-                <span className="font-mono text-xs font-semibold text-cyan-300">{selectedAsset.symbol}</span>
-                <span className="text-xs text-slate-500">· {assetVolatility.labelVi}</span>
+                <h1 className="text-lg font-bold text-[var(--text-primary)]">{selectedAsset.name}</h1>
+                <span className="font-mono text-xs font-semibold text-[var(--accent)]">{selectedAsset.symbol}</span>
+                <span className="text-xs text-[var(--text-muted)]">· {assetVolatility.labelVi}</span>
               </div>
               <div className="mt-1 flex flex-wrap items-baseline gap-2.5">
                 <span
-                  className="font-mono text-2xl font-bold tabular-nums text-white"
+                  className="font-mono text-2xl font-bold tabular-nums text-[var(--text-primary)]"
                   data-testid="header-last-price"
                 >
                   {formatCR(selectedAsset.lastPriceMinor)} CR
                 </span>
                 <span
                   className={`inline-flex items-center gap-0.5 font-mono text-xs font-semibold tabular-nums ${
-                    isPositive ? 'text-emerald-400' : 'text-rose-400'
+                    isPositive ? 'text-[var(--positive)]' : 'text-[var(--negative)]'
                   }`}
                 >
                   {isPositive ? <ArrowUpRight className="h-3.5 w-3.5" /> : <ArrowDownRight className="h-3.5 w-3.5" />}
@@ -229,7 +229,7 @@ export function ExchangePage() {
               aria-label="Đổi nhanh tài sản"
               value={activeSymbol}
               onChange={(e) => setSelectedSymbol(e.target.value)}
-              className="min-h-[40px] rounded-lg border border-slate-700 bg-slate-950 px-3 text-xs font-mono font-semibold text-white focus:border-cyan-500 focus:outline-none"
+              className="min-h-[42px] rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 text-xs font-mono font-semibold text-[var(--text-primary)] focus:border-[var(--accent)] focus:outline-none"
             >
               {nonForexAssets.map((a) => (
                 <option key={a.symbol} value={a.symbol}>
@@ -240,7 +240,7 @@ export function ExchangePage() {
             <button
               type="button"
               onClick={() => setActivePage('discover')}
-              className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-950 px-3 text-xs font-medium text-cyan-300 hover:border-cyan-500/50 hover:bg-slate-900"
+              className="inline-flex min-h-[42px] items-center gap-1.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 text-xs font-semibold text-[var(--accent)] hover:border-[var(--accent)]/60 cursor-pointer"
             >
               <Compass className="h-3.5 w-3.5" />
               Khám phá mã khác
@@ -264,13 +264,13 @@ export function ExchangePage() {
             />
 
             {/* Stock or Crypto Friendly Context Card */}
-            <div className="rounded-xl border border-slate-800/80 bg-slate-900/60 p-4 space-y-3">
+            <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-panel)] p-4 space-y-3">
               <div className="flex items-start gap-2.5">
-                <Info className="mt-0.5 h-4 w-4 shrink-0 text-cyan-400" />
-                <div className="text-xs leading-relaxed text-slate-300">
+                <Info className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent)]" />
+                <div className="text-xs leading-relaxed text-[var(--text-secondary)]">
                   {selectedAsset.marketClass === 'STOCK' ? (
                     <>
-                      <strong className="text-white">Mua cổ phiếu nghĩa là bạn sở hữu một phần doanh nghiệp trong game.</strong>{' '}
+                      <strong className="text-[var(--text-primary)]">Mua cổ phiếu nghĩa là bạn sở hữu một phần doanh nghiệp trong game.</strong>{' '}
                       {selectedAsset.description}
                     </>
                   ) : (

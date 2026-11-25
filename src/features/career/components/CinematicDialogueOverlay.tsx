@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ArrowRight,
+  Captions,
   FastForward,
   History,
   MapPin,
@@ -72,6 +73,9 @@ export function CinematicDialogueOverlay({
     toggleCareerSoundMuted,
     careerTypewriterEnabled,
     toggleCareerTypewriter,
+    careerSubtitlesEnabled,
+    toggleCareerSubtitles,
+    reducedMotionPref,
   } = useAppStore();
 
   const [revealedCount, setRevealedCount] = useState(0);
@@ -103,25 +107,23 @@ export function CinematicDialogueOverlay({
     );
   }, [currentNode, careerStory]);
 
-  // Play gentle editorial chord when scene changes
   useEffect(() => {
     if (scene?.id) {
       careerSound.playSceneChord(careerSoundMuted);
     }
   }, [scene?.id, careerSoundMuted]);
 
-  // Typewriter progression (respects toggle & prefers-reduced-motion)
   useEffect(() => {
     if (!currentNode) return;
-    const reduced =
+    const osReduced =
       typeof window !== 'undefined' &&
       window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-    if (!careerTypewriterEnabled || reduced) {
+    if (!careerTypewriterEnabled || osReduced || reducedMotionPref) {
       setRevealedCount(fullText.length);
       return;
     }
     setRevealedCount(0);
-    const stepMs = 16;
+    const stepMs = 15;
     const charsPerTick = 2;
     const timer = window.setInterval(() => {
       setRevealedCount((prev) => {
@@ -133,11 +135,76 @@ export function CinematicDialogueOverlay({
       });
     }, stepMs);
     return () => window.clearInterval(timer);
-  }, [currentNode?.id, fullText, careerTypewriterEnabled]);
+  }, [currentNode?.id, fullText, careerTypewriterEnabled, reducedMotionPref]);
+
+  const isTextComplete = revealedCount >= fullText.length;
+
+  const handleContinueLinear = useCallback(async () => {
+    if (busy) return;
+    if (!isTextComplete) {
+      setRevealedCount(fullText.length);
+      return;
+    }
+    careerSound.playChoiceClick(careerSoundMuted);
+    await onAdvance(undefined);
+  }, [busy, isTextComplete, fullText.length, careerSoundMuted, onAdvance]);
+
+  const handleChoose = useCallback(
+    async (choiceId: string) => {
+      if (busy) return;
+      if (!isTextComplete) {
+        setRevealedCount(fullText.length);
+        return;
+      }
+      careerSound.playChoiceClick(careerSoundMuted);
+      await onAdvance(choiceId);
+    },
+    [busy, isTextComplete, fullText.length, careerSoundMuted, onAdvance],
+  );
+
+  // Keyboard shortcuts: Space/Enter reveals text or advances linear node (never auto-selects choices); 1-4 picks choice
+  useEffect(() => {
+    if (!careerStory || !scene || !currentNode) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (historyOpen) {
+        if (e.key === 'Escape') setHistoryOpen(false);
+        return;
+      }
+      if (e.key === ' ' || e.key === 'Enter') {
+        if (!isTextComplete) {
+          e.preventDefault();
+          setRevealedCount(fullText.length);
+        } else if (visibleChoices.length === 0) {
+          e.preventDefault();
+          void handleContinueLinear();
+        }
+        return;
+      }
+      if (isTextComplete && visibleChoices.length > 0 && ['1', '2', '3', '4'].includes(e.key)) {
+        const idx = Number(e.key) - 1;
+        const picked = visibleChoices[idx];
+        if (picked) {
+          e.preventDefault();
+          void handleChoose(picked.id);
+        }
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [
+    careerStory,
+    scene,
+    currentNode,
+    historyOpen,
+    isTextComplete,
+    fullText.length,
+    visibleChoices,
+    handleContinueLinear,
+    handleChoose,
+  ]);
 
   if (!careerStory || !scene || !currentNode) return null;
 
-  const isTextComplete = revealedCount >= fullText.length;
   const displayedText = fullText.slice(0, revealedCount);
 
   const chapterSpec =
@@ -160,35 +227,13 @@ export function CinematicDialogueOverlay({
         ? careerStory.characterName
         : speakerNpc?.fullName ?? '');
 
-  // Nodes before current in this scene for dialogue history log
   const currentIdx = scene.nodes.findIndex((n) => n.id === currentNode.id);
   const pastNodes = currentIdx > 0 ? scene.nodes.slice(0, currentIdx) : [];
 
   const handleBoxClick = () => {
-    // Clicking while typing reveals full text immediately WITHOUT auto-selecting any choice (§07)
     if (!isTextComplete) {
       setRevealedCount(fullText.length);
     }
-  };
-
-  const handleContinueLinear = async () => {
-    if (busy) return;
-    if (!isTextComplete) {
-      setRevealedCount(fullText.length);
-      return;
-    }
-    careerSound.playChoiceClick(careerSoundMuted);
-    await onAdvance(undefined);
-  };
-
-  const handleChoose = async (choiceId: string) => {
-    if (busy) return;
-    if (!isTextComplete) {
-      setRevealedCount(fullText.length);
-      return;
-    }
-    careerSound.playChoiceClick(careerSoundMuted);
-    await onAdvance(choiceId);
   };
 
   return (
@@ -196,7 +241,7 @@ export function CinematicDialogueOverlay({
       data-testid="cinematic-dialogue-overlay"
       data-scene-id={scene.id}
       data-node-id={currentNode.id}
-      className="fixed inset-0 z-[65] bg-[#0C0B09] text-[#F5EFE6] flex flex-col overflow-hidden"
+      className="fixed inset-0 z-[65] bg-[#0C0B09] text-[var(--text-primary)] flex flex-col overflow-hidden"
       role="dialog"
       aria-modal="true"
       aria-label={scene.title}
@@ -207,19 +252,19 @@ export function CinematicDialogueOverlay({
           src={bgUrl}
           alt={scene.locationLabel}
           referrerPolicy="no-referrer"
-          className="w-full h-full object-cover opacity-75 scale-[1.01] transition-opacity duration-500"
+          className="w-full h-full object-cover opacity-75 transition-opacity duration-500"
         />
-        <div className="absolute inset-0 bg-gradient-to-b from-[#0C0B09]/80 via-[#0C0B09]/45 to-[#0C0B09]/95" />
+        <div className="absolute inset-0 bg-gradient-to-b from-[#0C0B09]/80 via-[#0C0B09]/40 to-[#0C0B09]/96" />
       </div>
 
-      {/* Top Editorial Scene Bar */}
+      {/* Top Scene Bar */}
       <header className="relative z-10 px-4 sm:px-8 pt-4 sm:pt-6 pb-3 flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-[11px] font-mono uppercase tracking-[0.2em] text-[#D4AF6A] truncate">
+          <div className="text-[11px] font-mono uppercase tracking-[0.2em] text-[var(--accent)] truncate">
             {chapterSpec.roman} · {chapterSpec.titleEn}
           </div>
-          <div className="flex items-center gap-2 mt-1 text-xs text-[#C5BAA8]">
-            <MapPin className="w-3.5 h-3.5 text-[#D4AF6A] shrink-0" />
+          <div className="flex items-center gap-2 mt-1 text-xs text-[var(--text-secondary)]">
+            <MapPin className="w-3.5 h-3.5 text-[var(--accent)] shrink-0" />
             <span className="truncate">{scene.locationLabel || bgMeta?.label}</span>
           </div>
         </div>
@@ -227,31 +272,45 @@ export function CinematicDialogueOverlay({
         <div className="flex items-center gap-1.5 shrink-0">
           <button
             type="button"
-            onClick={toggleCareerTypewriter}
-            title={careerTypewriterEnabled ? 'Tắt hiệu ứng đánh chữ (hiện toàn bộ ngay)' : 'Bật hiệu ứng đánh chữ'}
-            className="px-2.5 py-1.5 rounded-md border border-white/15 bg-black/45 hover:bg-black/70 text-[11px] font-medium text-[#E8DFD1] inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+            onClick={toggleCareerSubtitles}
+            title={careerSubtitlesEnabled ? 'Ẩn chú thích cảnh' : 'Hiện chú thích cảnh'}
+            className="px-2.5 py-1.5 rounded-lg border border-white/15 bg-black/45 hover:bg-black/70 text-[11px] font-medium text-[var(--text-primary)] inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
           >
-            <FastForward className="w-3.5 h-3.5 text-[#D4AF6A]" />
+            <Captions className="w-3.5 h-3.5 text-[var(--accent)]" />
+            <span className="hidden md:inline">{careerSubtitlesEnabled ? 'Phụ đề' : 'Gọn'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={toggleCareerTypewriter}
+            title={careerTypewriterEnabled ? 'Tắt hiệu ứng đánh chữ' : 'Bật hiệu ứng đánh chữ'}
+            className="px-2.5 py-1.5 rounded-lg border border-white/15 bg-black/45 hover:bg-black/70 text-[11px] font-medium text-[var(--text-primary)] inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+          >
+            <FastForward className="w-3.5 h-3.5 text-[var(--accent)]" />
             <span className="hidden sm:inline">{careerTypewriterEnabled ? 'Chữ chạy' : 'Hiện ngay'}</span>
           </button>
 
           <button
             type="button"
             onClick={() => setHistoryOpen((v) => !v)}
-            title="Lịch sử hội thoại cảnh hiện tại"
-            className="px-2.5 py-1.5 rounded-md border border-white/15 bg-black/45 hover:bg-black/70 text-[11px] font-medium text-[#E8DFD1] inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+            title="Lịch sử hội thoại"
+            className="px-2.5 py-1.5 rounded-lg border border-white/15 bg-black/45 hover:bg-black/70 text-[11px] font-medium text-[var(--text-primary)] inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
           >
-            <History className="w-3.5 h-3.5 text-[#D4AF6A]" />
-            <span className="hidden sm:inline">Nhật ký thoại</span>
+            <History className="w-3.5 h-3.5 text-[var(--accent)]" />
+            <span className="hidden sm:inline">Lịch sử</span>
           </button>
 
           <button
             type="button"
             onClick={toggleCareerSoundMuted}
-            aria-label={careerSoundMuted ? 'Bật âm thanh Career' : 'Tắt âm thanh Career'}
-            className="p-1.5 rounded-md border border-white/15 bg-black/45 hover:bg-black/70 text-[#E8DFD1] cursor-pointer"
+            aria-label={careerSoundMuted ? 'Bật âm thanh' : 'Tắt âm thanh'}
+            className="p-1.5 rounded-lg border border-white/15 bg-black/45 hover:bg-black/70 text-[var(--text-primary)] cursor-pointer"
           >
-            {careerSoundMuted ? <VolumeX className="w-4 h-4 text-[#9E9280]" /> : <Volume2 className="w-4 h-4 text-[#D4AF6A]" />}
+            {careerSoundMuted ? (
+              <VolumeX className="w-4 h-4 text-[var(--text-muted)]" />
+            ) : (
+              <Volume2 className="w-4 h-4 text-[var(--accent)]" />
+            )}
           </button>
 
           {scene.isOpeningScene && (
@@ -260,7 +319,7 @@ export function CinematicDialogueOverlay({
               disabled={busy}
               onClick={onSkipOpening}
               data-testid="skip-opening-btn"
-              className="px-3 py-1.5 rounded-md border border-[#D4AF6A]/45 bg-[#1C1915]/85 hover:bg-[#2A241D] text-[11px] font-semibold text-[#D4AF6A] inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap disabled:opacity-50"
+              className="px-3 py-1.5 rounded-lg border border-[var(--accent)]/50 bg-[var(--bg-panel)]/90 hover:bg-[var(--bg-elevated)] text-[11px] font-semibold text-[var(--accent)] inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap disabled:opacity-50"
             >
               <SkipForward className="w-3.5 h-3.5" />
               <span>Bỏ qua mở đầu</span>
@@ -269,36 +328,37 @@ export function CinematicDialogueOverlay({
         </div>
       </header>
 
-      {/* Main Stage — Portrait + Optional Scene 04 Capital Showcase */}
+      {/* Main Stage */}
       <div className="relative z-10 flex-1 flex flex-col justify-end px-4 sm:px-8 pb-5 sm:pb-8 max-w-5xl w-full mx-auto">
-        {/* Scene 04 Real Career Capital Preview Card */}
         {currentNode.isCapitalPreview && player && (
           <div
             data-testid="scene04-capital-card"
-            className="mb-4 sm:mb-5 max-w-md rounded-xl border border-[#D4AF6A]/55 bg-[#191612]/92 p-4 sm:p-5 shadow-2xl career-fade-in"
+            className="mb-4 sm:mb-5 max-w-md rounded-2xl border border-[var(--accent)]/55 bg-[var(--bg-panel)]/94 p-4 sm:p-5 shadow-2xl career-fade-in"
           >
-            <div className="flex items-center justify-between text-xs text-[#D4AF6A] font-medium">
+            <div className="flex items-center justify-between text-xs text-[var(--accent)] font-medium">
               <span className="inline-flex items-center gap-1.5">
                 <Wallet className="w-4 h-4" />
                 Vốn khởi đầu Career World (Thực tế)
               </span>
-              <span className="font-mono text-[11px] text-[#C5BAA8]">{careerStory.difficulty}</span>
+              <span className="font-mono text-[11px] text-[var(--text-secondary)]">
+                {careerStory.difficulty}
+              </span>
             </div>
-            <div className="mt-2 font-mono text-2xl sm:text-3xl font-bold text-[#F5EFE6]">
+            <div className="mt-2 font-mono text-2xl sm:text-3xl font-bold text-[var(--text-primary)] tabular-nums">
               {formatCR(player.wallet.availableMinor)} CR
             </div>
-            <div className="mt-1.5 text-xs text-[#C5BAA8] leading-relaxed">
-              Đây là số dư khởi điểm thật trong ví Career của <strong className="text-[#F5EFE6]">{careerStory.characterName}</strong>, tách biệt hoàn toàn khỏi tài khoản Online WORLD-01.
+            <div className="mt-1.5 text-xs text-[var(--text-secondary)] leading-relaxed">
+              Số dư khởi điểm thật trong ví Career của{' '}
+              <strong className="text-[var(--text-primary)]">{careerStory.characterName}</strong>, tách biệt hoàn toàn khỏi Online WORLD-01.
             </div>
           </div>
         )}
 
-        {/* Dialogue Grid: Portrait + Editorial Dialogue Card */}
         <div className="flex flex-col md:flex-row items-end gap-4 sm:gap-6">
-          {/* NPC Character Portrait */}
+          {/* Larger NPC Portrait */}
           {portraitNpc && (
-            <div className="hidden md:block w-52 lg:w-60 shrink-0 career-fade-in">
-              <div className="rounded-xl overflow-hidden border border-[#D4AF6A]/45 bg-[#161310] shadow-2xl">
+            <div className="hidden md:block w-56 lg:w-64 shrink-0 career-fade-in">
+              <div className="rounded-2xl overflow-hidden border border-[var(--accent)]/45 bg-[var(--bg-surface)] shadow-2xl">
                 <div className="aspect-[3/4] w-full overflow-hidden bg-[#12100E]">
                   <img
                     src={getNpcPortraitUrl(portraitNpc.id)}
@@ -307,13 +367,15 @@ export function CinematicDialogueOverlay({
                     className="w-full h-full object-cover object-top"
                   />
                 </div>
-                <div className="px-3.5 py-2.5 bg-[#161310] border-t border-[#342D24]">
-                  <div className="text-sm font-semibold text-[#F5EFE6]">{portraitNpc.fullName}</div>
-                  <div className="text-[11px] text-[#D4AF6A] truncate">{portraitNpc.roleTitle}</div>
+                <div className="px-4 py-3 bg-[var(--bg-surface)] border-t border-[var(--border-subtle)]">
+                  <div className="text-sm font-semibold text-[var(--text-primary)]">
+                    {portraitNpc.fullName}
+                  </div>
+                  <div className="text-xs text-[var(--accent)] truncate">{portraitNpc.roleTitle}</div>
                   {portraitRel && (
-                    <div className="mt-1.5 flex items-center justify-between text-[10px] font-mono text-[#9E9280]">
+                    <div className="mt-1.5 flex items-center justify-between text-[11px] font-mono text-[var(--text-muted)]">
                       <span>Tin cậy</span>
-                      <span className="text-[#E6C784]">{portraitRel.trust}/100</span>
+                      <span className="text-[var(--accent)] tabular-nums">{portraitRel.trust}/100</span>
                     </div>
                   )}
                 </div>
@@ -321,12 +383,11 @@ export function CinematicDialogueOverlay({
             </div>
           )}
 
-          {/* Editorial Dialogue Container */}
+          {/* Editorial Dialogue Card (16-18px readable speech body) */}
           <div
             onClick={handleBoxClick}
-            className="flex-1 w-full rounded-2xl border border-[#D4AF6A]/35 bg-[#14120F]/94 backdrop-blur-md shadow-2xl p-5 sm:p-7 space-y-4 cursor-pointer"
+            className="flex-1 w-full rounded-2xl border border-[var(--accent)]/35 bg-[#14120F]/95 backdrop-blur-md shadow-2xl p-5 sm:p-7 space-y-4 cursor-pointer"
           >
-            {/* Mobile Portrait Header + Speaker Line */}
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
                 {portraitNpc && (
@@ -334,90 +395,95 @@ export function CinematicDialogueOverlay({
                     src={getNpcPortraitUrl(portraitNpc.id)}
                     alt={portraitNpc.fullName}
                     referrerPolicy="no-referrer"
-                    className="md:hidden w-12 h-12 rounded-lg object-cover object-top border border-[#D4AF6A]/50 shrink-0"
+                    className="md:hidden w-12 h-12 rounded-xl object-cover object-top border border-[var(--accent)]/50 shrink-0"
                   />
                 )}
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     {currentNode.speakerId === 'NARRATOR' && (
-                      <Sparkles className="w-3.5 h-3.5 text-[#D4AF6A] shrink-0" />
+                      <Sparkles className="w-4 h-4 text-[var(--accent)] shrink-0" />
                     )}
-                    <span className="font-display-serif text-lg sm:text-xl font-semibold text-[#D4AF6A] truncate">
+                    <span className="font-display-serif text-xl sm:text-2xl font-semibold text-[var(--accent)] truncate">
                       {speakerTitle}
                     </span>
                   </div>
-                  {speakerNpc && (
-                    <div className="text-[11px] text-[#A89C89] truncate">{speakerNpc.roleTitle}</div>
+                  {speakerNpc && careerSubtitlesEnabled && (
+                    <div className="text-xs text-[var(--text-muted)] truncate">{speakerNpc.roleTitle}</div>
                   )}
                 </div>
               </div>
-              <div className="text-[11px] font-mono text-[#8F8474] shrink-0">
-                {scene.title}
-              </div>
+              {careerSubtitlesEnabled && (
+                <div className="text-xs font-mono text-[var(--text-muted)] shrink-0 hidden sm:block">
+                  {scene.title}
+                </div>
+              )}
             </div>
 
-            {/* Dialogue Text */}
             <div
               data-testid="dialogue-node-text"
-              className={`text-sm sm:text-base leading-relaxed min-h-[4.5rem] ${
+              className={`min-h-[5rem] leading-[1.68] ${
                 currentNode.speakerId === 'NARRATOR'
-                  ? 'font-display-serif italic text-[#F5EFE6]/95 text-base sm:text-lg'
-                  : 'text-[#F5EFE6]'
+                  ? 'font-display-serif italic text-[var(--text-primary)] text-[17px] sm:text-[19px]'
+                  : 'text-[var(--text-primary)] text-base sm:text-[18px]'
               }`}
             >
               {displayedText}
               {!isTextComplete && (
-                <span className="inline-block w-1.5 h-4 ml-1 align-middle bg-[#D4AF6A]/80" />
+                <span className="inline-block w-1.5 h-5 ml-1 align-middle bg-[var(--accent)]/85" />
               )}
             </div>
 
-            {/* Choices OR Continue CTA */}
-            <div
-              className="pt-2 space-y-2.5"
-              onClick={(e) => e.stopPropagation()}
-            >
+            <div className="pt-2 space-y-2.5" onClick={(e) => e.stopPropagation()}>
               {!isTextComplete ? (
-                <div className="flex justify-end">
+                <div className="flex items-center justify-between text-xs text-[var(--text-muted)]">
+                  <span>Nhấn Space hoặc chạm khung thoại để hiện toàn bộ</span>
                   <button
                     type="button"
                     onClick={() => setRevealedCount(fullText.length)}
-                    className="text-xs text-[#D4AF6A] hover:text-[#F5EFE6] transition-colors cursor-pointer"
+                    className="text-[var(--accent)] hover:text-[var(--text-primary)] font-semibold cursor-pointer"
                   >
-                    Nhấn để hiện toàn bộ lời thoại →
+                    Hiện ngay →
                   </button>
                 </div>
               ) : visibleChoices.length > 0 ? (
-                <div className="space-y-2" data-testid="dialogue-choices">
+                <div className="space-y-2.5" data-testid="dialogue-choices">
                   {visibleChoices.map((choice, idx) => (
                     <button
                       key={choice.id}
                       type="button"
                       disabled={busy}
-                      onClick={() => handleChoose(choice.id)}
+                      onClick={() => void handleChoose(choice.id)}
                       data-testid={`dialogue-choice-${choice.id}`}
-                      className="w-full text-left px-4 py-3 rounded-xl border border-[#D4AF6A]/35 bg-[#201C17] hover:bg-[#2B251D] hover:border-[#D4AF6A] transition-colors cursor-pointer flex items-start justify-between gap-3 disabled:opacity-50"
+                      className="w-full text-left px-4 py-3.5 rounded-xl border border-[var(--accent)]/35 bg-[var(--bg-panel)] hover:bg-[var(--bg-elevated)] hover:border-[var(--accent)] transition-colors cursor-pointer flex items-start justify-between gap-3 disabled:opacity-50 min-h-[48px]"
                     >
                       <div className="space-y-0.5">
-                        <div className="text-sm font-semibold text-[#F5EFE6]">
-                          <span className="font-mono text-xs text-[#D4AF6A] mr-2">0{idx + 1}.</span>
+                        <div className="text-sm sm:text-base font-semibold text-[var(--text-primary)]">
+                          <span className="font-mono text-xs text-[var(--accent)] mr-2">
+                            [{idx + 1}]
+                          </span>
                           {choice.label}
                         </div>
                         {choice.sublabel && (
-                          <div className="text-xs text-[#B5A996] pl-6">{choice.sublabel}</div>
+                          <div className="text-xs text-[var(--text-secondary)] pl-7">
+                            {choice.sublabel}
+                          </div>
                         )}
                       </div>
-                      <ArrowRight className="w-4 h-4 text-[#D4AF6A] shrink-0 mt-0.5" />
+                      <ArrowRight className="w-4 h-4 text-[var(--accent)] shrink-0 mt-1" />
                     </button>
                   ))}
                 </div>
               ) : (
-                <div className="flex items-center justify-end">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-[11px] text-[var(--text-muted)] hidden sm:inline">
+                    Nhấn Enter hoặc Space để tiếp tục
+                  </span>
                   <button
                     type="button"
                     disabled={busy}
-                    onClick={handleContinueLinear}
+                    onClick={() => void handleContinueLinear()}
                     data-testid="dialogue-continue-btn"
-                    className="px-5 py-2.5 rounded-lg bg-[#D4AF6A] hover:bg-[#C39A50] text-[#11100E] text-sm font-bold inline-flex items-center gap-2 transition-colors cursor-pointer disabled:opacity-50"
+                    className="ml-auto px-6 py-3 rounded-xl bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[var(--text-on-accent)] text-sm font-bold inline-flex items-center gap-2 transition-colors cursor-pointer disabled:opacity-50 min-h-[46px]"
                   >
                     <span>{busy ? 'Đang xử lý...' : 'Tiếp tục'}</span>
                     <ArrowRight className="w-4 h-4" />
@@ -432,28 +498,28 @@ export function CinematicDialogueOverlay({
       {/* Scene Dialogue History Drawer */}
       {historyOpen && (
         <div
-          className="fixed inset-0 z-20 bg-black/60 flex justify-end"
+          className="fixed inset-0 z-20 bg-black/65 flex justify-end"
           onClick={() => setHistoryOpen(false)}
         >
           <div
-            className="w-full max-w-md bg-[#161411] border-l border-[#342D24] h-full flex flex-col"
+            className="w-full max-w-md bg-[var(--bg-surface)] border-l border-[var(--border-subtle)] h-full flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-5 py-4 border-b border-[#342D24] flex items-center justify-between">
-              <span className="font-display-serif text-base font-semibold text-[#F5EFE6]">
-                Nhật ký hội thoại · {scene.title}
+            <div className="px-5 py-4 border-b border-[var(--border-subtle)] flex items-center justify-between">
+              <span className="font-display-serif text-base font-semibold text-[var(--text-primary)]">
+                Nhật ký thoại · {scene.title}
               </span>
               <button
                 type="button"
                 onClick={() => setHistoryOpen(false)}
-                className="p-1 text-[#A89C89] hover:text-[#F5EFE6] cursor-pointer"
+                className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-5 space-y-4">
               {pastNodes.length === 0 ? (
-                <div className="text-xs text-[#8F8474]">
+                <div className="text-xs text-[var(--text-muted)]">
                   Đang ở đoạn mở đầu của cảnh này. Các lời thoại trước đó sẽ được ghi lại tại đây.
                 </div>
               ) : (
@@ -465,9 +531,11 @@ export function CinematicDialogueOverlay({
                         ? careerStory.characterName
                         : 'Dẫn chuyện';
                   return (
-                    <div key={n.id} className="space-y-1 border-b border-[#342D24]/60 pb-3">
-                      <div className="text-xs font-semibold text-[#D4AF6A]">{n.speakerNameOverride ?? sp}</div>
-                      <div className="text-xs text-[#D6CCBD] leading-relaxed">
+                    <div key={n.id} className="space-y-1 border-b border-[var(--border-subtle)]/60 pb-3">
+                      <div className="text-xs font-semibold text-[var(--accent)]">
+                        {n.speakerNameOverride ?? sp}
+                      </div>
+                      <div className="text-sm text-[var(--text-secondary)] leading-relaxed">
                         {resolveNodeText(n, careerStory.storyFlags)}
                       </div>
                     </div>

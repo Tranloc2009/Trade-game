@@ -1,20 +1,24 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   ArrowLeft,
   BookMarked,
   BookOpen,
   Building2,
   CandlestickChart,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Compass,
+  Home,
   LogOut,
+  Map as MapIcon,
   Menu,
   Phone,
   PieChart,
   Play,
-  RefreshCw,
   Settings,
+  Sparkles,
+  Users,
   Volume2,
   VolumeX,
   X,
@@ -27,6 +31,11 @@ import type {
   CareerClockSpeed,
   GamePlayMode,
 } from '../../../../shared/contracts/careerStory';
+import {
+  CAREER_SIDEBAR_SECTIONS,
+  resolveSmartMissionDirective,
+  type CareerSidebarSectionId,
+} from '../../../lib/navigation';
 import { useAppStore, type NavPage } from '../../../store/useAppStore';
 import { CareerClockMenu } from '../components/CareerClockMenu';
 import { CareerTopBarBalance } from '../components/CareerTopBarBalance';
@@ -37,43 +46,20 @@ interface CareerShellProps {
   onSwitchMode: (targetMode: GamePlayMode, careerSaveId?: string) => Promise<void>;
   onSetClockSpeed: (speed: CareerClockSpeed) => Promise<void>;
   onAdvanceCycle: () => Promise<void>;
-  onSyncMission: () => Promise<void>;
+  onTriggerScene: (sceneId?: string) => Promise<void>;
   onSwitchAccount: () => void;
   onLogout: () => void;
   busy?: boolean;
 }
 
-interface CareerNavItem {
-  id: NavPage;
-  label: string;
-  icon: typeof BookOpen;
-  matchPages?: NavPage[];
-}
-
-// Exactly 6 clean narrative-first Career navigation items (§4.1)
-const CAREER_NAV_ITEMS: CareerNavItem[] = [
-  { id: 'career_home', label: 'Hành trình', icon: BookOpen },
-  {
-    id: 'exchange',
-    label: 'Sàn giao dịch',
-    icon: CandlestickChart,
-    matchPages: ['unified_exchange', 'exchange', 'discover', 'futures', 'forex'],
-  },
-  {
-    id: 'business',
-    label: 'Doanh nghiệp',
-    icon: Building2,
-    matchPages: ['my_empire', 'business', 'corporate', 'capital_hub', 'company_hq', 'empire_hub', 'funds'],
-  },
-  {
-    id: 'portfolio',
-    label: 'Tài sản',
-    icon: PieChart,
-    matchPages: ['my_assets', 'portfolio', 'property', 'banking', 'luxury'],
-  },
-  { id: 'career_world', label: 'Khám phá thế giới', icon: Compass },
-  { id: 'career_settings', label: 'Cài đặt', icon: Settings },
-];
+const SECTION_ICONS: Record<CareerSidebarSectionId, typeof BookOpen> = {
+  career_home: BookOpen,
+  career_world: MapIcon,
+  my_empire: Building2,
+  my_assets: PieChart,
+  unified_exchange: CandlestickChart,
+  career_settings: Settings,
+};
 
 const CLOCK_SPEEDS: CareerClockSpeed[] = ['PAUSE', '1x', '2x', '5x', '10x'];
 
@@ -82,30 +68,54 @@ export function CareerShell({
   onSwitchMode,
   onSetClockSpeed,
   onAdvanceCycle,
-  onSyncMission,
+  onTriggerScene,
   onSwitchAccount,
   onLogout,
   busy = false,
 }: CareerShellProps) {
   const {
     activePage,
-    exchangeTab,
-    empireTab,
-    assetsTab,
     setActivePage,
     sidebarCollapsed,
     toggleSidebar,
     careerStory,
     player,
+    gameClock,
     careerSoundMuted,
     toggleCareerSoundMuted,
+    reducedMotionPref,
+    toggleReducedMotion,
     setPhoneOpen,
     setJournalOpen,
+    setMainMenuOpen,
+    setEndingModalOpen,
+    openBusinessCreationWizard,
+    openBusinessWorkspaceTab,
     toasts,
     dismissToast,
   } = useAppStore();
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const accountMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!accountMenuOpen) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (accountMenuRef.current && !accountMenuRef.current.contains(e.target as Node)) {
+        setAccountMenuOpen(false);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setAccountMenuOpen(false);
+    };
+    window.addEventListener('mousedown', onPointerDown);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('mousedown', onPointerDown);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [accountMenuOpen]);
 
   const chapterSpec =
     CAMPAIGN_CHAPTERS.find((c) => c.chapterNumber === (careerStory?.currentChapter ?? 1)) ??
@@ -113,8 +123,7 @@ export function CareerShell({
   const activeMission =
     CAMPAIGN_MISSIONS.find((m) => m.id === careerStory?.activeMissionId) ?? CAMPAIGN_MISSIONS[0];
   const activeProgress = careerStory?.missionProgress[activeMission.id];
-  const unreadMessages =
-    careerStory?.phoneMessages.filter((m) => !m.read).length ?? 0;
+  const unreadMessages = careerStory?.phoneMessages.filter((m) => !m.read).length ?? 0;
 
   const isGuidedSubpage =
     activePage !== 'career_home' &&
@@ -126,29 +135,55 @@ export function CareerShell({
     setMobileMenuOpen(false);
   };
 
+  const handleSmartMissionJump = () => {
+    if (!careerStory) return;
+    const pendingAppt = careerStory.appointments.find((a) => !a.completed);
+    const directive = resolveSmartMissionDirective({
+      mission: activeMission,
+      sceneQueue: careerStory.sceneQueue,
+      pendingAppointmentSceneId: pendingAppt?.sceneId ?? null,
+      pendingAppointmentNpcName: pendingAppt?.title ?? null,
+      directorState: careerStory.directorState,
+      freePlayUnlocked: careerStory.freePlayUnlocked,
+      hasAnyBusiness: (careerStory.missionProgress.M05?.currentValue ?? 0) > 0,
+    });
+    if (directive.actionType === 'OPEN_ENDING') {
+      setEndingModalOpen(true);
+    } else if (directive.actionType === 'TRIGGER_SCENE') {
+      void onTriggerScene(directive.sceneId);
+    } else if (directive.actionType === 'OPEN_BUSINESS_WIZARD') {
+      openBusinessCreationWizard();
+    } else if (directive.actionType === 'OPEN_BUSINESS_TAB' && directive.businessTab) {
+      openBusinessWorkspaceTab(directive.businessTab);
+    } else if (directive.targetPage) {
+      setActivePage(directive.targetPage);
+    }
+  };
+
   return (
     <div
       data-experience="career"
       data-testid="career-shell"
-      className="min-h-screen flex bg-[#11100E] text-[#F5EFE6]"
+      className="min-h-screen flex bg-[var(--bg-app)] text-[var(--text-primary)]"
     >
-      {/* Editorial Warm Charcoal Sidebar */}
+      {/* Editorial Warm Obsidian Sidebar — Exact 6 Items */}
       <aside
-        className={`hidden lg:flex flex-col shrink-0 border-r border-[#342D24] bg-[#161411] transition-[width] duration-150 ${
+        className={`hidden lg:flex flex-col shrink-0 border-r border-[var(--border-subtle)] bg-[var(--bg-surface)] transition-[width] duration-150 ${
           sidebarCollapsed ? 'w-16' : 'w-60'
         }`}
       >
-        <div className="h-14 px-3.5 flex items-center justify-between border-b border-[#342D24]">
+        <div className="h-14 px-3.5 flex items-center justify-between border-b border-[var(--border-subtle)]">
           {!sidebarCollapsed && (
             <button
               type="button"
-              onClick={() => handleNav('career_home')}
-              className="text-left cursor-pointer min-w-0"
+              onClick={() => setMainMenuOpen(true)}
+              title="Mở Menu chính"
+              className="text-left cursor-pointer min-w-0 group"
             >
-              <div className="font-display-serif text-base font-bold tracking-tight text-[#F5EFE6] truncate">
+              <div className="font-display-serif text-base font-bold tracking-tight text-[var(--text-primary)] group-hover:text-[var(--accent)] transition-colors truncate">
                 Trading Empire
               </div>
-              <div className="text-[10px] font-mono uppercase tracking-[0.18em] text-[#D4AF6A]">
+              <div className="text-[10px] font-mono uppercase tracking-[0.16em] text-[var(--accent)]">
                 Career Chronicles
               </div>
             </button>
@@ -157,30 +192,27 @@ export function CareerShell({
             type="button"
             onClick={toggleSidebar}
             aria-label={sidebarCollapsed ? 'Mở rộng menu Career' : 'Thu gọn menu Career'}
-            className="p-1.5 rounded text-[#A89C89] hover:text-[#F5EFE6] hover:bg-[#24201B] transition-colors cursor-pointer"
+            className="p-2 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-panel)] transition-colors cursor-pointer"
           >
             {sidebarCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
           </button>
         </div>
 
-        {/* 6 Clean Career Navigation Items */}
         <nav className="flex-1 py-4 px-2.5 space-y-1 overflow-y-auto" aria-label="Điều hướng Career Mode">
-          {CAREER_NAV_ITEMS.map((item) => {
-            const Icon = item.icon;
-            const active = item.matchPages
-              ? item.matchPages.includes(activePage)
-              : activePage === item.id;
+          {CAREER_SIDEBAR_SECTIONS.map((item) => {
+            const Icon = SECTION_ICONS[item.id];
+            const active = item.matchPages.includes(activePage);
             return (
               <button
                 key={item.id}
                 type="button"
-                onClick={() => handleNav(item.id)}
+                onClick={() => handleNav(item.targetPage)}
                 title={sidebarCollapsed ? item.label : undefined}
                 data-testid={`career-nav-${item.id}`}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors cursor-pointer whitespace-nowrap min-h-[44px] ${
                   active
-                    ? 'bg-[#26211A] text-[#D4AF6A] border border-[#D4AF6A]/35'
-                    : 'text-[#C5BAA8] hover:text-[#F5EFE6] hover:bg-[#1F1C17] border border-transparent'
+                    ? 'bg-[var(--bg-panel)] text-[var(--accent)] border border-[var(--accent)]/40'
+                    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-panel)]/70 border border-transparent'
                 }`}
               >
                 <Icon className="w-4 h-4 shrink-0" />
@@ -188,70 +220,15 @@ export function CareerShell({
               </button>
             );
           })}
-
-          {/* Sub-module quick links when inside Tài sản / Doanh nghiệp / Sàn */}
-          {!sidebarCollapsed && isGuidedSubpage && (
-            <div className="pt-3 mt-3 border-t border-[#342D24]/80 space-y-1">
-              <div className="px-3 text-[10px] font-mono uppercase tracking-wider text-[#8F8474]">
-                Công cụ mở rộng Career
-              </div>
-              {(
-                [
-                  { id: 'exchange', label: 'Thị trường Spot', active: activePage === 'unified_exchange' && exchangeTab === 'spot' },
-                  { id: 'business', label: 'Quản trị Doanh nghiệp', active: activePage === 'my_empire' && empireTab === 'business' },
-                  { id: 'corporate', label: 'Tập đoàn & M&A', active: activePage === 'my_empire' && empireTab === 'corporate' },
-                  { id: 'funds', label: 'Quỹ đầu tư', active: activePage === 'my_empire' && empireTab === 'funds' },
-                  { id: 'property', label: 'Bất động sản VN', active: activePage === 'my_assets' && assetsTab === 'property' },
-                  { id: 'banking', label: 'Ngân hàng & Vay vốn', active: activePage === 'my_assets' && assetsTab === 'banking' },
-                ] as const
-              ).map((sub) => (
-                <button
-                  key={sub.id}
-                  type="button"
-                  onClick={() => handleNav(sub.id)}
-                  className={`w-full text-left px-3 py-1.5 rounded text-[11px] transition-colors cursor-pointer whitespace-nowrap ${
-                    sub.active || activePage === sub.id
-                      ? 'text-[#D4AF6A] font-semibold bg-[#24201B]'
-                      : 'text-[#9E9280] hover:text-[#F5EFE6]'
-                  }`}
-                >
-                  {sub.label}
-                </button>
-              ))}
-            </div>
-          )}
         </nav>
 
-        {/* Quick Career Story Tools (Journal & Phone) */}
         {!sidebarCollapsed && (
-          <div className="p-3 border-t border-[#342D24] space-y-2">
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => setJournalOpen(true)}
-                data-testid="career-journal-btn"
-                className="px-2.5 py-2 rounded-lg border border-[#3E352A] bg-[#1E1A15] hover:border-[#D4AF6A]/60 text-xs font-medium text-[#F5EFE6] inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
-              >
-                <BookMarked className="w-3.5 h-3.5 text-[#D4AF6A]" />
-                <span>Nhật ký</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setPhoneOpen(true)}
-                data-testid="career-phone-btn"
-                className="relative px-2.5 py-2 rounded-lg border border-[#3E352A] bg-[#1E1A15] hover:border-[#D4AF6A]/60 text-xs font-medium text-[#F5EFE6] inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
-              >
-                <Phone className="w-3.5 h-3.5 text-[#D4AF6A]" />
-                <span>Điện thoại</span>
-                {unreadMessages > 0 && (
-                  <span className="font-mono text-[10px] font-bold bg-[#D4AF6A] text-[#11100E] px-1.5 rounded-sm">
-                    {unreadMessages}
-                  </span>
-                )}
-              </button>
+          <div className="p-3.5 border-t border-[var(--border-subtle)] text-[11px] text-[var(--text-muted)] leading-snug">
+            <div className="font-medium text-[var(--text-secondary)]">
+              {careerStory?.characterName ?? player?.username}
             </div>
-            <div className="text-[10px] text-[#8F8474] leading-snug">
-              Thế giới Career độc lập · Tách biệt với Online WORLD-01
+            <div className="mt-0.5">
+              Bản lưu Career độc lập · {chapterSpec.roman}
             </div>
           </div>
         )}
@@ -259,30 +236,48 @@ export function CareerShell({
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Topbar — Cinematic Luxury Career Header with Fixed Balance + Compact Clock Menu + Story Tools */}
-        <header className="h-14 shrink-0 px-3 lg:px-5 border-b border-[#342D24] bg-[#161411] flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
+        {/* Clean Career HUD Topbar */}
+        <header className="h-14 shrink-0 px-3 lg:px-5 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5 min-w-0">
             <button
               type="button"
               onClick={() => setMobileMenuOpen(true)}
               aria-label="Mở menu Career"
-              className="lg:hidden p-2 -ml-1 rounded text-[#C5BAA8] hover:text-[#F5EFE6] cursor-pointer shrink-0"
+              className="lg:hidden p-2 -ml-1 rounded-lg text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center"
             >
               <Menu className="w-5 h-5" />
             </button>
 
             <div className="min-w-0">
               <div className="flex items-center gap-2 min-w-0">
-                <span className="font-mono text-[11px] uppercase tracking-wider text-[#D6B26E] whitespace-nowrap shrink-0">
+                <span className="font-mono text-xs uppercase tracking-wider text-[var(--accent)] whitespace-nowrap shrink-0">
                   {chapterSpec.roman}
                 </span>
-                <span className="hidden lg:inline text-[#5C5246] shrink-0">·</span>
-                <span className="hidden lg:inline font-display-serif text-sm font-semibold text-[#F6F1E7] truncate">
+                <span className="hidden md:inline text-[var(--text-muted)] shrink-0">·</span>
+                <span className="hidden md:inline font-display-serif text-sm font-semibold text-[var(--text-primary)] truncate">
                   {chapterSpec.titleVi}
                 </span>
+                {gameClock?.formattedGameTime && (
+                  <span className="hidden xl:inline text-[11px] font-mono text-[var(--text-muted)] tabular-nums whitespace-nowrap shrink-0 pl-1">
+                    {gameClock.formattedGameTime}
+                  </span>
+                )}
               </div>
-              {careerStory?.freePlayUnlocked && (
-                <div className="hidden sm:block text-[10px] text-[#34D399] font-mono truncate">
+              {!careerStory?.freePlayUnlocked ? (
+                <button
+                  type="button"
+                  onClick={handleSmartMissionJump}
+                  className="hidden sm:flex items-center gap-1.5 text-[11px] text-[var(--text-secondary)] hover:text-[var(--accent)] transition-colors cursor-pointer truncate max-w-[300px] lg:max-w-[380px]"
+                  title={`Nhiệm vụ: ${activeMission.title}`}
+                >
+                  <Compass className="w-3 h-3 text-[var(--accent)] shrink-0" />
+                  <span className="truncate">{activeMission.title}</span>
+                  <span className="font-mono text-[10px] text-[var(--accent)] shrink-0 tabular-nums">
+                    {activeProgress?.progressPct ?? 0}%
+                  </span>
+                </button>
+              ) : (
+                <div className="hidden sm:block text-[10px] text-[var(--positive)] font-mono truncate">
                   FREE PLAY · {careerStory.characterName}
                 </div>
               )}
@@ -290,10 +285,10 @@ export function CareerShell({
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            {/* Fixed Live Career Balance (Mobile: Available Cash prioritized; Desktop: Available + Net Worth) */}
+            {/* Fixed Live Career Balance */}
             <CareerTopBarBalance onOpenAssetsPage={() => handleNav('portfolio')} />
 
-            {/* Compact Career Clock Speed Menu (replaces 6 sprawling inline buttons) */}
+            {/* Compact Career Clock Speed Menu */}
             {careerStory && (
               <CareerClockMenu
                 clockSpeed={careerStory.clockSpeed}
@@ -303,166 +298,224 @@ export function CareerShell({
               />
             )}
 
-            {/* Quick Phone & Journal icon triggers on topbar */}
+            {/* Journal Trigger */}
             <button
               type="button"
               onClick={() => setJournalOpen(true)}
               aria-label="Mở Nhật ký Career"
               title="Nhật ký nhiệm vụ"
-              className="hidden sm:inline-flex p-2 rounded-md text-[#C5BAA8] hover:text-[#D6B26E] hover:bg-[#24201B] transition-colors cursor-pointer"
+              data-testid="career-journal-btn"
+              className="hidden sm:inline-flex p-2 rounded-lg text-[var(--text-secondary)] hover:text-[var(--accent)] hover:bg-[var(--bg-panel)] transition-colors cursor-pointer min-h-[38px] min-w-[38px] items-center justify-center"
             >
               <BookMarked className="w-4 h-4" />
             </button>
 
+            {/* NPC Phone Trigger */}
             <button
               type="button"
               onClick={() => setPhoneOpen(true)}
               aria-label="Mở Điện thoại nhân vật"
               title="Điện thoại & Tin nhắn NPC"
               data-testid="topbar-phone-btn"
-              className="relative p-2 rounded-md text-[#C5BAA8] hover:text-[#D6B26E] hover:bg-[#24201B] transition-colors cursor-pointer"
+              className="relative p-2 rounded-lg text-[var(--text-secondary)] hover:text-[var(--accent)] hover:bg-[var(--bg-panel)] transition-colors cursor-pointer min-h-[38px] min-w-[38px] inline-flex items-center justify-center"
             >
               <Phone className="w-4 h-4" />
               {unreadMessages > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-sm bg-[#D6B26E] text-[#100E0C] text-[10px] font-mono font-bold flex items-center justify-center">
+                <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded bg-[var(--accent)] text-[var(--text-on-accent)] text-[10px] font-mono font-bold flex items-center justify-center">
                   {unreadMessages}
                 </span>
               )}
             </button>
 
-            <button
-              type="button"
-              onClick={toggleCareerSoundMuted}
-              aria-label={careerSoundMuted ? 'Bật âm thanh Career' : 'Tắt âm thanh Career'}
-              title={careerSoundMuted ? 'Bật âm thanh' : 'Tắt âm thanh'}
-              className="hidden xl:inline-flex p-2 rounded-md text-[#A69A87] hover:text-[#D6B26E] hover:bg-[#24201B] transition-colors cursor-pointer"
-            >
-              {careerSoundMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-            </button>
-
-            {/* Always-Visible Global Mode Switcher next to Avatar (§03) */}
+            {/* Global Mode Switcher */}
             <ModeSwitcher onSwitchMode={onSwitchMode} />
 
-            {/* Profile Avatar */}
+            {/* Single Consolidated Character Account Menu */}
             {player && (
-              <div className="hidden sm:flex items-center gap-1 pl-2 border-l border-[#342D24]">
+              <div ref={accountMenuRef} className="relative pl-1.5 border-l border-[var(--border-subtle)]">
                 <button
                   type="button"
-                  onClick={onSwitchAccount}
-                  className="flex items-center gap-2 px-1.5 py-1 rounded hover:bg-[#24201B] transition-colors cursor-pointer"
-                  title="Đổi tài khoản"
+                  onClick={() => setAccountMenuOpen((v) => !v)}
+                  aria-expanded={accountMenuOpen}
+                  aria-haspopup="menu"
+                  data-testid="career-account-menu-btn"
+                  className="flex items-center gap-1.5 px-1.5 py-1 rounded-lg hover:bg-[var(--bg-panel)] transition-colors cursor-pointer"
                 >
-                  <span className="w-7 h-7 rounded bg-[#2A241C] border border-[#D6B26E]/45 flex items-center justify-center text-[11px] font-mono font-bold text-[#D6B26E]">
+                  <span className="w-7 h-7 rounded-lg bg-[var(--bg-panel)] border border-[var(--accent)]/45 flex items-center justify-center text-[11px] font-mono font-bold text-[var(--accent)]">
                     {player.avatarInitials}
                   </span>
-                  <div className="hidden 2xl:block text-left leading-tight">
-                    <div className="text-xs font-semibold text-[#F6F1E7] whitespace-nowrap">
-                      {careerStory?.characterName ?? player.username}
+                  <ChevronDown className="w-3.5 h-3.5 text-[var(--text-muted)] hidden sm:block" />
+                </button>
+
+                {accountMenuOpen && (
+                  <div
+                    role="menu"
+                    className="absolute right-0 mt-2 w-60 rounded-xl border border-[var(--border-strong)] bg-[var(--bg-panel)] shadow-2xl py-1.5 z-[60]"
+                  >
+                    <div className="px-3.5 py-2 border-b border-[var(--border-subtle)]">
+                      <div className="text-xs font-bold text-[var(--text-primary)] truncate">
+                        {careerStory?.characterName ?? player.username}
+                      </div>
+                      <div className="text-[11px] text-[var(--text-muted)]">
+                        Độ khó: {careerStory?.difficulty ?? 'NORMAL'}
+                      </div>
                     </div>
-                    <div className="text-[10px] text-[#A69A87] whitespace-nowrap">
-                      {careerStory?.difficulty ?? 'NORMAL'}
-                    </div>
+
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setAccountMenuOpen(false);
+                        setMainMenuOpen(true);
+                      }}
+                      className="w-full px-3.5 py-2 text-left text-xs text-[var(--text-primary)] hover:bg-[var(--bg-surface)] flex items-center gap-2.5 cursor-pointer"
+                    >
+                      <Home className="w-3.5 h-3.5 text-[var(--accent)]" />
+                      <span>Menu chính</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        toggleCareerSoundMuted();
+                      }}
+                      className="w-full px-3.5 py-2 text-left text-xs text-[var(--text-primary)] hover:bg-[var(--bg-surface)] flex items-center justify-between cursor-pointer"
+                    >
+                      <span className="inline-flex items-center gap-2.5">
+                        {careerSoundMuted ? (
+                          <VolumeX className="w-3.5 h-3.5 text-[var(--text-muted)]" />
+                        ) : (
+                          <Volume2 className="w-3.5 h-3.5 text-[var(--accent)]" />
+                        )}
+                        <span>Âm thanh Career</span>
+                      </span>
+                      <span className="text-[11px] font-mono text-[var(--text-muted)]">
+                        {careerSoundMuted ? 'Tắt' : 'Bật'}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        toggleReducedMotion();
+                      }}
+                      className="w-full px-3.5 py-2 text-left text-xs text-[var(--text-primary)] hover:bg-[var(--bg-surface)] flex items-center justify-between cursor-pointer"
+                    >
+                      <span className="inline-flex items-center gap-2.5">
+                        <Sparkles className="w-3.5 h-3.5 text-[var(--accent)]" />
+                        <span>Giảm chuyển động</span>
+                      </span>
+                      <span className="text-[11px] font-mono text-[var(--text-muted)]">
+                        {reducedMotionPref ? 'Bật' : 'Tắt'}
+                      </span>
+                    </button>
+
+                    <div className="my-1 border-t border-[var(--border-subtle)]" />
+
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setAccountMenuOpen(false);
+                        onSwitchAccount();
+                      }}
+                      className="w-full px-3.5 py-2 text-left text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)] flex items-center gap-2.5 cursor-pointer"
+                    >
+                      <Users className="w-3.5 h-3.5" />
+                      <span>Đổi tài khoản</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setAccountMenuOpen(false);
+                        onLogout();
+                      }}
+                      className="w-full px-3.5 py-2 text-left text-xs text-[var(--negative)] hover:bg-[var(--bg-surface)] flex items-center gap-2.5 cursor-pointer"
+                    >
+                      <LogOut className="w-3.5 h-3.5" />
+                      <span>Đăng xuất</span>
+                    </button>
                   </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={onLogout}
-                  aria-label="Đăng xuất"
-                  title="Đăng xuất"
-                  className="p-1.5 rounded text-[#A69A87] hover:text-[#F87171] hover:bg-[#24201B] cursor-pointer"
-                >
-                  <LogOut className="w-4 h-4" />
-                </button>
+                )}
               </div>
             )}
           </div>
         </header>
 
-        {/* Contextual Guided Mission Return Bar when playing Business / Exchange / Assets (§11) */}
+        {/* Slim Guided Mission Return Bar (Auto-synced — zero duplicate Sync/Cycle buttons) */}
         {isGuidedSubpage && careerStory && (
           <div
             data-testid="career-guided-mission-bar"
-            className="px-4 lg:px-6 py-2.5 bg-[#1D1914] border-b border-[#D4AF6A]/35 flex flex-wrap items-center justify-between gap-2 text-xs"
+            className="px-4 lg:px-6 py-2 bg-[var(--bg-panel)] border-b border-[var(--border-subtle)] flex items-center justify-between gap-3 text-xs"
           >
             <div className="flex items-center gap-2.5 min-w-0">
               <button
                 type="button"
                 onClick={() => setActivePage('career_home')}
-                className="px-2.5 py-1 rounded border border-[#D4AF6A]/45 bg-[#2A241C] text-[#D4AF6A] hover:bg-[#362E24] font-semibold inline-flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0"
+                className="px-2.5 py-1.5 rounded-lg border border-[var(--accent)]/45 bg-[var(--bg-surface)] text-[var(--accent)] hover:bg-[var(--bg-elevated)] font-semibold inline-flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0"
               >
                 <ArrowLeft className="w-3.5 h-3.5" />
-                <span>Về Hành trình</span>
+                <span>Hành trình</span>
               </button>
               <div className="min-w-0 truncate">
-                <span className="text-[#D4AF6A] font-semibold mr-1.5">Nhiệm vụ:</span>
-                <span className="text-[#F5EFE6] font-medium">{activeMission.title}</span>
-                <span className="hidden md:inline text-[#A89C89] ml-2">
-                  — {activeMission.objectiveLabel} ({activeProgress?.progressPct ?? 0}%)
+                <span className="text-[var(--accent)] font-semibold mr-1.5">Mục tiêu:</span>
+                <span className="text-[var(--text-primary)] font-medium">{activeMission.title}</span>
+                <span className="hidden md:inline text-[var(--text-secondary)] ml-2">
+                  — {activeMission.objectiveLabel}
                 </span>
               </div>
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void onAdvanceCycle()}
-                className="px-2.5 py-1 rounded border border-[#3E352A] bg-[#24201B] hover:border-[#D4AF6A]/60 text-[#F5EFE6] font-medium inline-flex items-center gap-1 cursor-pointer whitespace-nowrap"
-              >
-                <Play className="w-3 h-3 text-[#D4AF6A]" />
-                <span>Chạy 1 chu kỳ</span>
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void onSyncMission()}
-                className="px-2.5 py-1 rounded bg-[#D4AF6A] hover:bg-[#C39A50] text-[#11100E] font-bold inline-flex items-center gap-1 cursor-pointer whitespace-nowrap"
-              >
-                <RefreshCw className="w-3 h-3" />
-                <span>Kiểm tra tiến độ</span>
-              </button>
+              <span className="font-mono text-xs font-semibold text-[var(--accent)] tabular-nums">
+                {activeProgress?.progressPct ?? 0}%
+              </span>
             </div>
           </div>
         )}
 
         {/* Main Viewport */}
-        <main className="flex-1 overflow-y-auto p-3 lg:p-6 pb-24 lg:pb-8">{children}</main>
+        <main className="flex-1 overflow-y-auto p-3.5 lg:p-6 pb-24 lg:pb-8">{children}</main>
       </div>
 
       {/* Mobile Navigation Drawer */}
       {mobileMenuOpen && (
-        <div className="fixed inset-0 z-50 lg:hidden flex">
+        <div className="fixed inset-0 z-[50] lg:hidden flex">
           <div className="fixed inset-0 bg-black/70" onClick={() => setMobileMenuOpen(false)} />
-          <div className="relative w-72 max-w-[85vw] bg-[#161411] border-r border-[#342D24] flex flex-col z-10">
-            <div className="h-14 px-4 flex items-center justify-between border-b border-[#342D24]">
+          <div className="relative w-72 max-w-[85vw] bg-[var(--bg-surface)] border-r border-[var(--border-subtle)] flex flex-col z-10">
+            <div className="h-14 px-4 flex items-center justify-between border-b border-[var(--border-subtle)]">
               <div>
-                <div className="font-display-serif text-base font-bold text-[#F5EFE6]">Trading Empire</div>
-                <div className="text-[10px] font-mono text-[#D4AF6A]">CAREER MODE</div>
+                <div className="font-display-serif text-base font-bold text-[var(--text-primary)]">
+                  Trading Empire
+                </div>
+                <div className="text-[10px] font-mono text-[var(--accent)]">CAREER MODE</div>
               </div>
               <button
                 type="button"
                 onClick={() => setMobileMenuOpen(false)}
                 aria-label="Đóng menu"
-                className="p-1.5 text-[#A89C89] cursor-pointer"
+                className="p-2 text-[var(--text-muted)] cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
             <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
-              {CAREER_NAV_ITEMS.map((item) => {
-                const Icon = item.icon;
-                const active = item.matchPages
-                  ? item.matchPages.includes(activePage)
-                  : activePage === item.id;
+              {CAREER_SIDEBAR_SECTIONS.map((item) => {
+                const Icon = SECTION_ICONS[item.id];
+                const active = item.matchPages.includes(activePage);
                 return (
                   <button
                     key={item.id}
                     type="button"
-                    onClick={() => handleNav(item.id)}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium cursor-pointer ${
+                    onClick={() => handleNav(item.targetPage)}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium cursor-pointer min-h-[44px] ${
                       active
-                        ? 'bg-[#26211A] text-[#D4AF6A]'
-                        : 'text-[#C5BAA8] hover:bg-[#1F1C17]'
+                        ? 'bg-[var(--bg-panel)] text-[var(--accent)]'
+                        : 'text-[var(--text-secondary)] hover:bg-[var(--bg-panel)]/70'
                     }`}
                   >
                     <Icon className="w-4 h-4" />
@@ -472,7 +525,7 @@ export function CareerShell({
               })}
 
               {careerStory && (
-                <div className="pt-4 mt-4 border-t border-[#342D24] space-y-2.5">
+                <div className="pt-4 mt-4 border-t border-[var(--border-subtle)] space-y-2.5">
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
@@ -480,9 +533,9 @@ export function CareerShell({
                         setMobileMenuOpen(false);
                         setJournalOpen(true);
                       }}
-                      className="py-2 px-2.5 rounded-lg border border-[#3E352A] bg-[#1E1A15] text-xs font-medium text-[#F5EFE6] inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                      className="py-2.5 px-2.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-panel)] text-xs font-medium text-[var(--text-primary)] inline-flex items-center justify-center gap-1.5 cursor-pointer min-h-[44px]"
                     >
-                      <BookMarked className="w-3.5 h-3.5 text-[#D6B26E]" />
+                      <BookMarked className="w-3.5 h-3.5 text-[var(--accent)]" />
                       <span>Nhật ký</span>
                     </button>
                     <button
@@ -492,23 +545,23 @@ export function CareerShell({
                         setMobileMenuOpen(false);
                         void onAdvanceCycle();
                       }}
-                      className="py-2 px-2.5 rounded-lg border border-[#D6B26E]/45 bg-[#231F19] text-xs font-semibold text-[#D6B26E] inline-flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
+                      className="py-2.5 px-2.5 rounded-xl border border-[var(--accent)]/45 bg-[var(--bg-panel)] text-xs font-semibold text-[var(--accent)] inline-flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50 min-h-[44px]"
                     >
                       <Play className="w-3.5 h-3.5" />
                       <span>+1 chu kỳ</span>
                     </button>
                   </div>
-                  <div className="px-1 text-[11px] font-mono text-[#A69A87]">Tốc độ Career</div>
+                  <div className="px-1 text-[11px] font-mono text-[var(--text-muted)]">Tốc độ Career</div>
                   <div className="grid grid-cols-5 gap-1">
                     {CLOCK_SPEEDS.map((sp) => (
                       <button
                         key={sp}
                         type="button"
                         onClick={() => void onSetClockSpeed(sp)}
-                        className={`py-1.5 rounded text-[11px] font-mono font-semibold cursor-pointer ${
+                        className={`py-2 rounded-lg text-[11px] font-mono font-semibold cursor-pointer ${
                           careerStory.clockSpeed === sp
-                            ? 'bg-[#D6B26E] text-[#100E0C]'
-                            : 'bg-[#24201B] text-[#C5BAA8]'
+                            ? 'bg-[var(--accent)] text-[var(--text-on-accent)]'
+                            : 'bg-[var(--bg-panel)] text-[var(--text-secondary)]'
                         }`}
                       >
                         {sp === 'PAUSE' ? '⏸' : sp}
@@ -518,16 +571,16 @@ export function CareerShell({
                 </div>
               )}
             </nav>
-            <div className="p-3 border-t border-[#342D24] flex items-center justify-between gap-2">
+            <div className="p-3 border-t border-[var(--border-subtle)] flex items-center justify-between gap-2">
               <button
                 type="button"
                 onClick={() => {
                   setMobileMenuOpen(false);
-                  onSwitchAccount();
+                  setMainMenuOpen(true);
                 }}
-                className="text-xs text-[#C5BAA8] hover:text-[#F5EFE6] cursor-pointer"
+                className="text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer py-1.5"
               >
-                Đổi tài khoản
+                Menu chính
               </button>
               <button
                 type="button"
@@ -535,7 +588,7 @@ export function CareerShell({
                   setMobileMenuOpen(false);
                   onLogout();
                 }}
-                className="text-xs text-[#F87171] cursor-pointer"
+                className="text-xs text-[var(--negative)] cursor-pointer py-1.5"
               >
                 Đăng xuất
               </button>
@@ -544,18 +597,33 @@ export function CareerShell({
         </div>
       )}
 
-      {/* Mobile Bottom Bar */}
+      {/* Mobile Bottom Bar — 5 Clean Items */}
       <nav
         aria-label="Điều hướng nhanh Career di động"
-        className="lg:hidden fixed bottom-0 inset-x-0 h-14 bg-[#161411] border-t border-[#342D24] grid grid-cols-5 z-30"
+        className="lg:hidden fixed bottom-0 inset-x-0 min-h-[56px] safe-pb bg-[var(--bg-surface)] border-t border-[var(--border-subtle)] grid grid-cols-5 z-[30]"
       >
         {(
           [
             { id: 'career_home', label: 'Hành trình', icon: BookOpen, match: ['career_home'] },
-            { id: 'business', label: 'Doanh nghiệp', icon: Building2, match: ['my_empire', 'business', 'corporate', 'funds'] },
-            { id: 'exchange', label: 'Sàn', icon: CandlestickChart, match: ['unified_exchange', 'exchange', 'discover', 'futures', 'forex'] },
-            { id: 'portfolio', label: 'Tài sản', icon: PieChart, match: ['my_assets', 'portfolio', 'property', 'banking', 'luxury'] },
-            { id: 'career_world', label: 'Nhân vật', icon: Compass, match: ['career_world'] },
+            { id: 'career_world', label: 'Thành phố', icon: MapIcon, match: ['career_world'] },
+            {
+              id: 'business',
+              label: 'Doanh nghiệp',
+              icon: Building2,
+              match: ['my_empire', 'business', 'corporate', 'capital_hub', 'company_hq', 'funds'],
+            },
+            {
+              id: 'portfolio',
+              label: 'Tài sản',
+              icon: PieChart,
+              match: ['my_assets', 'portfolio', 'property', 'banking', 'luxury'],
+            },
+            {
+              id: 'exchange',
+              label: 'Sàn',
+              icon: CandlestickChart,
+              match: ['unified_exchange', 'exchange', 'discover', 'futures', 'forex'],
+            },
           ] as const
         ).map((tab) => {
           const Icon = tab.icon;
@@ -565,8 +633,8 @@ export function CareerShell({
               key={tab.id}
               type="button"
               onClick={() => handleNav(tab.id)}
-              className={`flex flex-col items-center justify-center gap-0.5 text-[10px] font-medium cursor-pointer ${
-                active ? 'text-[#D4AF6A]' : 'text-[#9E9280]'
+              className={`flex flex-col items-center justify-center gap-0.5 text-[10px] font-medium cursor-pointer min-h-[48px] ${
+                active ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'
               }`}
             >
               <Icon className="w-4 h-4" />
@@ -576,37 +644,39 @@ export function CareerShell({
         })}
       </nav>
 
-      {/* Toast Stack */}
+      {/* Toast Stack — Top-Right (z-40) */}
       <div
         aria-live="polite"
-        className="fixed top-16 right-4 z-50 flex flex-col gap-2 w-80 max-w-[calc(100vw-2rem)] pointer-events-none"
+        className="fixed top-16 right-4 z-[40] flex flex-col gap-2 w-80 max-w-[calc(100vw-2rem)] pointer-events-none"
       >
         {toasts.map((t) => (
           <div
             key={t.id}
-            className="pointer-events-auto bg-[#1D1914] border border-[#D4AF6A]/40 rounded-lg px-3.5 py-2.5 shadow-2xl flex items-start justify-between gap-2"
+            className="pointer-events-auto bg-[var(--bg-panel)] border border-[var(--accent)]/40 rounded-xl px-3.5 py-2.5 shadow-2xl flex items-start justify-between gap-2"
           >
             <div className="space-y-0.5 text-xs">
               <div
                 className={`font-semibold ${
                   t.tone === 'success'
-                    ? 'text-[#34D399]'
+                    ? 'text-[var(--positive)]'
                     : t.tone === 'error'
-                      ? 'text-[#F87171]'
+                      ? 'text-[var(--negative)]'
                       : t.tone === 'warning'
-                        ? 'text-[#E6B85C]'
-                        : 'text-[#D4AF6A]'
+                        ? 'text-[var(--warning)]'
+                        : 'text-[var(--accent)]'
                 }`}
               >
                 {t.title}
               </div>
-              {t.description && <div className="text-[#C5BAA8] leading-snug">{t.description}</div>}
+              {t.description && (
+                <div className="text-[var(--text-secondary)] leading-snug">{t.description}</div>
+              )}
             </div>
             <button
               type="button"
               onClick={() => dismissToast(t.id)}
               aria-label="Đóng thông báo"
-              className="text-[#8F8474] hover:text-[#F5EFE6] cursor-pointer"
+              className="text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer p-0.5"
             >
               <X className="w-3.5 h-3.5" />
             </button>

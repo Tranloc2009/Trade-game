@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import type { WorldMode } from '../shared/contracts/beginner';
 import { STORY_SCENES } from '../shared/contracts/careerCampaignData';
@@ -11,6 +11,7 @@ import type {
 } from '../shared/contracts/careerStory';
 import { GlossaryDrawer } from './components/beginner/GlossaryTerm';
 import { TutorialOverlay } from './components/beginner/TutorialOverlay';
+import { GameFeedbackModal } from './components/feedback/GameFeedbackModal';
 import { AppShell } from './components/layout/AppShell';
 import { GuestLoginModal } from './features/auth/GuestLoginModal';
 import { CareerJournalModal } from './features/career/components/CareerJournalModal';
@@ -20,19 +21,12 @@ import { InGamePhoneDrawer } from './features/career/components/InGamePhoneDrawe
 import { NpcCornerBanner } from './features/career/components/NpcCornerBanner';
 import { CareerShell } from './features/career/layouts/CareerShell';
 import { CareerHomePage } from './features/career/pages/CareerHomePage';
-import { CareerSettingsPage } from './features/career/pages/CareerSettingsPage';
-import { CareerWorldExplorePage } from './features/career/pages/CareerWorldExplorePage';
 import { careerSound } from './features/career/soundEngine';
 import { OverviewPage } from './features/dashboard/OverviewPage';
-import { EntertainmentPage } from './features/entertainment/EntertainmentPage';
-import { LeaderboardPage } from './features/leaderboard/LeaderboardPage';
-import { EconomyNewsPage } from './features/news/EconomyNewsPage';
-import { SettingsPage } from './features/settings/SettingsPage';
-import { SocialPage } from './features/social/SocialPage';
+import { GameMainMenu } from './features/menu/GameMainMenu';
 import { MyAssetsPage } from './features/unified/MyAssetsPage';
 import { MyEmpirePage } from './features/unified/MyEmpirePage';
 import { UnifiedExchangePage } from './features/unified/UnifiedExchangePage';
-import { CareerProfilePage } from './features/v4/CareerProfilePage';
 import { queryClient } from './lib/queryClient';
 import {
   ApiClientError,
@@ -49,11 +43,33 @@ import { CareerStoryService } from './services/careerStoryApi';
 import { realtimeClient } from './services/realtime';
 import { useAppStore, type NavPage } from './store/useAppStore';
 
+const CareerWorldExplorePage = lazy(() =>
+  import('./features/career/pages/CareerWorldExplorePage').then((m) => ({
+    default: m.CareerWorldExplorePage,
+  })),
+);
+const CareerSettingsPage = lazy(() =>
+  import('./features/career/pages/CareerSettingsPage').then((m) => ({
+    default: m.CareerSettingsPage,
+  })),
+);
+const SettingsPage = lazy(() =>
+  import('./features/settings/SettingsPage').then((m) => ({ default: m.SettingsPage })),
+);
+const LifestyleHubPage = lazy(() =>
+  import('./features/unified/LifestyleHubPage').then((m) => ({ default: m.LifestyleHubPage })),
+);
+const WorldHubPage = lazy(() =>
+  import('./features/unified/WorldHubPage').then((m) => ({ default: m.WorldHubPage })),
+);
+
 const VALID_PAGES = new Set<NavPage>([
   'overview',
   'unified_exchange',
   'my_empire',
   'my_assets',
+  'lifestyle',
+  'world',
   'discover',
   'exchange',
   'forex',
@@ -79,16 +95,27 @@ const VALID_PAGES = new Set<NavPage>([
   'career_settings',
 ]);
 
+function PageLoadingFallback() {
+  return (
+    <div className="p-10 text-center text-sm text-[var(--text-secondary)]">
+      Đang tải khu vực...
+    </div>
+  );
+}
+
 function TradingEmpireWorkspace() {
   const {
     activePage,
     setActivePage,
     theme,
+    reducedMotionPref,
     player,
     worldMode,
     playMode,
     careerStory,
     careerSoundMuted,
+    mainMenuOpen,
+    setMainMenuOpen,
     orderSyncSeq,
     v4SyncSeq,
     cofounderSyncSeq,
@@ -103,6 +130,7 @@ function TradingEmpireWorkspace() {
     setPlayer,
     applyWorldSnapshot,
     pushToast,
+    openBusinessCreationWizard,
   } = useAppStore();
 
   const [loginModalOpen, setLoginModalOpen] = useState(true);
@@ -110,7 +138,7 @@ function TradingEmpireWorkspace() {
   const [practiceBusy, setPracticeBusy] = useState(false);
   const [careerBusy, setCareerBusy] = useState(false);
 
-  // Sync Tailwind v4 .dark class on <html> (Career Mode is always editorial dark; Online follows theme pref)
+  // Sync Tailwind v4 .dark class, experience palette scope, and reduced motion flag on <html>
   useEffect(() => {
     const root = document.documentElement;
     if (playMode === 'CAREER' || theme === 'dark') {
@@ -118,7 +146,9 @@ function TradingEmpireWorkspace() {
     } else {
       root.classList.remove('dark');
     }
-  }, [theme, playMode]);
+    root.dataset.experience = playMode === 'CAREER' ? 'career' : 'online';
+    root.dataset.reducedMotion = String(reducedMotionPref);
+  }, [theme, playMode, reducedMotionPref]);
 
   const applyUnifiedLoginResult = useCallback(
     async (
@@ -135,7 +165,6 @@ function TradingEmpireWorkspace() {
       queryClient.clear();
 
       if (res.resolvedMode === 'CAREER' && res.careerSaveId && res.careerToken) {
-        // Strict isolation: disconnect WORLD-01 Socket.IO before loading Career World
         realtimeClient.disconnect();
         setApiPlayContext('CAREER', res.careerSaveId);
         setPlayMode('CAREER');
@@ -165,6 +194,7 @@ function TradingEmpireWorkspace() {
         );
       }
       setLoginModalOpen(false);
+      setMainMenuOpen(false);
     },
     [
       applyWorldSnapshot,
@@ -173,6 +203,7 @@ function TradingEmpireWorkspace() {
       setActiveCareerSaveId,
       setActivePage,
       setCareerStory,
+      setMainMenuOpen,
       setPlayMode,
       setPlayer,
       setSession,
@@ -201,7 +232,11 @@ function TradingEmpireWorkspace() {
         if (guestParam || autostart) {
           const upper = (guestParam || '').toUpperCase();
           const preset: 'ALICE' | 'BOB' | 'CUSTOM' =
-            upper === 'BOB' ? 'BOB' : upper === 'ALICE' || (autostart && !guestParam) ? 'ALICE' : 'CUSTOM';
+            upper === 'BOB'
+              ? 'BOB'
+              : upper === 'ALICE' || (autostart && !guestParam)
+                ? 'ALICE'
+                : 'CUSTOM';
           const name =
             preset === 'ALICE'
               ? 'Trader Alice'
@@ -250,7 +285,11 @@ function TradingEmpireWorkspace() {
     const timer = window.setInterval(async () => {
       try {
         const snap = await PracticeService.getPracticeSnapshot();
-        if (!active || useAppStore.getState().worldMode !== 'PRACTICE' || useAppStore.getState().playMode !== 'ONLINE') {
+        if (
+          !active ||
+          useAppStore.getState().worldMode !== 'PRACTICE' ||
+          useAppStore.getState().playMode !== 'ONLINE'
+        ) {
           return;
         }
         applyWorldSnapshot(snap);
@@ -343,6 +382,7 @@ function TradingEmpireWorkspace() {
     if (playMode !== 'CAREER' || !player) return;
     if (orderSyncSeq === 0 && v4SyncSeq === 0 && cofounderSyncSeq === 0) return;
     let active = true;
+    const prevCompletedCount = useAppStore.getState().careerStory?.completedMissionIds.length ?? 0;
     CareerStoryService.syncMission()
       .then((res) => {
         if (!active || useAppStore.getState().playMode !== 'CAREER') return;
@@ -350,12 +390,29 @@ function TradingEmpireWorkspace() {
         setPlayer(res.profile);
         applyWorldSnapshot(res.worldSnapshot);
         void queryClient.invalidateQueries({ queryKey: ['career-wealth-details'] });
+        if (res.careerStory.completedMissionIds.length > prevCompletedCount) {
+          pushToast({
+            tone: 'success',
+            title: 'Hoàn thành nhiệm vụ cốt truyện!',
+            description: 'Tiến trình chương và quan hệ nhân vật đã tự động cập nhật.',
+          });
+        }
       })
       .catch(() => {});
     return () => {
       active = false;
     };
-  }, [playMode, player?.id, orderSyncSeq, v4SyncSeq, cofounderSyncSeq, applyWorldSnapshot, setCareerStory, setPlayer]);
+  }, [
+    playMode,
+    player?.id,
+    orderSyncSeq,
+    v4SyncSeq,
+    cofounderSyncSeq,
+    applyWorldSnapshot,
+    pushToast,
+    setCareerStory,
+    setPlayer,
+  ]);
 
   // Immediately refresh authoritative Career Wallet, World Snapshot & Company Treasuries after any Career financial mutation
   useEffect(() => {
@@ -405,18 +462,11 @@ function TradingEmpireWorkspace() {
         res.resolvedMode === 'CAREER'
           ? res.isFirstLaunch
             ? 'Đã khởi tạo hành trình Career Mode độc lập — bắt đầu Chương 1: Khởi Đầu.'
-            : 'Đã tiếp tục đúng tệp lưu Career Mode gần nhất của bạn.'
+            : 'Đã tiếp tục đúng bản lưu Career Mode gần nhất của bạn.'
           : 'Đã kết nối tới thế giới tài chính chung WORLD-01.',
     });
   };
 
-  /**
-   * Seamless Career <-> Online Mode Switch (§03)
-   * - Locks actions while switching
-   * - Clears caches & detaches/attaches Socket.IO cleanly
-   * - Zero logout, zero password re-entry, zero intro replay
-   * - Rollback cleanly on failure with retry banner
-   */
   const handleSwitchPlayMode = async (targetMode: GamePlayMode, targetCareerSaveId?: string) => {
     const currentState = useAppStore.getState();
     if (currentState.modeSwitching) return;
@@ -434,7 +484,6 @@ function TradingEmpireWorkspace() {
     try {
       const res = await CareerStoryService.switchMode(targetMode, targetCareerSaveId);
 
-      // Clear all financial caches so zero stale data bleeds across worlds
       clearWorldCachesForModeSwitch();
       queryClient.clear();
       setWorldMode('LIVE');
@@ -476,7 +525,6 @@ function TradingEmpireWorkspace() {
       }
       setModeSwitching(false, null);
     } catch (err) {
-      // Rollback API context cleanly on error
       setApiPlayContext(prevMode, prevMode === 'CAREER' ? prevSaveId : null);
       const msg =
         err instanceof Error ? err.message : 'Không thể chuyển chế độ lúc này. Vui lòng thử lại.';
@@ -489,7 +537,6 @@ function TradingEmpireWorkspace() {
     }
   };
 
-  // Career Story & Gameplay Action Handlers
   const applyCareerPayload = (payload: {
     careerStory: NonNullable<typeof careerStory>;
     profile?: typeof player;
@@ -513,7 +560,6 @@ function TradingEmpireWorkspace() {
   const handleAdvanceStory = async (choiceId?: string) => {
     setCareerBusy(true);
     try {
-      // Inspect executeAction before advancing so guided story choices jump straight to target gameplay module
       const prevStory = useAppStore.getState().careerStory;
       let executeAction: string | undefined;
       if (choiceId && prevStory?.activeSceneId) {
@@ -525,7 +571,7 @@ function TradingEmpireWorkspace() {
       const res = await CareerStoryService.advanceStory(choiceId);
       applyCareerPayload(res);
       if (executeAction === 'OPEN_BUSINESS_FLOW') {
-        setActivePage('business');
+        openBusinessCreationWizard();
       } else if (executeAction === 'OPEN_EXCHANGE_FLOW') {
         setActivePage('exchange');
       }
@@ -632,24 +678,6 @@ function TradingEmpireWorkspace() {
     }
   };
 
-  const handleSyncMission = async () => {
-    setCareerBusy(true);
-    try {
-      const prevCount = careerStory?.completedMissionIds.length ?? 0;
-      const res = await CareerStoryService.syncMission();
-      applyCareerPayload(res);
-      if (res.careerStory.completedMissionIds.length > prevCount) {
-        pushToast({
-          tone: 'success',
-          title: 'Hoàn thành nhiệm vụ cốt truyện!',
-          description: 'Tiến độ chương và nhân vật đã được ghi nhận.',
-        });
-      }
-    } finally {
-      setCareerBusy(false);
-    }
-  };
-
   const handleConfirmEnding = async (endingId: CareerEndingId) => {
     setCareerBusy(true);
     try {
@@ -699,7 +727,7 @@ function TradingEmpireWorkspace() {
     setActivePage(route);
   };
 
-  // Online Practice Sandbox switcher (preserved 100% intact for Online Mode)
+  // Online Practice Sandbox switcher
   const handleSwitchWorldMode = async (targetMode: WorldMode) => {
     if (playMode !== 'ONLINE' || targetMode === worldMode || practiceBusy) return;
     setPracticeBusy(true);
@@ -709,7 +737,9 @@ function TradingEmpireWorkspace() {
         let practiceToken = getAuthToken('PRACTICE');
         let practiceProfile = null;
         if (!practiceToken) {
-          const guestName = player?.username ? `${player.username} (Luyện tập)` : 'Practice Trader';
+          const guestName = player?.username
+            ? `${player.username} (Luyện tập)`
+            : 'Practice Trader';
           const loginRes = await PracticeService.loginPracticeGuest(guestName.slice(0, 24));
           practiceToken = loginRes.token;
           practiceProfile = loginRes.profile;
@@ -791,7 +821,7 @@ function TradingEmpireWorkspace() {
     try {
       await CareerStoryService.logout();
     } catch {
-      // ignore if already expired
+      // ignore
     }
     try {
       if (playMode === 'ONLINE') {
@@ -814,6 +844,7 @@ function TradingEmpireWorkspace() {
     setSession(null, null);
     clearWorldCachesForModeSwitch();
     queryClient.clear();
+    setMainMenuOpen(false);
     setLoginModalOpen(true);
   };
 
@@ -829,21 +860,25 @@ function TradingEmpireWorkspace() {
           <CareerHomePage
             onTriggerScene={handleTriggerScene}
             onNavigateRoute={handleCareerNavigateRoute}
-            onAdvanceCycle={handleAdvanceCareerCycle}
-            onSyncMission={handleSyncMission}
             busy={careerBusy}
           />
         );
       case 'career_world':
-        return <CareerWorldExplorePage />;
+        return (
+          <Suspense fallback={<PageLoadingFallback />}>
+            <CareerWorldExplorePage onTriggerScene={handleTriggerScene} />
+          </Suspense>
+        );
       case 'career_settings':
         return (
-          <CareerSettingsPage
-            onRenameCharacter={handleRenameCharacter}
-            onCreateSave={handleCreateCareerSave}
-            onSwitchSave={handleSwitchPlayMode}
-            busy={careerBusy}
-          />
+          <Suspense fallback={<PageLoadingFallback />}>
+            <CareerSettingsPage
+              onRenameCharacter={handleRenameCharacter}
+              onCreateSave={handleCreateCareerSave}
+              onSwitchSave={handleSwitchPlayMode}
+              busy={careerBusy}
+            />
+          </Suspense>
         );
       case 'unified_exchange':
       case 'discover':
@@ -870,8 +905,6 @@ function TradingEmpireWorkspace() {
           <CareerHomePage
             onTriggerScene={handleTriggerScene}
             onNavigateRoute={handleCareerNavigateRoute}
-            onAdvanceCycle={handleAdvanceCareerCycle}
-            onSyncMission={handleSyncMission}
             busy={careerBusy}
           />
         );
@@ -902,22 +935,36 @@ function TradingEmpireWorkspace() {
       case 'banking':
       case 'luxury':
         return <MyAssetsPage />;
+      case 'lifestyle':
       case 'career':
-        return <CareerProfilePage />;
-      case 'social':
-        return <SocialPage />;
-      case 'leaderboard':
-        return <LeaderboardPage />;
-      case 'news':
-        return <EconomyNewsPage />;
       case 'entertainment':
-        return <EntertainmentPage />;
+        return (
+          <Suspense fallback={<PageLoadingFallback />}>
+            <LifestyleHubPage />
+          </Suspense>
+        );
+      case 'world':
+      case 'social':
+      case 'leaderboard':
+      case 'news':
+        return (
+          <Suspense fallback={<PageLoadingFallback />}>
+            <WorldHubPage />
+          </Suspense>
+        );
       case 'settings':
-        return <SettingsPage onWorldReset={handleWorldReset} />;
+        return (
+          <Suspense fallback={<PageLoadingFallback />}>
+            <SettingsPage onWorldReset={handleWorldReset} />
+          </Suspense>
+        );
       default:
         return <OverviewPage onEnterPracticeMode={() => handleSwitchWorldMode('PRACTICE')} />;
     }
   };
+
+  const showPreLoginMainMenu = loginModalOpen && !player && !booting;
+  const showSwitchAccountModal = loginModalOpen && Boolean(player) && !booting;
 
   return (
     <>
@@ -927,14 +974,14 @@ function TradingEmpireWorkspace() {
             onSwitchMode={handleSwitchPlayMode}
             onSetClockSpeed={handleSetClockSpeed}
             onAdvanceCycle={handleAdvanceCareerCycle}
-            onSyncMission={handleSyncMission}
+            onTriggerScene={handleTriggerScene}
             onSwitchAccount={() => setLoginModalOpen(true)}
             onLogout={handleLogout}
             busy={careerBusy}
           >
             {booting ? (
-              <div className="p-12 text-center text-xs text-[#A89C89]">
-                Đang khởi tạo câu chuyện Career Mode...
+              <div className="p-12 text-center text-sm text-[var(--text-muted)]">
+                Đang khởi tạo hành trình Career Mode...
               </div>
             ) : (
               renderCareerPage()
@@ -961,10 +1008,7 @@ function TradingEmpireWorkspace() {
             onNavigateRoute={handleCareerNavigateRoute}
             onTriggerScene={handleTriggerScene}
           />
-          <EndingCinematicModal
-            onConfirmEnding={handleConfirmEnding}
-            busy={careerBusy}
-          />
+          <EndingCinematicModal onConfirmEnding={handleConfirmEnding} busy={careerBusy} />
         </>
       ) : (
         <AppShell
@@ -976,7 +1020,7 @@ function TradingEmpireWorkspace() {
           practiceBusy={practiceBusy}
         >
           {booting ? (
-            <div className="p-12 text-center text-xs text-[var(--text-secondary)]">
+            <div className="p-12 text-center text-sm text-[var(--text-secondary)]">
               Đang kết nối tới máy chủ WORLD-01: GLOBAL ECONOMY...
             </div>
           ) : (
@@ -987,8 +1031,32 @@ function TradingEmpireWorkspace() {
 
       <GlossaryDrawer />
       <TutorialOverlay />
+      <GameFeedbackModal />
 
-      {loginModalOpen && !booting && (
+      {(showPreLoginMainMenu || (mainMenuOpen && Boolean(player))) && (
+        <GameMainMenu
+          mode={showPreLoginMainMenu ? 'LOGIN' : 'OVERLAY'}
+          onLogin={handleUnifiedLogin}
+          onSwitchPlayMode={handleSwitchPlayMode}
+          onClose={() => setMainMenuOpen(false)}
+          onOpenSaves={() => {
+            setMainMenuOpen(false);
+            if (playMode === 'CAREER') {
+              setActivePage('career_settings');
+            } else {
+              void handleSwitchPlayMode('CAREER').then(() => setActivePage('career_settings'));
+            }
+          }}
+          onOpenSettings={() => {
+            setMainMenuOpen(false);
+            setActivePage(playMode === 'CAREER' ? 'career_settings' : 'settings');
+          }}
+          onSwitchAccount={() => setLoginModalOpen(true)}
+          onLogout={handleLogout}
+        />
+      )}
+
+      {showSwitchAccountModal && (
         <GuestLoginModal
           onLogin={handleUnifiedLogin}
           onClose={() => setLoginModalOpen(false)}

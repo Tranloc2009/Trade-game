@@ -1,72 +1,117 @@
 @import "tailwindcss";
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* ==========================================================================
+   TRADING EMPIRE — DUAL DESIGN SYSTEM TOKENS (UI UX PRO MAX)
+   1. Online Mode Light (:root)  — Financial Paper & Institutional Deep Teal
+   2. Online Mode Dark (.dark)   — Obsidian Navy & Precision Teal
+   3. Career Mode ([data-experience="career"]) — Warm Obsidian & Champagne Gold
+   ========================================================================== */
+
 :root {
-  --bg-app: #f4f7fa;
+  /* Layer 2: Semantic Tokens — Online Light (Financial Paper) */
+  --bg-app: #f4f6f9;
   --bg-sidebar: #ffffff;
   --bg-panel: #ffffff;
-  --bg-surface: #eef2f7;
+  --bg-surface: #f1f5f9;
   --bg-hover: #e5ecf4;
-  --border-subtle: #d6dfe9;
+  --bg-scrim: rgba(15, 23, 42, 0.72);
+  --border-subtle: #dce3ec;
+  --border-strong: #b8c5d6;
+  --border-accent: rgba(15, 118, 110, 0.38);
+
   --text-primary: #0f172a;
-  --text-secondary: #526175;
-  --text-muted: #6e7f96;
-  --accent: #0f9488;
-  --accent-hover: #0d7f75;
-  --positive: #16a34a;
-  --positive-soft: rgba(22, 163, 74, 0.12);
+  --text-secondary: #334155;
+  --text-muted: #526075;
+  --text-on-accent: #ffffff;
+
+  --accent: #0f766e;
+  --accent-hover: #0d645d;
+  --accent-muted: #115e59;
+
+  --positive: #15803d;
+  --positive-soft: rgba(21, 128, 61, 0.12);
   --negative: #dc2626;
   --negative-soft: rgba(220, 38, 38, 0.12);
-  --warning: #d97706;
-  --warning-soft: rgba(217, 119, 6, 0.14);
+  --warning: #b45309;
+  --warning-soft: rgba(180, 83, 9, 0.14);
+
+  /* Layer 3: Overlay Governance & Focus */
+  --focus-ring: 0 0 0 2px var(--bg-app), 0 0 0 4px var(--accent);
+  --z-bottom-nav: 30;
+  --z-banner: 35;
+  --z-toast: 40;
+  --z-drawer: 50;
+  --z-modal: 55;
+  --z-dialogue: 65;
+  --z-menu: 75;
 }
 
 .dark {
-  --bg-app: #0b0f17;
-  --bg-sidebar: #101722;
-  --bg-panel: #151e2b;
-  --bg-surface: #1c2735;
-  --bg-hover: #223041;
-  --border-subtle: #283446;
-  --text-primary: #edf3f8;
-  --text-secondary: #92a0b2;
-  --text-muted: #6c7c91;
-  --accent: #39b8ad;
-  --accent-hover: #2fa197;
-  --positive: #22c55e;
-  --positive-soft: rgba(34, 197, 94, 0.13);
-  --negative: #ef5555;
-  --negative-soft: rgba(239, 85, 85, 0.13);
-  --warning: #f5b942;
-  --warning-soft: rgba(245, 185, 66, 0.14);
-}
+  /* Layer 2: Semantic Tokens — Online Dark (Obsidian Navy) */
+  --bg-app: #090d14;
+  --bg-sidebar: #0e141f;
+  --bg-panel: #111824;
+  --bg-surface: #182232;
+  --bg-hover: #212e42;
+  --bg-scrim: rgba(7, 10, 16, 0.84);
+  --border-subtle: #243044;
+  --border-strong: #34455e;
+  --border-accent: rgba(45, 212, 191, 0.42);
 
-/* Career Mode — Cinematic Business RPG palette (Charcoal / Champagne Gold / Warm Bronze / Ivory) */
-[data-experience="career"] {
-  --bg-app: #11100e;
-  --bg-sidebar: #161411;
-  --bg-panel: #1c1915;
-  --bg-surface: #24201b;
-  --bg-hover: #2d2821;
-  --border-subtle: #342d24;
-  --text-primary: #f5efe6;
-  --text-secondary: #c5baa8;
-  --text-muted: #8f8474;
-  --accent: #d4af6a;
-  --accent-hover: #c39a50;
-  --career-bronze: #9c7a49;
-  --positive: #34d399;
-  --positive-soft: rgba(52, 211, 153, 0.13);
+  --text-primary: #f1f5f9;
+  --text-secondary: #b6c2d2;
+  --text-muted: #8d9cb0;
+  --text-on-accent: #071018;
+
+  --accent: #2dd4bf;
+  --accent-hover: #5eead4;
+  --accent-muted: #14b8a6;
+
+  --positive: #22c55e;
+  --positive-soft: rgba(34, 197, 94, 0.14);
   --negative: #f87171;
   --negative-soft: rgba(248, 113, 113, 0.14);
-  --warning: #e6b85c;
-  --warning-soft: rgba(230, 184, 92, 0.16);
+  --warning: #f5b942;
+  --warning-soft: rgba(245, 185, 66, 0.15);
+}
+
+/* Career Mode — Cinematic Business RPG (Warm Obsidian / Parchment Ivory / Champagne Gold) */
+[data-experience="career"] {
+  --bg-app: #100e0c;
+  --bg-sidebar: #14120f;
+  --bg-panel: #191612;
+  --bg-surface: #231f19;
+  --bg-hover: #2d271f;
+  --bg-scrim: rgba(16, 14, 12, 0.86);
+  --border-subtle: #332c23;
+  --border-strong: #524636;
+  --border-accent: rgba(214, 178, 110, 0.44);
+
+  --text-primary: #f6f1e7;
+  --text-secondary: #cfc5b5;
+  --text-muted: #a69a87;
+  --text-on-accent: #100e0c;
+
+  --accent: #d6b26e;
+  --accent-hover: #e2c282;
+  --accent-muted: #8c6d3f;
+  --career-bronze: #8c6d3f;
+
+  --positive: #34d399;
+  --positive-soft: rgba(52, 211, 153, 0.14);
+  --negative: #f87171;
+  --negative-soft: rgba(248, 113, 113, 0.14);
+  --warning: #f0b85a;
+  --warning-soft: rgba(240, 184, 90, 0.16);
 }
 
 @layer base {
   html {
     font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    font-size: 16px;
+    -webkit-font-smoothing: antialiased;
   }
 
   body {
@@ -81,18 +126,39 @@
 
   .font-mono,
   .tabular-nums {
-    font-variant-numeric: tabular-nums;
+    font-variant-numeric: tabular-nums lining-nums;
   }
 
   .font-mono {
     font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   }
+
+  button:focus-visible,
+  a:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+}
+
+.safe-pb {
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 @keyframes careerSceneFadeIn {
   from {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
@@ -101,19 +167,31 @@
 }
 
 .career-fade-in {
-  animation: careerSceneFadeIn 0.35s ease-out both;
+  animation: careerSceneFadeIn 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .career-fade-in,
-  [data-experience="career"] * {
+  *,
+  *::before,
+  *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
 
-/* Custom restrained scrollbars for financial terminal grids */
+html[data-reduced-motion="true"] .career-fade-in,
+html[data-reduced-motion="true"] *,
+html[data-reduced-motion="true"] *::before,
+html[data-reduced-motion="true"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+/* Restrained scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;

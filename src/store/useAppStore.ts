@@ -62,77 +62,49 @@ export function resetSeenRealtimeEvents(): void {
   seenEventIds.clear();
 }
 
-export type UnifiedExchangeTab = 'discover' | 'spot' | 'futures' | 'forex';
-export type MyEmpireTab = 'hub' | 'business' | 'corporate' | 'cofounder' | 'hq' | 'funds';
-export type MyAssetsTab = 'portfolio' | 'property' | 'banking' | 'luxury';
+import {
+  resolveCanonicalNavigation,
+  type BusinessTycoonTab,
+  type LifestyleTab,
+  type MyAssetsTab,
+  type MyEmpireTab,
+  type NavPage,
+  type UnifiedExchangeTab,
+  type WorldTab,
+} from '../lib/navigation';
 
-export type NavPage =
-  | 'overview'
-  | 'unified_exchange'
-  | 'my_empire'
-  | 'my_assets'
-  | 'discover'
-  | 'exchange'
-  | 'forex'
-  | 'futures'
-  | 'portfolio'
-  | 'property'
-  | 'business'
-  | 'empire_hub'
-  | 'capital_hub'
-  | 'company_hq'
-  | 'corporate'
-  | 'funds'
-  | 'luxury'
-  | 'career'
-  | 'banking'
-  | 'social'
-  | 'leaderboard'
-  | 'news'
-  | 'entertainment'
-  | 'settings'
-  | 'career_home'
-  | 'career_world'
-  | 'career_settings';
+export type {
+  BusinessTycoonTab,
+  LifestyleTab,
+  MyAssetsTab,
+  MyEmpireTab,
+  NavPage,
+  UnifiedExchangeTab,
+  WorldTab,
+};
 
-export function resolveLegacyPageRedirect(page: NavPage): {
-  activePage: NavPage;
-  exchangeTab?: UnifiedExchangeTab;
-  empireTab?: MyEmpireTab;
-  assetsTab?: MyAssetsTab;
-} {
-  switch (page) {
-    case 'discover':
-      return { activePage: 'unified_exchange', exchangeTab: 'discover' };
-    case 'exchange':
-      return { activePage: 'unified_exchange', exchangeTab: 'spot' };
-    case 'futures':
-      return { activePage: 'unified_exchange', exchangeTab: 'futures' };
-    case 'forex':
-      return { activePage: 'unified_exchange', exchangeTab: 'forex' };
-    case 'empire_hub':
-      return { activePage: 'my_empire', empireTab: 'hub' };
-    case 'business':
-      return { activePage: 'my_empire', empireTab: 'business' };
-    case 'corporate':
-      return { activePage: 'my_empire', empireTab: 'corporate' };
-    case 'capital_hub':
-      return { activePage: 'my_empire', empireTab: 'cofounder' };
-    case 'company_hq':
-      return { activePage: 'my_empire', empireTab: 'hq' };
-    case 'funds':
-      return { activePage: 'my_empire', empireTab: 'funds' };
-    case 'portfolio':
-      return { activePage: 'my_assets', assetsTab: 'portfolio' };
-    case 'property':
-      return { activePage: 'my_assets', assetsTab: 'property' };
-    case 'banking':
-      return { activePage: 'my_assets', assetsTab: 'banking' };
-    case 'luxury':
-      return { activePage: 'my_assets', assetsTab: 'luxury' };
-    default:
-      return { activePage: page };
-  }
+export const resolveLegacyPageRedirect = resolveCanonicalNavigation;
+
+export interface GameFeedbackEvent {
+  id: string;
+  kind: 'COMPANY_OPENING' | 'UPGRADE' | 'DEAL_SUCCESS' | 'FAILURE';
+  title: string;
+  subtitle?: string;
+  summary?: string;
+  imageUrl?: string;
+  metrics?: Array<{
+    label: string;
+    value: string;
+    tone?: 'default' | 'neutral' | 'accent' | 'positive' | 'negative';
+  }>;
+  npcQuote?: {
+    npcId?: 'minh_quan' | 'gia_han' | 'duc_huy' | 'hoang_nam' | 'thao_linh';
+    name: string;
+    message: string;
+  };
+  nextObjective?: string;
+  ctaLabel?: string;
+  ctaTargetPage?: NavPage;
 }
 
 export type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'polling';
@@ -165,6 +137,8 @@ interface UiPrefs {
   futuresIntroSeen: boolean;
   careerSoundMuted: boolean;
   careerTypewriterEnabled: boolean;
+  careerSubtitlesEnabled: boolean;
+  reducedMotionPref: boolean;
 }
 
 const DEFAULT_UI_PREFS: UiPrefs = {
@@ -177,6 +151,8 @@ const DEFAULT_UI_PREFS: UiPrefs = {
   futuresIntroSeen: false,
   careerSoundMuted: false,
   careerTypewriterEnabled: true,
+  careerSubtitlesEnabled: true,
+  reducedMotionPref: false,
 };
 
 function resolveInitialTradingModeFromUrl(): TradingExperienceMode | null {
@@ -211,6 +187,9 @@ function loadUiPrefs(): UiPrefs {
       careerSoundMuted: Boolean(parsed.careerSoundMuted),
       careerTypewriterEnabled:
         typeof parsed.careerTypewriterEnabled === 'boolean' ? parsed.careerTypewriterEnabled : true,
+      careerSubtitlesEnabled:
+        typeof parsed.careerSubtitlesEnabled === 'boolean' ? parsed.careerSubtitlesEnabled : true,
+      reducedMotionPref: Boolean(parsed.reducedMotionPref),
     };
   } catch {
     return { ...DEFAULT_UI_PREFS, tradingMode: urlMode ?? DEFAULT_UI_PREFS.tradingMode };
@@ -231,6 +210,10 @@ interface AppState {
   exchangeTab: UnifiedExchangeTab;
   empireTab: MyEmpireTab;
   assetsTab: MyAssetsTab;
+  lifestyleTab: LifestyleTab;
+  worldTab: WorldTab;
+  businessCreationIntent: boolean;
+  businessTabIntent: BusinessTycoonTab | null;
   exchangeClassFilter: 'ALL' | 'CRYPTO' | 'STOCK';
   selectedSymbol: string;
   selectedForexSymbol: string;
@@ -257,9 +240,13 @@ interface AppState {
   activeCareerSaveId: string | null;
   careerSoundMuted: boolean;
   careerTypewriterEnabled: boolean;
+  careerSubtitlesEnabled: boolean;
+  reducedMotionPref: boolean;
+  mainMenuOpen: boolean;
   phoneOpen: boolean;
   journalOpen: boolean;
   endingModalOpen: boolean;
+  gameFeedback: GameFeedbackEvent | null;
 
   // Session & Connection (in-memory only)
   token: string | null;
@@ -303,6 +290,13 @@ interface AppState {
   setExchangeTab: (tab: UnifiedExchangeTab) => void;
   setEmpireTab: (tab: MyEmpireTab) => void;
   setAssetsTab: (tab: MyAssetsTab) => void;
+  setLifestyleTab: (tab: LifestyleTab) => void;
+  setWorldTab: (tab: WorldTab) => void;
+  openBusinessCreationWizard: () => void;
+  clearBusinessCreationIntent: () => void;
+  openBusinessWorkspaceTab: (tab: BusinessTycoonTab) => void;
+  clearBusinessTabIntent: () => void;
+  clearBusinessIntents: () => void;
   openCompanyHq: (companyId: string) => void;
   setSelectedHqCompanyId: (companyId: string | null) => void;
   setConnectUnreadCounts: (notifications: number, messages: number) => void;
@@ -336,9 +330,14 @@ interface AppState {
   setActiveCareerSaveId: (saveId: string | null) => void;
   toggleCareerSoundMuted: () => void;
   toggleCareerTypewriter: () => void;
+  toggleCareerSubtitles: () => void;
+  toggleReducedMotion: () => void;
+  setMainMenuOpen: (open: boolean) => void;
   setPhoneOpen: (open: boolean) => void;
   setJournalOpen: (open: boolean) => void;
   setEndingModalOpen: (open: boolean) => void;
+  showGameFeedback: (event: Omit<GameFeedbackEvent, 'id'>) => void;
+  dismissGameFeedback: () => void;
   clearWorldCachesForModeSwitch: () => void;
   setSession: (token: string | null, player: PlayerProfile | null) => void;
   setPlayer: (player: PlayerProfile | null) => void;
@@ -367,6 +366,8 @@ function persistFromState(s: AppState, overrides: Partial<UiPrefs> = {}): void {
     futuresIntroSeen: overrides.futuresIntroSeen ?? s.futuresIntroSeen,
     careerSoundMuted: overrides.careerSoundMuted ?? s.careerSoundMuted,
     careerTypewriterEnabled: overrides.careerTypewriterEnabled ?? s.careerTypewriterEnabled,
+    careerSubtitlesEnabled: overrides.careerSubtitlesEnabled ?? s.careerSubtitlesEnabled,
+    reducedMotionPref: overrides.reducedMotionPref ?? s.reducedMotionPref,
   });
 }
 
@@ -375,6 +376,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   exchangeTab: 'spot',
   empireTab: 'business',
   assetsTab: 'portfolio',
+  lifestyleTab: 'rank',
+  worldTab: 'connect',
+  businessCreationIntent: false,
+  businessTabIntent: null,
   exchangeClassFilter: 'ALL',
   selectedSymbol: 'NOVA',
   selectedForexSymbol: 'EUR-SIM/USD-SIM',
@@ -400,9 +405,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   activeCareerSaveId: null,
   careerSoundMuted: initialPrefs.careerSoundMuted,
   careerTypewriterEnabled: initialPrefs.careerTypewriterEnabled,
+  careerSubtitlesEnabled: initialPrefs.careerSubtitlesEnabled,
+  reducedMotionPref: initialPrefs.reducedMotionPref,
+  mainMenuOpen: false,
   phoneOpen: false,
   journalOpen: false,
   endingModalOpen: false,
+  gameFeedback: null,
 
   token: null,
   player: null,
@@ -441,17 +450,36 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setActivePage: (page) =>
     set((state) => {
-      const resolved = resolveLegacyPageRedirect(page);
+      const resolved = resolveCanonicalNavigation(page);
       return {
         activePage: resolved.activePage,
         exchangeTab: resolved.exchangeTab ?? state.exchangeTab,
         empireTab: resolved.empireTab ?? state.empireTab,
         assetsTab: resolved.assetsTab ?? state.assetsTab,
+        lifestyleTab: resolved.lifestyleTab ?? state.lifestyleTab,
+        worldTab: resolved.worldTab ?? state.worldTab,
       };
     }),
   setExchangeTab: (exchangeTab) => set({ activePage: 'unified_exchange', exchangeTab }),
   setEmpireTab: (empireTab) => set({ activePage: 'my_empire', empireTab }),
   setAssetsTab: (assetsTab) => set({ activePage: 'my_assets', assetsTab }),
+  setLifestyleTab: (lifestyleTab) => set({ activePage: 'lifestyle', lifestyleTab }),
+  setWorldTab: (worldTab) => set({ activePage: 'world', worldTab }),
+  openBusinessCreationWizard: () =>
+    set({
+      activePage: 'my_empire',
+      empireTab: 'business',
+      businessCreationIntent: true,
+    }),
+  clearBusinessCreationIntent: () => set({ businessCreationIntent: false }),
+  openBusinessWorkspaceTab: (tab) =>
+    set({
+      activePage: 'my_empire',
+      empireTab: 'business',
+      businessTabIntent: tab,
+    }),
+  clearBusinessTabIntent: () => set({ businessTabIntent: null }),
+  clearBusinessIntents: () => set({ businessCreationIntent: false, businessTabIntent: null }),
   openCompanyHq: (companyId) =>
     set({ selectedHqCompanyId: companyId, activePage: 'my_empire', empireTab: 'hq' }),
   setSelectedHqCompanyId: (selectedHqCompanyId) => set({ selectedHqCompanyId }),
@@ -578,9 +606,39 @@ export const useAppStore = create<AppState>((set, get) => ({
       persistFromState(state, { careerTypewriterEnabled: next });
       return { careerTypewriterEnabled: next };
     }),
-  setPhoneOpen: (phoneOpen) => set({ phoneOpen }),
-  setJournalOpen: (journalOpen) => set({ journalOpen }),
+  toggleCareerSubtitles: () =>
+    set((state) => {
+      const next = !state.careerSubtitlesEnabled;
+      persistFromState(state, { careerSubtitlesEnabled: next });
+      return { careerSubtitlesEnabled: next };
+    }),
+  toggleReducedMotion: () =>
+    set((state) => {
+      const next = !state.reducedMotionPref;
+      persistFromState(state, { reducedMotionPref: next });
+      return { reducedMotionPref: next };
+    }),
+  setMainMenuOpen: (mainMenuOpen) => set({ mainMenuOpen }),
+  // Unified overlay mutual exclusion: Phone and Journal never stack unintentionally
+  setPhoneOpen: (phoneOpen) =>
+    set((state) => ({
+      phoneOpen,
+      journalOpen: phoneOpen ? false : state.journalOpen,
+    })),
+  setJournalOpen: (journalOpen) =>
+    set((state) => ({
+      journalOpen,
+      phoneOpen: journalOpen ? false : state.phoneOpen,
+    })),
   setEndingModalOpen: (endingModalOpen) => set({ endingModalOpen }),
+  showGameFeedback: (event) =>
+    set({
+      gameFeedback: {
+        ...event,
+        id: `fb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      },
+    }),
+  dismissGameFeedback: () => set({ gameFeedback: null }),
   clearWorldCachesForModeSwitch: () => {
     resetSeenRealtimeEvents();
     set({
