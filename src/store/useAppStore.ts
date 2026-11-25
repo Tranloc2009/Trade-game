@@ -208,12 +208,15 @@ interface AppState {
   // Navigation & UI Prefs
   activePage: NavPage;
   exchangeTab: UnifiedExchangeTab;
+  exchangeDiscoveryOpen: boolean;
   empireTab: MyEmpireTab;
   assetsTab: MyAssetsTab;
   lifestyleTab: LifestyleTab;
   worldTab: WorldTab;
   businessCreationIntent: boolean;
   businessTabIntent: BusinessTycoonTab | null;
+  selectedBusinessId: string | null;
+  focusedCityLocationId: string | null;
   exchangeClassFilter: 'ALL' | 'CRYPTO' | 'STOCK';
   selectedSymbol: string;
   selectedForexSymbol: string;
@@ -288,13 +291,17 @@ interface AppState {
   // Actions
   setActivePage: (page: NavPage) => void;
   setExchangeTab: (tab: UnifiedExchangeTab) => void;
+  setExchangeDiscoveryOpen: (open: boolean) => void;
   setEmpireTab: (tab: MyEmpireTab) => void;
   setAssetsTab: (tab: MyAssetsTab) => void;
   setLifestyleTab: (tab: LifestyleTab) => void;
   setWorldTab: (tab: WorldTab) => void;
   openBusinessCreationWizard: () => void;
   clearBusinessCreationIntent: () => void;
-  openBusinessWorkspaceTab: (tab: BusinessTycoonTab) => void;
+  openBusinessWorkspaceTab: (tab: BusinessTycoonTab, businessId?: string) => void;
+  setSelectedBusinessId: (businessId: string | null) => void;
+  focusCityLocation: (locationId: string) => void;
+  clearFocusedCityLocation: () => void;
   clearBusinessTabIntent: () => void;
   clearBusinessIntents: () => void;
   openCompanyHq: (companyId: string) => void;
@@ -373,14 +380,17 @@ function persistFromState(s: AppState, overrides: Partial<UiPrefs> = {}): void {
 
 export const useAppStore = create<AppState>((set, get) => ({
   activePage: 'overview',
-  exchangeTab: 'spot',
+  exchangeTab: 'stocks',
+  exchangeDiscoveryOpen: false,
   empireTab: 'business',
   assetsTab: 'portfolio',
   lifestyleTab: 'rank',
   worldTab: 'connect',
   businessCreationIntent: false,
   businessTabIntent: null,
-  exchangeClassFilter: 'ALL',
+  selectedBusinessId: null,
+  focusedCityLocationId: null,
+  exchangeClassFilter: 'STOCK',
   selectedSymbol: 'NOVA',
   selectedForexSymbol: 'EUR-SIM/USD-SIM',
   selectedFuturesSymbol: 'BTC-SIM/CR-PERP',
@@ -451,16 +461,37 @@ export const useAppStore = create<AppState>((set, get) => ({
   setActivePage: (page) =>
     set((state) => {
       const resolved = resolveCanonicalNavigation(page);
+      const nextExchangeTab = resolved.exchangeTab ?? state.exchangeTab;
+      const nextClassFilter =
+        nextExchangeTab === 'stocks'
+          ? 'STOCK'
+          : nextExchangeTab === 'crypto'
+            ? 'CRYPTO'
+            : state.exchangeClassFilter;
       return {
         activePage: resolved.activePage,
-        exchangeTab: resolved.exchangeTab ?? state.exchangeTab,
+        exchangeTab: nextExchangeTab,
+        exchangeClassFilter: nextClassFilter,
+        exchangeDiscoveryOpen: resolved.exchangeDiscoveryOpen ?? false,
         empireTab: resolved.empireTab ?? state.empireTab,
         assetsTab: resolved.assetsTab ?? state.assetsTab,
         lifestyleTab: resolved.lifestyleTab ?? state.lifestyleTab,
         worldTab: resolved.worldTab ?? state.worldTab,
       };
     }),
-  setExchangeTab: (exchangeTab) => set({ activePage: 'unified_exchange', exchangeTab }),
+  setExchangeTab: (exchangeTab) =>
+    set((state) => ({
+      activePage: 'unified_exchange',
+      exchangeTab,
+      exchangeDiscoveryOpen: false,
+      exchangeClassFilter:
+        exchangeTab === 'stocks'
+          ? 'STOCK'
+          : exchangeTab === 'crypto'
+            ? 'CRYPTO'
+            : state.exchangeClassFilter,
+    })),
+  setExchangeDiscoveryOpen: (exchangeDiscoveryOpen) => set({ exchangeDiscoveryOpen }),
   setEmpireTab: (empireTab) => set({ activePage: 'my_empire', empireTab }),
   setAssetsTab: (assetsTab) => set({ activePage: 'my_assets', assetsTab }),
   setLifestyleTab: (lifestyleTab) => set({ activePage: 'lifestyle', lifestyleTab }),
@@ -472,12 +503,22 @@ export const useAppStore = create<AppState>((set, get) => ({
       businessCreationIntent: true,
     }),
   clearBusinessCreationIntent: () => set({ businessCreationIntent: false }),
-  openBusinessWorkspaceTab: (tab) =>
-    set({
+  openBusinessWorkspaceTab: (tab, businessId) =>
+    set((state) => ({
       activePage: 'my_empire',
       empireTab: 'business',
       businessTabIntent: tab,
+      selectedBusinessId: businessId ?? state.selectedBusinessId,
+    })),
+  setSelectedBusinessId: (selectedBusinessId) => set({ selectedBusinessId }),
+  focusCityLocation: (locationId) =>
+    set({
+      activePage: 'career_world',
+      focusedCityLocationId: locationId,
+      phoneOpen: false,
+      journalOpen: false,
     }),
+  clearFocusedCityLocation: () => set({ focusedCityLocationId: null }),
   clearBusinessTabIntent: () => set({ businessTabIntent: null }),
   clearBusinessIntents: () => set({ businessCreationIntent: false, businessTabIntent: null }),
   openCompanyHq: (companyId) =>
@@ -487,11 +528,17 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ connectUnreadNotifications, connectUnreadMessages }),
 
   openAssetInExchange: (symbol, marketClass) =>
-    set({
-      selectedSymbol: symbol,
-      exchangeClassFilter: marketClass ?? 'ALL',
-      activePage: 'unified_exchange',
-      exchangeTab: 'spot',
+    set((state) => {
+      const detected =
+        marketClass ??
+        (state.assets.find((a) => a.symbol === symbol)?.marketClass === 'CRYPTO' ? 'CRYPTO' : 'STOCK');
+      return {
+        selectedSymbol: symbol,
+        exchangeClassFilter: detected,
+        activePage: 'unified_exchange',
+        exchangeTab: detected === 'CRYPTO' ? 'crypto' : 'stocks',
+        exchangeDiscoveryOpen: false,
+      };
     }),
 
   openForexPair: (symbol) =>

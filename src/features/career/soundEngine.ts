@@ -1,5 +1,5 @@
 /**
- * Synthesized Web Audio sound engine for Project Immersion.
+ * Synthesized Web Audio sound engine for Trading Empire — Living World 2.0.
  * - Zero external audio file dependencies
  * - Respects mute toggle, autoplay gesture unlocking, and prefers-reduced-motion
  */
@@ -20,7 +20,9 @@ class CareerSoundEngine {
 
   private ensureContext(): AudioContext | null {
     if (typeof window === 'undefined') return null;
-    const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    const AudioCtx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioCtx) return null;
     if (!this.ctx) {
       this.ctx = new AudioCtx();
@@ -46,7 +48,7 @@ class CareerSoundEngine {
     osc.type = type;
     osc.frequency.setValueAtTime(freq, now);
     gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, volume), now + 0.03);
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, volume), now + 0.025);
     gain.gain.exponentialRampToValueAtTime(0.0001, now + durationSec);
     osc.connect(gain);
     gain.connect(ctx.destination);
@@ -66,6 +68,46 @@ class CareerSoundEngine {
     if (!this.canPlay(muted)) return;
     this.playTone(523.25, 0.12, 0.02, 'triangle', 0);
     this.playTone(659.25, 0.16, 0.016, 'sine', 0.04);
+  }
+
+  public playLocationSelect(muted: boolean): void {
+    if (!this.canPlay(muted)) return;
+    this.playTone(440.0, 0.09, 0.014, 'sine', 0);
+    this.playTone(587.33, 0.12, 0.012, 'triangle', 0.03);
+  }
+
+  public playArrivalCue(locationId: string, muted: boolean): void {
+    if (!this.canPlay(muted)) return;
+    if (locationId === 'coffee_shop') {
+      // Warm acoustic bell chime
+      this.playTone(587.33, 0.35, 0.02, 'sine', 0);
+      this.playTone(739.99, 0.45, 0.016, 'triangle', 0.09);
+      return;
+    }
+    if (locationId === 'financial_district' || locationId === 'bank') {
+      // Crisp institutional two-note pulse
+      this.playTone(523.25, 0.22, 0.02, 'triangle', 0);
+      this.playTone(783.99, 0.32, 0.018, 'sine', 0.08);
+      return;
+    }
+    // Warm modern city/office arrival motif
+    this.playTone(392.0, 0.28, 0.02, 'sine', 0);
+    this.playTone(493.88, 0.36, 0.018, 'triangle', 0.08);
+    this.playTone(587.33, 0.42, 0.014, 'sine', 0.15);
+  }
+
+  public playMissionCompleteCue(muted: boolean): void {
+    if (!this.canPlay(muted)) return;
+    this.playTone(440.0, 0.22, 0.024, 'triangle', 0);
+    this.playTone(554.37, 0.26, 0.022, 'triangle', 0.09);
+    this.playTone(659.25, 0.45, 0.024, 'sine', 0.18);
+  }
+
+  public playCompanyOpeningCue(muted: boolean): void {
+    if (!this.canPlay(muted)) return;
+    this.playTone(329.63, 0.3, 0.024, 'triangle', 0);
+    this.playTone(440.0, 0.34, 0.024, 'triangle', 0.1);
+    this.playTone(659.25, 0.65, 0.026, 'sine', 0.2);
   }
 
   public playPhoneChime(muted: boolean): void {
@@ -88,7 +130,7 @@ class CareerSoundEngine {
       this.playTone(293.66, 0.35, 0.022, 'triangle', 0.09);
     } else {
       this.playTone(392.0, 0.18, 0.02, 'sine', 0);
-      this.playTone(523.25, 0.28, 0.022, 'sine', 0.08);
+      this.playTone(523.25, 0.28, 0.022, 'triangle', 0.08);
     }
   }
 }

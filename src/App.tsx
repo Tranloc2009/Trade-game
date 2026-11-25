@@ -391,6 +391,7 @@ function TradingEmpireWorkspace() {
         applyWorldSnapshot(res.worldSnapshot);
         void queryClient.invalidateQueries({ queryKey: ['career-wealth-details'] });
         if (res.careerStory.completedMissionIds.length > prevCompletedCount) {
+          careerSound.playMissionCompleteCue(useAppStore.getState().careerSoundMuted);
           pushToast({
             tone: 'success',
             title: 'Hoàn thành nhiệm vụ cốt truyện!',

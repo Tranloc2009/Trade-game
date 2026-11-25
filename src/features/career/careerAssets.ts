@@ -1,6 +1,7 @@
 import type { NpcCharacterId, SceneBackgroundKey } from '../../../shared/contracts/careerStory';
 import type { V4BusinessIndustry } from '../../../shared/contracts/v4';
 
+import saigonCityMapImg from '../../assets/images/isometric_saigon_city_map_1795620700501.jpg';
 import saigonDawnImg from '../../assets/images/career_scene_saigon_dawn_1795525588378.jpg';
 import apartmentImg from '../../assets/images/career_scene_apartment_1795525590441.jpg';
 import coffeeShopImg from '../../assets/images/career_scene_coffee_shop_1795525588528.jpg';
@@ -21,6 +22,8 @@ import npcGiaHanImg from '../../assets/images/npc_gia_han_1795525591457.jpg';
 import npcDucHuyImg from '../../assets/images/npc_duc_huy_1795525589275.jpg';
 import npcHoangNamImg from '../../assets/images/npc_hoang_nam_1795525586575.jpg';
 import npcThaoLinhImg from '../../assets/images/npc_thao_linh_1795525586633.jpg';
+
+export const SAIGON_CITY_MAP_IMAGE = saigonCityMapImg;
 
 export const CAREER_SCENE_IMAGES: Record<SceneBackgroundKey, string> = {
   saigon_dawn: saigonDawnImg,
@@ -61,6 +64,46 @@ export const INDUSTRY_IMAGES: Record<V4BusinessIndustry, string> = {
   REAL_ESTATE: cityLegacyImg,
   FINANCE: districtFinancialImg,
 };
+
+export interface BusinessProgressionStage {
+  tierKey: 'STARTUP' | 'GROWING' | 'ENTERPRISE' | 'CONGLOMERATE';
+  labelVi: string;
+  subtitleVi: string;
+  imageUrl: string;
+}
+
+export function getBusinessProgressionStage(level: number): BusinessProgressionStage {
+  if (level >= 9) {
+    return {
+      tierKey: 'CONGLOMERATE',
+      labelVi: 'Tập đoàn đa ngành',
+      subtitleVi: 'Biểu tượng dẫn dắt thị trường cấp quốc gia',
+      imageUrl: cityLegacyImg,
+    };
+  }
+  if (level >= 6) {
+    return {
+      tierKey: 'ENTERPRISE',
+      labelVi: 'Doanh nghiệp lớn',
+      subtitleVi: 'Trụ sở quy mô lớn với mạng lưới chi nhánh vững mạnh',
+      imageUrl: saigonRiverHqImg,
+    };
+  }
+  if (level >= 3) {
+    return {
+      tierKey: 'GROWING',
+      labelVi: 'Đang phát triển',
+      subtitleVi: 'Văn phòng mở rộng, tăng tốc thị phần và thương hiệu',
+      imageUrl: thuthiemDistrictImg,
+    };
+  }
+  return {
+    tierKey: 'STARTUP',
+    labelVi: 'Khởi nghiệp',
+    subtitleVi: 'Văn phòng khởi điểm gọn nhẹ, tập trung tìm dòng tiền đầu tiên',
+    imageUrl: startupOfficeImg,
+  };
+}
 
 export function getSceneImageUrl(key: SceneBackgroundKey): string {
   return CAREER_SCENE_IMAGES[key] ?? saigonDawnImg;

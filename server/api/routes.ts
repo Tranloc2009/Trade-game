@@ -33,6 +33,7 @@ import { WorldEngine } from '../engine/WorldEngine';
 import { createV4Router } from './v4Routes';
 import { createCoFounderRouter } from './cofounderRoutes';
 import { createConnectRouter } from './connectRoutes';
+import { adminAuth, requireAdminDev } from '../security/AdminAuth';
 
 const TriggerCentralBankSchema = z.object({
   currency: z.enum(ALL_CURRENCIES as unknown as [string, ...string[]]).optional(),
@@ -49,6 +50,10 @@ const BotDevConfigureSchema = z.object({
   agentCount: z.number().int().min(8).max(200).optional(),
   seed: z.number().int().min(1).max(2_147_483_647).optional(),
   cpuBudgetMsPerTick: z.number().min(2).max(250).optional(),
+});
+
+const AdminLoginSchema = z.object({
+  secret: z.string().min(1).max(256),
 });
 
 function ok<T>(res: Response, data: T, status = 200): void {
@@ -79,6 +84,7 @@ const VALID_TIMEFRAMES = new Set<Timeframe>(['1m', '5m', '15m', '1h', '4h', '1D'
 
 export function createApiRouter(world: WorldEngine): Router {
   const router = Router();
+  const adminGuard = requireAdminDev(world.devToolsEnabled);
 
   const resolvePlayerId = (req: Request): string | null => {
     const authHeader = req.header('authorization');
@@ -166,9 +172,8 @@ export function createApiRouter(world: WorldEngine): Router {
     ok(res, world.getForexOverview());
   });
 
-  router.post('/forex/dev/trigger-policy', (req, res, next) => {
+  router.post('/forex/dev/trigger-policy', adminGuard, (req, res, next) => {
     try {
-      if (!world.devToolsEnabled) throw new DomainError('FORBIDDEN_IN_PRODUCTION', undefined, 403);
       const parsed = TriggerCentralBankSchema.safeParse(req.body ?? {});
       if (!parsed.success) {
         return fail(res, 'VALIDATION_ERROR', 'Mã tiền tệ không hợp lệ.', 400);
@@ -376,9 +381,8 @@ export function createApiRouter(world: WorldEngine): Router {
     }
   });
 
-  router.post('/futures/dev/settle-funding', (req, res, next) => {
+  router.post('/futures/dev/settle-funding', adminGuard, (req, res, next) => {
     try {
-      if (!world.devToolsEnabled) throw new DomainError('FORBIDDEN_IN_PRODUCTION', undefined, 403);
       const symbol = typeof req.body?.symbol === 'string' ? req.body.symbol.toUpperCase() : undefined;
       ok(res, world.devSettleFuturesFunding(symbol));
     } catch (err) {
@@ -386,9 +390,8 @@ export function createApiRouter(world: WorldEngine): Router {
     }
   });
 
-  router.post('/futures/dev/simulate-tick', (req, res, next) => {
+  router.post('/futures/dev/simulate-tick', adminGuard, (req, res, next) => {
     try {
-      if (!world.devToolsEnabled) throw new DomainError('FORBIDDEN_IN_PRODUCTION', undefined, 403);
       const symbol = typeof req.body?.symbol === 'string' ? req.body.symbol.toUpperCase() : undefined;
       ok(res, world.devSimulateFuturesTick(symbol));
     } catch (err) {
@@ -866,8 +869,46 @@ export function createApiRouter(world: WorldEngine): Router {
     }
   });
 
-  // Diagnostics & Development QA Tools
-  router.get('/diagnostics', (_req, res) => {
+  // Server-Side Admin / QA Auth (Disabled when ADMIN_DEV_SECRET is not configured on backend)
+  router.get('/admin/status', (req, res) => {
+    ok(res, adminAuth.getStatus(req));
+  });
+
+  router.post('/admin/login', (req, res, next) => {
+    try {
+      if (!world.devToolsEnabled) {
+        throw new DomainError(
+          'FORBIDDEN_IN_PRODUCTION',
+          'Công cụ quản trị / QA bị vô hiệu hóa trên môi trường này.',
+          403,
+        );
+      }
+      if (!adminAuth.isAdminEnabled()) {
+        throw new DomainError(
+          'UNAUTHORIZED',
+          'Chức năng quản trị / QA đang bị vô hiệu hóa trên máy chủ.',
+          403,
+        );
+      }
+      const parsed = AdminLoginSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return fail(res, 'VALIDATION_ERROR', 'Thiếu thông tin xác thực quản trị.', 400);
+      }
+      const clientKey = req.ip || req.socket.remoteAddress || 'unknown';
+      const session = adminAuth.loginWithSecret(parsed.data.secret, clientKey);
+      ok(res, session);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/admin/logout', (req, res) => {
+    adminAuth.logout(req.header('x-admin-token'));
+    ok(res, { loggedOut: true });
+  });
+
+  // Diagnostics & Development QA Tools (Strictly Admin-Protected)
+  router.get('/diagnostics', adminGuard, (_req, res) => {
     ok(res, world.getDiagnostics());
   });
 
@@ -886,9 +927,8 @@ export function createApiRouter(world: WorldEngine): Router {
     }
   });
 
-  router.post('/bots/dev/tick', (req, res, next) => {
+  router.post('/bots/dev/tick', adminGuard, (req, res, next) => {
     try {
-      if (!world.devToolsEnabled) throw new DomainError('FORBIDDEN_IN_PRODUCTION', undefined, 403);
       const parsed = BotDevTickSchema.safeParse(req.body ?? {});
       if (!parsed.success) {
         return fail(res, 'VALIDATION_ERROR', parsed.error.issues[0]?.message, 400);
@@ -930,9 +970,8 @@ export function createApiRouter(world: WorldEngine): Router {
     }
   });
 
-  router.post('/bots/dev/configure', (req, res, next) => {
+  router.post('/bots/dev/configure', adminGuard, (req, res, next) => {
     try {
-      if (!world.devToolsEnabled) throw new DomainError('FORBIDDEN_IN_PRODUCTION', undefined, 403);
       const parsed = BotDevConfigureSchema.safeParse(req.body ?? {});
       if (!parsed.success) {
         return fail(res, 'VALIDATION_ERROR', parsed.error.issues[0]?.message, 400);
@@ -944,9 +983,8 @@ export function createApiRouter(world: WorldEngine): Router {
     }
   });
 
-  router.post('/dev/simulate-bot-tick', (req, res, next) => {
+  router.post('/dev/simulate-bot-tick', adminGuard, (req, res, next) => {
     try {
-      if (!world.devToolsEnabled) throw new DomainError('FORBIDDEN_IN_PRODUCTION', undefined, 403);
       const symbol = typeof req.body?.symbol === 'string' ? req.body.symbol.toUpperCase() : undefined;
       const result = world.devSimulateBotTick(symbol);
       ok(res, { tradesExecuted: result.trades.length, affectedSymbols: result.affectedSymbols });
@@ -955,9 +993,8 @@ export function createApiRouter(world: WorldEngine): Router {
     }
   });
 
-  router.post('/dev/reset', (_req, res, next) => {
+  router.post('/dev/reset', adminGuard, (_req, res, next) => {
     try {
-      if (!world.devToolsEnabled) throw new DomainError('FORBIDDEN_IN_PRODUCTION', undefined, 403);
       world.auth.reset();
       world.bootstrapWorld();
       ok(res, { reset: true, diagnostics: world.getDiagnostics() });

@@ -419,12 +419,4 @@ export const V4Service = {
       '/career/unlock-skill',
       { method: 'POST', body: JSON.stringify({ skillId }) },
     ),
-
-  devAdvanceCycle: (cycles = 1, forceEventTemplateId?: string) =>
-    v4Request<{ cyclesExecuted: number }>('/dev/advance-cycle', {
-      method: 'POST',
-      body: JSON.stringify({ cycles, forceEventTemplateId }),
-    }),
-
-  devBalanceSimulation: (days = 90) => v4Request<MacroSimulationReport>(`/dev/balance-simulation?days=${days}`),
 };

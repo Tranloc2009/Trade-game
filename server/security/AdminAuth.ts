@@ -6,107 +6,85 @@ interface AdminSession {
   token: string;
   createdAtMs: number;
   expiresAtMs: number;
-  label: string;
+}
+
+interface RateLimitEntry {
+  count: number;
+  windowStartMs: number;
 }
 
 const SESSION_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
-const SCRYPT_KEYLEN = 64;
+const MIN_SECRET_LENGTH = 8;
+const RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
+const RATE_LIMIT_MAX_ATTEMPTS = 5;
+
+function constantTimeDigestEquals(provided: string, expected: string): boolean {
+  const providedDigest = crypto.createHash('sha256').update(provided, 'utf8').digest();
+  const expectedDigest = crypto.createHash('sha256').update(expected, 'utf8').digest();
+  return crypto.timingSafeEqual(providedDigest, expectedDigest);
+}
 
 /**
- * Server-side Admin / Developer authorization service for sensitive Online world QA routes.
+ * Server-side Admin / QA authorization service.
  *
- * Security design:
- * - Never ships a hardcoded admin password in source code.
- * - If process.env.ADMIN_DEV_SECRET is configured, validates against it via timingSafeEqual.
- * - Otherwise, supports a one-time server-side admin passcode setup (scrypt + random salt)
- *   so an operator can claim admin access on a local/demo server without exposing dev/QA tools
- *   to ordinary players.
- * - Issues opaque random Bearer admin tokens stored strictly in server memory.
+ * Security invariants:
+ * - Reads ONLY `process.env.ADMIN_DEV_SECRET` on the backend (never exposed to frontend, API responses, or logs).
+ * - Never ships a hardcoded secret or first-run claim backdoor.
+ * - When `ADMIN_DEV_SECRET` is not configured (unset or < 8 chars), ALL Admin/QA functions are disabled (HTTP 403),
+ *   while ordinary Online and Career gameplay remain completely unaffected.
+ * - Uses constant-time SHA-256 digest comparison (`crypto.timingSafeEqual`) so even secret length is never leaked.
  */
 export class AdminAuthService {
-  private claimedHash: Buffer | null = null;
-  private claimedSalt: Buffer | null = null;
   private readonly sessions = new Map<string, AdminSession>();
+  private readonly failedAttempts = new Map<string, RateLimitEntry>();
 
   private getEnvSecret(): string | null {
     const raw = process.env.ADMIN_DEV_SECRET?.trim();
-    return raw && raw.length >= 8 ? raw : null;
+    if (!raw || raw.length < MIN_SECRET_LENGTH) {
+      return null;
+    }
+    return raw;
   }
 
-  public getStatus(): {
-    configuredViaEnv: boolean;
-    claimed: boolean;
-    requiresSetup: boolean;
+  public isAdminEnabled(): boolean {
+    return this.getEnvSecret() !== null;
+  }
+
+  public getStatus(req?: Request): {
+    adminEnabled: boolean;
+    authenticated: boolean;
   } {
-    const configuredViaEnv = Boolean(this.getEnvSecret());
-    const claimed = Boolean(this.claimedHash);
+    const adminEnabled = this.isAdminEnabled();
     return {
-      configuredViaEnv,
-      claimed,
-      requiresSetup: !configuredViaEnv && !claimed,
+      adminEnabled,
+      authenticated: adminEnabled && req ? this.isRequestAuthorized(req) : false,
     };
   }
 
-  public claimFirstRunPasscode(passcode: string): { token: string; expiresAt: string } {
-    if (this.getEnvSecret()) {
-      throw new DomainError(
-        'UNAUTHORIZED',
-        'Máy chủ đã cấu hình khóa quản trị qua biến môi trường. Vui lòng đăng nhập bằng khóa quản trị.',
-        403,
-      );
-    }
-    if (this.claimedHash) {
-      throw new DomainError(
-        'UNAUTHORIZED',
-        'Quyền quản trị đã được thiết lập trước đó. Vui lòng đăng nhập bằng mật khẩu quản trị hiện tại.',
-        403,
-      );
-    }
-    const clean = passcode.trim();
-    if (clean.length < 8 || clean.length > 128) {
-      throw new DomainError('VALIDATION_ERROR', 'Mật khẩu quản trị phải từ 8 đến 128 ký tự.', 400);
-    }
-    const salt = crypto.randomBytes(16);
-    const derived = crypto.scryptSync(clean, salt, SCRYPT_KEYLEN);
-    this.claimedSalt = salt;
-    this.claimedHash = derived;
-    return this.issueSession('local-operator');
-  }
-
-  public loginWithPasscode(passcode: string): { token: string; expiresAt: string } {
-    const clean = passcode.trim();
-    if (!clean) {
-      throw new DomainError('UNAUTHORIZED', 'Thiếu mật khẩu quản trị.', 401);
-    }
-
+  public loginWithSecret(secret: string, clientKey = 'unknown'): { token: string; expiresAt: string } {
     const envSecret = this.getEnvSecret();
-    if (envSecret) {
-      const providedBuf = Buffer.from(clean, 'utf8');
-      const expectedBuf = Buffer.from(envSecret, 'utf8');
-      if (providedBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(providedBuf, expectedBuf)) {
-        throw new DomainError('UNAUTHORIZED', 'Khóa quản trị không hợp lệ.', 403);
-      }
-      return this.issueSession('env-admin');
-    }
-
-    if (!this.claimedHash || !this.claimedSalt) {
+    if (!envSecret) {
       throw new DomainError(
         'UNAUTHORIZED',
-        'Chưa thiết lập tài khoản quản trị trên máy chủ này.',
+        'Chức năng quản trị / QA đang bị vô hiệu hóa trên máy chủ.',
         403,
       );
     }
 
-    const derived = crypto.scryptSync(clean, this.claimedSalt, SCRYPT_KEYLEN);
-    if (derived.length !== this.claimedHash.length || !crypto.timingSafeEqual(derived, this.claimedHash)) {
-      throw new DomainError('UNAUTHORIZED', 'Mật khẩu quản trị không chính xác.', 403);
+    this.assertNotRateLimited(clientKey);
+
+    const clean = typeof secret === 'string' ? secret.trim() : '';
+    if (!clean || !constantTimeDigestEquals(clean, envSecret)) {
+      this.recordFailedAttempt(clientKey);
+      throw new DomainError('UNAUTHORIZED', 'Thông tin xác thực quản trị không hợp lệ.', 403);
     }
 
-    return this.issueSession('local-operator');
+    this.failedAttempts.delete(clientKey);
+    return this.issueSession();
   }
 
   public verifyToken(token: string | null | undefined): AdminSession | null {
-    if (!token) return null;
+    if (!this.isAdminEnabled() || !token) return null;
     const session = this.sessions.get(token);
     if (!session) return null;
     if (Date.now() > session.expiresAtMs) {
@@ -119,9 +97,9 @@ export class AdminAuthService {
   public verifyEnvSecretHeader(secretHeader: string | null | undefined): boolean {
     const envSecret = this.getEnvSecret();
     if (!envSecret || !secretHeader) return false;
-    const providedBuf = Buffer.from(secretHeader.trim(), 'utf8');
-    const expectedBuf = Buffer.from(envSecret, 'utf8');
-    return providedBuf.length === expectedBuf.length && crypto.timingSafeEqual(providedBuf, expectedBuf);
+    const clean = secretHeader.trim();
+    if (!clean) return false;
+    return constantTimeDigestEquals(clean, envSecret);
   }
 
   public logout(token: string | null | undefined): void {
@@ -130,7 +108,16 @@ export class AdminAuthService {
     }
   }
 
+  public clearAllForTests(): void {
+    this.sessions.clear();
+    this.failedAttempts.clear();
+  }
+
   public isRequestAuthorized(req: Request): boolean {
+    if (!this.isAdminEnabled()) {
+      return false;
+    }
+
     const adminTokenHeader = req.header('x-admin-token');
     if (this.verifyToken(adminTokenHeader)) return true;
 
@@ -140,11 +127,37 @@ export class AdminAuthService {
     return false;
   }
 
-  private issueSession(label: string): { token: string; expiresAt: string } {
+  private assertNotRateLimited(clientKey: string): void {
+    const entry = this.failedAttempts.get(clientKey);
+    if (!entry) return;
+    if (Date.now() - entry.windowStartMs > RATE_LIMIT_WINDOW_MS) {
+      this.failedAttempts.delete(clientKey);
+      return;
+    }
+    if (entry.count >= RATE_LIMIT_MAX_ATTEMPTS) {
+      throw new DomainError(
+        'RATE_LIMITED',
+        'Quá nhiều lần xác thực không thành công. Vui lòng thử lại sau ít phút.',
+        429,
+      );
+    }
+  }
+
+  private recordFailedAttempt(clientKey: string): void {
+    const now = Date.now();
+    const existing = this.failedAttempts.get(clientKey);
+    if (!existing || now - existing.windowStartMs > RATE_LIMIT_WINDOW_MS) {
+      this.failedAttempts.set(clientKey, { count: 1, windowStartMs: now });
+    } else {
+      existing.count += 1;
+    }
+  }
+
+  private issueSession(): { token: string; expiresAt: string } {
     const token = `adm_${crypto.randomBytes(24).toString('hex')}`;
     const now = Date.now();
     const expiresAtMs = now + SESSION_TTL_MS;
-    this.sessions.set(token, { token, createdAtMs: now, expiresAtMs, label });
+    this.sessions.set(token, { token, createdAtMs: now, expiresAtMs });
     return { token, expiresAt: new Date(expiresAtMs).toISOString() };
   }
 }
@@ -154,14 +167,30 @@ export const adminAuth = new AdminAuthService();
 export function requireAdminDev(devToolsEnabled: boolean) {
   return (req: Request, _res: Response, next: NextFunction): void => {
     if (!devToolsEnabled) {
-      next(new DomainError('FORBIDDEN_IN_PRODUCTION', 'Công cụ QA/Dev bị vô hiệu hóa trên môi trường production.', 403));
+      next(
+        new DomainError(
+          'FORBIDDEN_IN_PRODUCTION',
+          'Công cụ quản trị / QA bị vô hiệu hóa trên môi trường này.',
+          403,
+        ),
+      );
+      return;
+    }
+    if (!adminAuth.isAdminEnabled()) {
+      next(
+        new DomainError(
+          'UNAUTHORIZED',
+          'Chức năng quản trị / QA đang bị vô hiệu hóa trên máy chủ.',
+          403,
+        ),
+      );
       return;
     }
     if (!adminAuth.isRequestAuthorized(req)) {
       next(
         new DomainError(
           'UNAUTHORIZED',
-          'Chỉ quản trị viên đã xác thực mới có quyền thực thi thao tác hệ thống trên thế giới Online.',
+          'Chỉ quản trị viên đã xác thực mới có quyền thực thi thao tác hệ thống này.',
           403,
         ),
       );

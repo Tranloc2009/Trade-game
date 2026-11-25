@@ -1,5 +1,12 @@
 import { lazy, Suspense, useState } from 'react';
-import { ArrowLeftRight, CandlestickChart, Compass, Sparkles, TrendingUp } from 'lucide-react';
+import {
+  ArrowLeftRight,
+  Building2,
+  Coins,
+  Compass,
+  Sparkles,
+  TrendingUp,
+} from 'lucide-react';
 import { getChapterFocusGuidance } from '../../lib/navigation';
 import { useAppStore, type UnifiedExchangeTab } from '../../store/useAppStore';
 import { AssetDiscoveryPage } from '../discover/AssetDiscoveryPage';
@@ -16,12 +23,12 @@ const EXCHANGE_TABS: Array<{
   id: UnifiedExchangeTab;
   label: string;
   shortLabel: string;
-  icon: typeof Compass;
+  icon: typeof Building2;
 }> = [
-  { id: 'discover', label: 'Khám phá thị trường', shortLabel: 'Khám phá', icon: Compass },
-  { id: 'spot', label: 'Sàn Spot', shortLabel: 'Spot', icon: CandlestickChart },
-  { id: 'futures', label: 'Sàn Futures (PERP)', shortLabel: 'Futures', icon: TrendingUp },
-  { id: 'forex', label: 'Sàn Forex (EFX)', shortLabel: 'Forex', icon: ArrowLeftRight },
+  { id: 'stocks', label: 'Cổ phiếu (ESE)', shortLabel: 'Cổ phiếu', icon: Building2 },
+  { id: 'crypto', label: 'Crypto & Meme (ECX)', shortLabel: 'Crypto', icon: Coins },
+  { id: 'forex', label: 'Forex (EFX)', shortLabel: 'Forex', icon: ArrowLeftRight },
+  { id: 'futures', label: 'Futures (PERP)', shortLabel: 'Futures', icon: TrendingUp },
 ];
 
 function TabLoadingFallback() {
@@ -33,7 +40,14 @@ function TabLoadingFallback() {
 }
 
 export function UnifiedExchangePage() {
-  const { exchangeTab, setExchangeTab, playMode, careerStory } = useAppStore();
+  const {
+    exchangeTab,
+    setExchangeTab,
+    exchangeDiscoveryOpen,
+    setExchangeDiscoveryOpen,
+    playMode,
+    careerStory,
+  } = useAppStore();
   const [showAllCareerTools, setShowAllCareerTools] = useState(false);
 
   const isCareer = playMode === 'CAREER';
@@ -56,37 +70,54 @@ export function UnifiedExchangePage() {
         <div className="flex flex-wrap items-center justify-between gap-2 pb-3">
           <div>
             <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--accent)]">
-              {isCareer ? 'Thị trường tài chính · Career World' : 'Trung tâm giao dịch'}
+              {isCareer ? 'Thị trường tài chính · Khu tài chính Sài Gòn' : 'Trung tâm giao dịch hợp nhất'}
             </div>
             <h1
               className={`text-lg font-bold tracking-tight text-[var(--text-primary)] ${
                 isCareer ? 'font-display-serif' : ''
               }`}
             >
-              Sàn giao dịch Hợp nhất
+              Sàn giao dịch 4 Thị trường
             </h1>
           </div>
 
-          {hasHiddenTabs && (
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={() => setShowAllCareerTools(true)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-2.5 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
+              data-testid="unified-exchange-discovery-toggle"
+              onClick={() => setExchangeDiscoveryOpen(!exchangeDiscoveryOpen)}
+              className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer min-h-[36px] ${
+                exchangeDiscoveryOpen
+                  ? 'border-[var(--accent)] bg-[var(--accent)] text-[var(--text-on-accent)]'
+                  : 'border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--accent)]/60'
+              }`}
             >
-              <Sparkles className="w-3.5 h-3.5 text-[var(--accent)]" />
-              <span>Mở công cụ nâng cao (Futures &amp; Forex)</span>
+              <Compass className="w-3.5 h-3.5" />
+              <span>{exchangeDiscoveryOpen ? 'Quay lại bảng lệnh' : 'Khám phá & Tìm tài sản'}</span>
             </button>
-          )}
+
+            {hasHiddenTabs && (
+              <button
+                type="button"
+                data-testid="unified-exchange-unlock-advanced"
+                onClick={() => setShowAllCareerTools(true)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-2.5 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors cursor-pointer min-h-[36px]"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-[var(--accent)]" />
+                <span>Mở Forex &amp; Futures</span>
+              </button>
+            )}
+          </div>
         </div>
 
         <div
           role="tablist"
-          aria-label="Chuyển thị trường giao dịch"
+          aria-label="4 thị trường giao dịch"
           className="flex items-center gap-1 overflow-x-auto no-scrollbar border-t border-[var(--border-subtle)] -mx-4 px-4"
         >
           {visibleTabs.map((tab) => {
             const Icon = tab.icon;
-            const active = exchangeTab === tab.id;
+            const active = !exchangeDiscoveryOpen && exchangeTab === tab.id;
             return (
               <button
                 key={tab.id}
@@ -94,7 +125,10 @@ export function UnifiedExchangePage() {
                 role="tab"
                 aria-selected={active}
                 data-testid={`unified-exchange-tab-${tab.id}`}
-                onClick={() => setExchangeTab(tab.id)}
+                onClick={() => {
+                  setExchangeDiscoveryOpen(false);
+                  setExchangeTab(tab.id);
+                }}
                 className={`relative px-3.5 py-3 text-xs sm:text-sm font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap min-h-[44px] ${
                   active
                     ? 'text-[var(--accent)]'
@@ -113,17 +147,23 @@ export function UnifiedExchangePage() {
         </div>
       </div>
 
-      {exchangeTab === 'discover' && <AssetDiscoveryPage />}
-      {exchangeTab === 'spot' && <ExchangePage />}
-      {exchangeTab === 'futures' && (
-        <Suspense fallback={<TabLoadingFallback />}>
-          <FuturesPage />
-        </Suspense>
-      )}
-      {exchangeTab === 'forex' && (
-        <Suspense fallback={<TabLoadingFallback />}>
-          <ForexPage />
-        </Suspense>
+      {exchangeDiscoveryOpen ? (
+        <AssetDiscoveryPage />
+      ) : (
+        <>
+          {exchangeTab === 'stocks' && <ExchangePage forcedMarketClass="STOCK" />}
+          {exchangeTab === 'crypto' && <ExchangePage forcedMarketClass="CRYPTO" />}
+          {exchangeTab === 'forex' && (
+            <Suspense fallback={<TabLoadingFallback />}>
+              <ForexPage />
+            </Suspense>
+          )}
+          {exchangeTab === 'futures' && (
+            <Suspense fallback={<TabLoadingFallback />}>
+              <FuturesPage />
+            </Suspense>
+          )}
+        </>
       )}
     </div>
   );

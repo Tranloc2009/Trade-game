@@ -247,14 +247,6 @@ export const WorldService = {
   getNews: () => request<NewsItem[]>('/api/news'),
   getLeaderboard: (scope: 'PLAYERS' | 'AGENTS' | 'ALL' = 'PLAYERS') =>
     request<LeaderboardEntry[]>(`/api/leaderboard?scope=${scope}`),
-  getDiagnostics: () => request<DiagnosticsSnapshot>('/api/diagnostics'),
-  devResetWorld: () =>
-    request<{ reset: boolean; diagnostics: DiagnosticsSnapshot }>('/api/dev/reset', { method: 'POST' }),
-  devSimulateBotTick: (symbol?: string) =>
-    request<{ tradesExecuted: number; affectedSymbols: string[] }>('/api/dev/simulate-bot-tick', {
-      method: 'POST',
-      body: JSON.stringify({ symbol }),
-    }),
 };
 
 export const TradingService = {
@@ -475,17 +467,6 @@ export const EntertainmentService = {
 
 export const ForexService = {
   getOverview: () => request<ForexOverviewSnapshot>('/api/forex/overview'),
-  triggerPolicyEvent: (currency?: CurrencyCode) =>
-    request<{
-      policyEvent: CentralBankPolicyEvent;
-      newsItem: NewsItem;
-      tradesExecuted: number;
-      affectedSymbols: string[];
-      overview: ForexOverviewSnapshot;
-    }>('/api/forex/dev/trigger-policy', {
-      method: 'POST',
-      body: JSON.stringify(currency ? { currency } : {}),
-    }),
 };
 
 export const FuturesService = {
@@ -588,22 +569,6 @@ export const FuturesService = {
       headers: { 'Idempotency-Key': params.idempotencyKey },
       body: JSON.stringify(params),
     }),
-  devSettleFunding: (symbol?: string) =>
-    request<{ events: FuturesFundingSettlementEvent[]; overview: FuturesOverviewSnapshot }>(
-      '/api/futures/dev/settle-funding',
-      {
-        method: 'POST',
-        body: JSON.stringify(symbol ? { symbol } : {}),
-      },
-    ),
-  devSimulateTick: (symbol?: string) =>
-    request<{ tradesExecuted: number; affectedSymbols: string[]; marginCalls: number; liquidations: number }>(
-      '/api/futures/dev/simulate-tick',
-      {
-        method: 'POST',
-        body: JSON.stringify(symbol ? { symbol } : {}),
-      },
-    ),
 };
 
 export const ConnectService = {

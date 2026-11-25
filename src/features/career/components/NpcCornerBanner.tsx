@@ -18,10 +18,11 @@ export function NpcCornerBanner({
   const { careerStory, activePage, gameFeedback, phoneOpen, journalOpen, mainMenuOpen } =
     useAppStore();
 
-  // Never interrupt dialogue, modals, drawers, main menu, or redundant career_home mission view
+  // Never interrupt dialogue, modals, drawers, main menu, career_home, or Living City map
   if (
     !careerStory ||
     activePage === 'career_home' ||
+    activePage === 'career_world' ||
     careerStory.activeSceneId ||
     careerStory.cornerQueue.length === 0 ||
     gameFeedback ||
@@ -48,7 +49,7 @@ export function NpcCornerBanner({
   return (
     <div
       data-testid="npc-corner-banner"
-      className="hidden lg:block fixed bottom-5 right-5 z-[35] w-80 rounded-2xl border border-[var(--accent)]/45 bg-[var(--bg-panel)]/95 backdrop-blur-md shadow-2xl p-3.5 career-fade-in"
+      className="hidden lg:block fixed bottom-5 left-4 lg:left-64 z-[35] w-80 rounded-2xl border border-[var(--accent)]/45 bg-[var(--bg-panel)]/95 backdrop-blur-md shadow-2xl p-3.5 career-fade-in"
     >
       <div className="flex items-start gap-3">
         <img

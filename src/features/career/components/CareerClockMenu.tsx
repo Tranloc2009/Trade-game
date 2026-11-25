@@ -150,7 +150,7 @@ export function CareerClockMenu({
               className="w-full px-3 py-2 rounded-lg border border-[#D6B26E]/40 bg-[#231F19] hover:bg-[#2E2820] text-xs font-semibold text-[#D6B26E] inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
             >
               <FastForward className="w-3.5 h-3.5" />
-              <span>Chạy nhanh +1 chu kỳ kinh doanh</span>
+              <span>Chạy nhanh +1 kỳ kinh doanh</span>
             </button>
           </div>
         </div>

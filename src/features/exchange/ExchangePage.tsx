@@ -31,7 +31,11 @@ import { OrderPlacementPanel } from './OrderPlacementPanel';
 type BottomTab = 'OPEN_ORDERS' | 'ORDER_HISTORY' | 'RECENT_TRADES' | 'HOLDINGS' | 'FINANCIALS';
 type MobileTab = 'CHART' | 'BOOK' | 'TRADE' | 'ORDERS';
 
-export function ExchangePage() {
+interface ExchangePageProps {
+  forcedMarketClass?: 'STOCK' | 'CRYPTO';
+}
+
+export function ExchangePage({ forcedMarketClass }: ExchangePageProps = {}) {
   const queryClient = useQueryClient();
   const {
     assets,
@@ -68,13 +72,41 @@ export function ExchangePage() {
   const [mobileSheetSide, setMobileSheetSide] = useState<'BUY' | 'SELL' | null>(null);
   const [beginnerBottomTab, setBeginnerBottomTab] = useState<'HOLDINGS' | 'OPEN_ORDERS' | 'HISTORY'>('OPEN_ORDERS');
 
+  const [cryptoSubFilter, setCryptoSubFilter] = useState<'ALL' | 'MAIN' | 'MEME'>('ALL');
+
   const nonForexAssets = useMemo(() => assets.filter((a) => a.marketClass !== 'FOREX'), [assets]);
+  const effectiveClassFilter = forcedMarketClass ?? exchangeClassFilter;
+
+  const scopedAssets = useMemo(() => {
+    return nonForexAssets.filter((a) => {
+      if (effectiveClassFilter !== 'ALL' && a.marketClass !== effectiveClassFilter) return false;
+      if (effectiveClassFilter === 'CRYPTO' && cryptoSubFilter !== 'ALL') {
+        const isMeme = a.subCategory === 'MEME';
+        if (cryptoSubFilter === 'MEME' && !isMeme) return false;
+        if (cryptoSubFilter === 'MAIN' && isMeme) return false;
+      }
+      return true;
+    });
+  }, [nonForexAssets, effectiveClassFilter, cryptoSubFilter]);
 
   const selectedAsset = useMemo(
-    () => nonForexAssets.find((a) => a.symbol === selectedSymbol) ?? nonForexAssets[0],
-    [nonForexAssets, selectedSymbol],
+    () =>
+      scopedAssets.find((a) => a.symbol === selectedSymbol) ??
+      scopedAssets[0] ??
+      nonForexAssets.find((a) => a.symbol === selectedSymbol) ??
+      nonForexAssets[0],
+    [scopedAssets, nonForexAssets, selectedSymbol],
   );
-  const activeSymbol = selectedAsset?.symbol ?? 'NOVA';
+  const activeSymbol = selectedAsset?.symbol ?? (forcedMarketClass === 'CRYPTO' ? 'BTC-SIM' : 'NOVA');
+
+  // Auto-align selectedSymbol when switching between Cổ phiếu and Crypto tabs
+  useEffect(() => {
+    if (!forcedMarketClass || scopedAssets.length === 0) return;
+    const current = scopedAssets.find((a) => a.symbol === selectedSymbol);
+    if (!current) {
+      setSelectedSymbol(scopedAssets[0].symbol);
+    }
+  }, [forcedMarketClass, scopedAssets, selectedSymbol, setSelectedSymbol]);
 
   // Subscribe to active symbol's Socket.IO room so orderbook/trades/candles stream live
   useEffect(() => {
@@ -117,8 +149,7 @@ export function ExchangePage() {
   });
 
   const filteredAssets = useMemo(() => {
-    return nonForexAssets.filter((a) => {
-      if (exchangeClassFilter !== 'ALL' && a.marketClass !== exchangeClassFilter) return false;
+    return scopedAssets.filter((a) => {
       if (watchlistOnly && !watchlist.includes(a.symbol)) return false;
       if (search.trim()) {
         const q = search.trim().toLowerCase();
@@ -126,7 +157,7 @@ export function ExchangePage() {
       }
       return true;
     });
-  }, [nonForexAssets, exchangeClassFilter, watchlistOnly, watchlist, search]);
+  }, [scopedAssets, watchlistOnly, watchlist, search]);
 
   const activeOrderBook = orderBooks[activeSymbol];
   const recentTrades = recentTradesBySymbol[activeSymbol] ?? [];
@@ -225,13 +256,38 @@ export function ExchangePage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {effectiveClassFilter === 'CRYPTO' && (
+              <div className="inline-flex items-center gap-1 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-1">
+                {(
+                  [
+                    { id: 'ALL', label: 'Tất cả Crypto' },
+                    { id: 'MAIN', label: 'Coin chính' },
+                    { id: 'MEME', label: 'Meme Coin' },
+                  ] as const
+                ).map((sub) => (
+                  <button
+                    key={sub.id}
+                    type="button"
+                    data-testid={`crypto-subfilter-${sub.id}`}
+                    onClick={() => setCryptoSubFilter(sub.id)}
+                    className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                      cryptoSubFilter === sub.id
+                        ? 'bg-[var(--accent)] text-[var(--text-on-accent)]'
+                        : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                    }`}
+                  >
+                    {sub.label}
+                  </button>
+                ))}
+              </div>
+            )}
             <select
               aria-label="Đổi nhanh tài sản"
               value={activeSymbol}
               onChange={(e) => setSelectedSymbol(e.target.value)}
               className="min-h-[42px] rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 text-xs font-mono font-semibold text-[var(--text-primary)] focus:border-[var(--accent)] focus:outline-none"
             >
-              {nonForexAssets.map((a) => (
+              {scopedAssets.map((a) => (
                 <option key={a.symbol} value={a.symbol}>
                   {a.symbol} — {a.name}
                 </option>
@@ -770,20 +826,48 @@ export function ExchangePage() {
         <aside className="order-3 lg:order-1 lg:col-span-3 xl:col-span-2 rounded-lg bg-[var(--bg-panel)] border border-[var(--border-subtle)] overflow-hidden">
           <div className="p-2.5 border-b border-[var(--border-subtle)] space-y-2">
             <div className="flex items-center gap-1">
-              {(['ALL', 'STOCK', 'CRYPTO'] as const).map((cls) => (
-                <button
-                  key={cls}
-                  type="button"
-                  onClick={() => setExchangeClassFilter(cls)}
-                  className={`flex-1 py-1 text-[11px] font-medium rounded cursor-pointer ${
-                    exchangeClassFilter === cls
-                      ? 'bg-[var(--bg-surface)] text-[var(--accent)] font-semibold'
-                      : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-                  }`}
-                >
-                  {cls === 'ALL' ? 'Tất cả' : cls === 'STOCK' ? 'ESE' : 'ECX'}
-                </button>
-              ))}
+              {forcedMarketClass === 'CRYPTO' ? (
+                (
+                  [
+                    { id: 'ALL', label: 'Tất cả' },
+                    { id: 'MAIN', label: 'Coin' },
+                    { id: 'MEME', label: 'Meme' },
+                  ] as const
+                ).map((sub) => (
+                  <button
+                    key={sub.id}
+                    type="button"
+                    data-testid={`pro-crypto-subfilter-${sub.id}`}
+                    onClick={() => setCryptoSubFilter(sub.id)}
+                    className={`flex-1 py-1 text-[11px] font-medium rounded cursor-pointer ${
+                      cryptoSubFilter === sub.id
+                        ? 'bg-[var(--bg-surface)] text-[var(--accent)] font-semibold'
+                        : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                    }`}
+                  >
+                    {sub.label}
+                  </button>
+                ))
+              ) : forcedMarketClass === 'STOCK' ? (
+                <span className="flex-1 py-1 px-1.5 text-[11px] font-semibold text-[var(--accent)]">
+                  Cổ phiếu ESE ({scopedAssets.length})
+                </span>
+              ) : (
+                (['ALL', 'STOCK', 'CRYPTO'] as const).map((cls) => (
+                  <button
+                    key={cls}
+                    type="button"
+                    onClick={() => setExchangeClassFilter(cls)}
+                    className={`flex-1 py-1 text-[11px] font-medium rounded cursor-pointer ${
+                      exchangeClassFilter === cls
+                        ? 'bg-[var(--bg-surface)] text-[var(--accent)] font-semibold'
+                        : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                    }`}
+                  >
+                    {cls === 'ALL' ? 'Tất cả' : cls === 'STOCK' ? 'ESE' : 'ECX'}
+                  </button>
+                ))
+              )}
               <button
                 type="button"
                 onClick={() => setWatchlistOnly((v) => !v)}

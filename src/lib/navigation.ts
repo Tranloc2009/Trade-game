@@ -1,6 +1,6 @@
 import type { StoryMissionSpec } from '../../shared/contracts/careerStory';
 
-export type UnifiedExchangeTab = 'discover' | 'spot' | 'futures' | 'forex';
+export type UnifiedExchangeTab = 'stocks' | 'crypto' | 'forex' | 'futures';
 export type MyEmpireTab = 'hub' | 'business' | 'corporate' | 'cofounder' | 'hq' | 'funds';
 export type MyAssetsTab = 'portfolio' | 'property' | 'banking' | 'luxury';
 export type LifestyleTab = 'luxury' | 'rank' | 'entertainment';
@@ -73,6 +73,7 @@ export const VALID_NAV_PAGES = new Set<NavPage>([
 export interface ResolvedNavTarget {
   activePage: NavPage;
   exchangeTab?: UnifiedExchangeTab;
+  exchangeDiscoveryOpen?: boolean;
   empireTab?: MyEmpireTab;
   assetsTab?: MyAssetsTab;
   lifestyleTab?: LifestyleTab;
@@ -86,13 +87,13 @@ export interface ResolvedNavTarget {
 export function resolveCanonicalNavigation(page: NavPage): ResolvedNavTarget {
   switch (page) {
     case 'discover':
-      return { activePage: 'unified_exchange', exchangeTab: 'discover' };
+      return { activePage: 'unified_exchange', exchangeTab: 'stocks', exchangeDiscoveryOpen: true };
     case 'exchange':
-      return { activePage: 'unified_exchange', exchangeTab: 'spot' };
+      return { activePage: 'unified_exchange', exchangeTab: 'stocks', exchangeDiscoveryOpen: false };
     case 'futures':
-      return { activePage: 'unified_exchange', exchangeTab: 'futures' };
+      return { activePage: 'unified_exchange', exchangeTab: 'futures', exchangeDiscoveryOpen: false };
     case 'forex':
-      return { activePage: 'unified_exchange', exchangeTab: 'forex' };
+      return { activePage: 'unified_exchange', exchangeTab: 'forex', exchangeDiscoveryOpen: false };
     case 'empire_hub':
       return { activePage: 'my_empire', empireTab: 'hub' };
     case 'business':
@@ -311,7 +312,7 @@ export function getChapterFocusGuidance(chapterNumber: number, freePlayUnlocked:
       focusSummary: 'Tự do điều hành tập đoàn, quỹ đầu tư, bất động sản và toàn bộ thị trường tài chính.',
       recommendedEmpireTabs: ['hub', 'business', 'corporate', 'cofounder', 'hq', 'funds'],
       recommendedAssetsTabs: ['portfolio', 'property', 'banking', 'luxury'],
-      recommendedExchangeTabs: ['discover', 'spot', 'forex', 'futures'],
+      recommendedExchangeTabs: ['stocks', 'crypto', 'forex', 'futures'],
     };
   }
   switch (chapterNumber) {
@@ -322,7 +323,7 @@ export function getChapterFocusGuidance(chapterNumber: number, freePlayUnlocked:
         focusSummary: 'Tập trung vào câu chuyện nhân vật, nguồn vốn mặt và chọn ngành nghề mở doanh nghiệp đầu tiên.',
         recommendedEmpireTabs: ['business'],
         recommendedAssetsTabs: ['portfolio'],
-        recommendedExchangeTabs: ['discover', 'spot'],
+        recommendedExchangeTabs: ['stocks', 'crypto'],
       };
     case 2:
       return {
@@ -331,7 +332,7 @@ export function getChapterFocusGuidance(chapterNumber: number, freePlayUnlocked:
         focusSummary: 'Tuyển nhân sự, nâng cấp chất lượng phục vụ và tạo dòng tiền dương từ khách hàng đầu tiên.',
         recommendedEmpireTabs: ['business', 'hq'],
         recommendedAssetsTabs: ['portfolio', 'banking'],
-        recommendedExchangeTabs: ['discover', 'spot'],
+        recommendedExchangeTabs: ['stocks', 'crypto'],
       };
     case 3:
       return {
@@ -340,7 +341,7 @@ export function getChapterFocusGuidance(chapterNumber: number, freePlayUnlocked:
         focusSummary: 'Đàm phán nhà đầu tư, quản trị tỷ lệ sở hữu, mở chi nhánh và tận dụng nguồn vốn ngân hàng.',
         recommendedEmpireTabs: ['business', 'cofounder', 'hq'],
         recommendedAssetsTabs: ['portfolio', 'banking', 'property'],
-        recommendedExchangeTabs: ['discover', 'spot'],
+        recommendedExchangeTabs: ['stocks', 'crypto'],
       };
     case 4:
       return {
@@ -349,7 +350,7 @@ export function getChapterFocusGuidance(chapterNumber: number, freePlayUnlocked:
         focusSummary: 'Kiểm soát chi phí cố định, dự phòng thanh khoản và tái cơ cấu vượt qua chu kỳ suy thoái.',
         recommendedEmpireTabs: ['business', 'corporate', 'hq'],
         recommendedAssetsTabs: ['banking', 'portfolio', 'property'],
-        recommendedExchangeTabs: ['discover', 'spot', 'forex'],
+        recommendedExchangeTabs: ['stocks', 'crypto', 'forex'],
       };
     default:
       return {
@@ -358,7 +359,7 @@ export function getChapterFocusGuidance(chapterNumber: number, freePlayUnlocked:
         focusSummary: 'Mở rộng thành tập đoàn đa ngành, góp vốn quỹ đầu tư, thương vụ M&A và liên minh chiến lược.',
         recommendedEmpireTabs: ['hub', 'business', 'corporate', 'cofounder', 'hq', 'funds'],
         recommendedAssetsTabs: ['portfolio', 'property', 'banking', 'luxury'],
-        recommendedExchangeTabs: ['discover', 'spot', 'forex', 'futures'],
+        recommendedExchangeTabs: ['stocks', 'crypto', 'forex', 'futures'],
       };
   }
 }
@@ -374,12 +375,18 @@ export interface SmartMissionDirective {
 }
 
 /**
- * Smart Mission Flow resolver (§4.2 & §4.4):
- * Produces contextual, specific primary CTAs and direct deep-link targets instead of generic labels.
+ * Mission Director 2.0 resolver (Living World 2.0):
+ * - Free Play NEVER falls back to M01.
+ * - Uncompleted queued scenes and pending appointments play first without looping.
+ * - Missions with `introSceneId` + gameplay objective (M06, M09, M12, M21...) ALWAYS trigger
+ *   their uncompleted `introSceneId` FIRST, and immediately route to gameplay once completed!
+ * - Gameplay missions deep-link straight to the exact creation wizard or workspace tab.
  */
 export function resolveSmartMissionDirective(params: {
-  mission: StoryMissionSpec;
+  mission: StoryMissionSpec | null | undefined;
   sceneQueue: string[];
+  completedSceneIds?: string[];
+  completedMissionIds?: string[];
   pendingAppointmentSceneId?: string | null;
   pendingAppointmentNpcName?: string | null;
   directorState: string;
@@ -389,6 +396,8 @@ export function resolveSmartMissionDirective(params: {
   const {
     mission,
     sceneQueue,
+    completedSceneIds = [],
+    completedMissionIds = [],
     pendingAppointmentSceneId,
     pendingAppointmentNpcName,
     directorState,
@@ -396,6 +405,27 @@ export function resolveSmartMissionDirective(params: {
     hasAnyBusiness,
   } = params;
 
+  const isSceneDone = (sid: string | null | undefined): boolean =>
+    Boolean(sid && completedSceneIds.includes(sid));
+
+  // 1. Free Play mode — NEVER fall back to M01
+  if (
+    freePlayUnlocked &&
+    (!mission ||
+      directorState === 'FREE_PLAY' ||
+      completedMissionIds.includes(mission.id) ||
+      mission.id === 'M30')
+  ) {
+    return {
+      primaryLabel: hasAnyBusiness ? 'Mở rộng Đế chế Free Play' : 'Khám phá Thành phố Sài Gòn',
+      actionType: 'OPEN_ROUTE',
+      targetPage: hasAnyBusiness ? 'business' : 'career_world',
+      hintText:
+        'Bạn đã hoàn tất chiến dịch chính và mở khóa Free Play. Tự do phát triển công ty, đầu tư và khám phá thành phố.',
+    };
+  }
+
+  // 2. Campaign Ending ready
   if (directorState === 'CAMPAIGN_COMPLETED' && !freePlayUnlocked) {
     return {
       primaryLabel: 'Chọn Di sản & Mở khóa Free Play',
@@ -404,31 +434,35 @@ export function resolveSmartMissionDirective(params: {
     };
   }
 
-  if (sceneQueue.length > 0) {
+  if (!mission) {
     return {
-      primaryLabel: mission.ctaLabel || 'Tiếp tục cuộc trò chuyện',
+      primaryLabel: 'Khám phá Thành phố Sài Gòn',
+      actionType: 'OPEN_ROUTE',
+      targetPage: 'career_world',
+      hintText: 'Ghé thăm các địa điểm trên bản đồ thành phố để tiếp tục sự nghiệp.',
+    };
+  }
+
+  // 3. Uncompleted scene already queued by the authoritative StoryDirector
+  const nextQueuedScene = sceneQueue.find((sid) => !isSceneDone(sid));
+  if (nextQueuedScene) {
+    const matchesAppt = pendingAppointmentSceneId && pendingAppointmentSceneId === nextQueuedScene;
+    return {
+      primaryLabel: matchesAppt
+        ? pendingAppointmentNpcName
+          ? `Gặp ${pendingAppointmentNpcName}`
+          : 'Đến điểm hẹn ngay'
+        : mission.introSceneId === nextQueuedScene
+          ? mission.ctaLabel || 'Tiếp tục câu chuyện'
+          : 'Mở cuộc trò chuyện mới',
       actionType: 'TRIGGER_SCENE',
-      sceneId: sceneQueue[0],
+      sceneId: nextQueuedScene,
       hintText: mission.objectiveLabel,
     };
   }
 
-  const isSceneDriven =
-    mission.objectiveType === 'COMPLETE_SCENE' ||
-    mission.objectiveType === 'RESOLVE_INVESTOR_OFFER' ||
-    mission.objectiveType === 'RESOLVE_HUY_ALLIANCE' ||
-    mission.objectiveType === 'COMPLETE_ENDING';
-
-  if (isSceneDriven && mission.introSceneId) {
-    return {
-      primaryLabel: mission.ctaLabel,
-      actionType: 'TRIGGER_SCENE',
-      sceneId: mission.introSceneId,
-      hintText: mission.objectiveLabel,
-    };
-  }
-
-  if (pendingAppointmentSceneId) {
+  // 4. Uncompleted pending appointment
+  if (pendingAppointmentSceneId && !isSceneDone(pendingAppointmentSceneId)) {
     return {
       primaryLabel: pendingAppointmentNpcName ? `Gặp ${pendingAppointmentNpcName}` : 'Tham dự cuộc hẹn',
       actionType: 'TRIGGER_SCENE',
@@ -437,7 +471,24 @@ export function resolveSmartMissionDirective(params: {
     };
   }
 
-  // Gameplay-driven missions deep-link directly to the exact flow or tab!
+  // 5. Mission has an uncompleted introSceneId (fixes M06, M09, M12, M21 — plays ONCE without looping!)
+  if (mission.introSceneId && !isSceneDone(mission.introSceneId)) {
+    const isPureScene =
+      mission.objectiveType === 'COMPLETE_SCENE' ||
+      mission.objectiveType === 'RESOLVE_INVESTOR_OFFER' ||
+      mission.objectiveType === 'RESOLVE_HUY_ALLIANCE' ||
+      mission.objectiveType === 'COMPLETE_ENDING';
+    return {
+      primaryLabel: isPureScene ? mission.ctaLabel : 'Gặp nhân vật & Bắt đầu nhiệm vụ',
+      actionType: 'TRIGGER_SCENE',
+      sceneId: mission.introSceneId,
+      hintText: isPureScene
+        ? mission.objectiveLabel
+        : `Trò chuyện mở màn cho "${mission.title}" trước khi triển khai mục tiêu.`,
+    };
+  }
+
+  // 6. Gameplay-driven missions deep-link directly to the exact flow or tab!
   switch (mission.objectiveType) {
     case 'OWN_BUSINESS_COUNT':
       if (!hasAnyBusiness) {
@@ -466,17 +517,21 @@ export function resolveSmartMissionDirective(params: {
       };
     case 'COMPLETE_BUSINESS_CYCLE':
     case 'EXPERIENCE_RECESSION_CYCLE':
+    case 'SURVIVE_STORM_OR_COMEBACK':
       return {
-        primaryLabel: 'Theo dõi & vận hành chu kỳ kinh doanh',
+        primaryLabel: 'Theo dõi & vận hành kỳ kinh doanh',
         actionType: 'OPEN_BUSINESS_TAB',
         targetPage: 'business',
         businessTab: 'OVERVIEW',
-        hintText: 'Theo dõi doanh thu, chi phí và lợi nhuận thực tế sau chu kỳ vận hành.',
+        hintText: 'Theo dõi doanh thu, chi phí và lợi nhuận thực tế sau kỳ kinh doanh.',
       };
     case 'BUSINESS_STRATEGY_ACTION':
     case 'RESTRUCTURE_OR_RESERVE':
       return {
-        primaryLabel: mission.objectiveType === 'RESTRUCTURE_OR_RESERVE' ? 'Tái cơ cấu & giữ dòng tiền' : 'Điều chỉnh chiến lược cạnh tranh',
+        primaryLabel:
+          mission.objectiveType === 'RESTRUCTURE_OR_RESERVE'
+            ? 'Tái cơ cấu & giữ dòng tiền'
+            : 'Điều chỉnh chiến lược cạnh tranh',
         actionType: 'OPEN_BUSINESS_TAB',
         targetPage: 'business',
         businessTab: 'OPERATIONS',
@@ -484,6 +539,8 @@ export function resolveSmartMissionDirective(params: {
       };
     case 'REVIEW_OR_VALUE_COMPANY':
     case 'POSITIVE_CASHFLOW_OR_CASH_TARGET':
+    case 'DEBT_OR_CASHFLOW_AUDIT':
+    case 'GOVERNANCE_OR_DIVIDEND_ACTION':
       return {
         primaryLabel: mission.ctaLabel,
         actionType: 'OPEN_BUSINESS_TAB',
@@ -492,11 +549,26 @@ export function resolveSmartMissionDirective(params: {
         hintText: mission.objectiveLabel,
       };
     case 'EXPAND_BRANCH_OR_UPGRADE':
+    case 'LEGACY_PROJECT_ACTION':
       return {
         primaryLabel: 'Nâng cấp cấp độ & Mở chi nhánh',
         actionType: 'OPEN_BUSINESS_TAB',
         targetPage: 'business',
         businessTab: 'GROWTH',
+        hintText: mission.objectiveLabel,
+      };
+    case 'POST_CRISIS_TRADE_OR_INVEST':
+      return {
+        primaryLabel: 'Mở Sàn Giao dịch',
+        actionType: 'OPEN_ROUTE',
+        targetPage: 'unified_exchange',
+        hintText: mission.objectiveLabel,
+      };
+    case 'EXPAND_EMPIRE_ASSET':
+      return {
+        primaryLabel: 'Mở rộng tài sản đế chế',
+        actionType: 'OPEN_ROUTE',
+        targetPage: 'property',
         hintText: mission.objectiveLabel,
       };
     default:

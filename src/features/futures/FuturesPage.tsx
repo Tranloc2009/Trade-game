@@ -6,7 +6,6 @@ import {
   Bot,
   Clock,
   PlusCircle,
-  RefreshCw,
   Shield,
   X,
 } from 'lucide-react';
@@ -249,31 +248,6 @@ export function FuturesPage() {
         tone: 'error',
         title: 'Bổ sung ký quỹ thất bại',
         description: err instanceof Error ? err.message : 'Không đủ CR khả dụng.',
-      });
-    } finally {
-      setBusyActionId(null);
-    }
-  };
-
-  const handleDevSettleFunding = async () => {
-    setBusyActionId('dev_funding');
-    try {
-      const res = await FuturesService.devSettleFunding(selectedFuturesSymbol);
-      setFuturesOverview(res.overview);
-      refetchAccount();
-      const evt = res.events[0];
-      pushToast({
-        tone: 'info',
-        title: `Hoàn tất kỳ Funding ${selectedFuturesSymbol}`,
-        description: evt
-          ? `Rate ${(evt.fundingRateBps / 100).toFixed(3)}% · Chuyển ngang hàng ${formatCR(evt.totalPaidMinor)} CR (tổng = 0).`
-          : 'Đã cập nhật chu kỳ Funding.',
-      });
-    } catch (err) {
-      pushToast({
-        tone: 'error',
-        title: 'Không thể chạy Funding thủ công',
-        description: err instanceof Error ? err.message : 'Lỗi hệ thống.',
       });
     } finally {
       setBusyActionId(null);
@@ -1240,15 +1214,6 @@ export function FuturesPage() {
                 Funding là cơ chế chuyển khoản ngang hàng <strong>tổng bằng 0 (Zero-Sum)</strong> giữa Long và Short.
                 Sàn không phát hành thêm CR khi thanh toán Funding.
               </p>
-              <button
-                type="button"
-                disabled={busyActionId === 'dev_funding'}
-                onClick={handleDevSettleFunding}
-                className="px-3 py-1.5 rounded text-xs font-medium bg-[var(--bg-surface)] border border-[var(--border-subtle)] hover:text-[var(--accent)] inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-                Chạy kỳ Funding thử nghiệm ({activeContract.symbol})
-              </button>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

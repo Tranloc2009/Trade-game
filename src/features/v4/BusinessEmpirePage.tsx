@@ -9,7 +9,6 @@ import {
   ChevronUp,
   Coins,
   MapPin,
-  Play,
   Plus,
   ShieldAlert,
   TrendingUp,
@@ -30,7 +29,12 @@ import type {
 } from '../../../shared/contracts/v4';
 import { V4Service } from '../../services/v4Api';
 import { useAppStore, type BusinessTycoonTab } from '../../store/useAppStore';
-import { getIndustryImageUrl } from '../career/careerAssets';
+import { getBusinessProgressionStage, getIndustryImageUrl } from '../career/careerAssets';
+import { careerSound } from '../career/soundEngine';
+import {
+  buildBusinessActionItems,
+  pickRecommendedStarterCatalog,
+} from '../career/world/locationRegistry';
 
 const INDUSTRY_LABELS: Record<'ALL' | V4BusinessIndustry, string> = {
   ALL: 'Tất cả ngành',
@@ -56,7 +60,7 @@ function MiniProfitChart({ history }: { history: BusinessEntity['financialHistor
   if (history.length === 0) {
     return (
       <div className="h-36 flex items-center justify-center text-xs text-[var(--text-muted)] border border-dashed border-[var(--border-subtle)] rounded-xl px-4 text-center">
-        Chưa có chu kỳ vận hành nào. Chạy 1 chu kỳ hoặc chờ đồng hồ game để ghi nhận doanh thu và chi phí thực tế.
+        Chưa có chu kỳ vận hành nào. Doanh thu và chi phí thực tế sẽ tự động ghi nhận khi chu kỳ kinh doanh kế tiếp hoàn tất.
       </div>
     );
   }
@@ -160,14 +164,17 @@ export function BusinessEmpirePage() {
     v4SyncSeq,
     pushToast,
     playMode,
+    careerSoundMuted,
     businessCreationIntent,
     businessTabIntent,
+    selectedBusinessId,
+    setSelectedBusinessId,
     clearBusinessIntents,
     showGameFeedback,
   } = useAppStore();
   const qc = useQueryClient();
 
-  const [selectedBizId, setSelectedBizId] = useState<string | null>(null);
+  const [listScope, setListScope] = useState<'MINE' | 'MARKET'>('MINE');
   const [activeTab, setActiveTab] = useState<BusinessTycoonTab>('OVERVIEW');
   const [showAdvancedFinancials, setShowAdvancedFinancials] = useState(false);
 
@@ -221,8 +228,10 @@ export function BusinessEmpirePage() {
       setWizardOpen(false);
       setWizardStep(1);
       setSelectedCatalogItem(null);
-      setSelectedBizId(res.business.id);
+      setListScope('MINE');
+      setSelectedBusinessId(res.business.id);
       setActiveTab('OVERVIEW');
+      careerSound.playCompanyOpeningCue(careerSoundMuted);
       invalidateAll();
 
       showGameFeedback({
@@ -271,16 +280,6 @@ export function BusinessEmpirePage() {
         ctaLabel: 'Điều chỉnh lại',
       });
     },
-  });
-
-  const advanceCycleMutation = useMutation({
-    mutationFn: () => V4Service.devAdvanceCycle(1),
-    onSuccess: () => {
-      invalidateAll();
-      pushToast({ tone: 'info', title: 'Đã hoàn tất 1 chu kỳ vận hành doanh nghiệp' });
-    },
-    onError: (err: Error) =>
-      pushToast({ tone: 'error', title: 'Lỗi mô phỏng chu kỳ', description: err.message }),
   });
 
   const empMutation = useMutation({
@@ -406,14 +405,32 @@ export function BusinessEmpirePage() {
         : [],
     [allBusinesses, player],
   );
+  const marketBusinesses = useMemo(
+    () =>
+      player
+        ? allBusinesses.filter(
+            (b) => b.ownerId !== player.id && !b.shareholders.some((s) => s.playerId === player.id),
+          )
+        : allBusinesses,
+    [allBusinesses, player],
+  );
 
+  // Never silently display an NPC company as the player's own company when viewing "MINE"
   const activeBiz = useMemo(() => {
-    if (selectedBizId) {
-      const found = allBusinesses.find((b) => b.id === selectedBizId);
-      if (found) return found;
+    if (listScope === 'MINE') {
+      if (myBusinesses.length === 0) return null;
+      if (selectedBusinessId) {
+        const foundMine = myBusinesses.find((b) => b.id === selectedBusinessId);
+        if (foundMine) return foundMine;
+      }
+      return myBusinesses[0] ?? null;
     }
-    return myBusinesses[0] ?? allBusinesses[0] ?? null;
-  }, [allBusinesses, myBusinesses, selectedBizId]);
+    if (selectedBusinessId) {
+      const foundMarket = marketBusinesses.find((b) => b.id === selectedBusinessId);
+      if (foundMarket) return foundMarket;
+    }
+    return marketBusinesses[0] ?? null;
+  }, [listScope, marketBusinesses, myBusinesses, selectedBusinessId]);
 
   const isController = Boolean(
     player && activeBiz && (activeBiz.ownerId === player.id || activeBiz.ceoId === player.id),
@@ -488,40 +505,62 @@ export function BusinessEmpirePage() {
             <Plus className="w-4 h-4" />
             <span>Thành lập doanh nghiệp</span>
           </button>
-
-          <button
-            type="button"
-            onClick={() => advanceCycleMutation.mutate()}
-            disabled={advanceCycleMutation.isPending}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold border border-[var(--border-subtle)] bg-[var(--bg-panel)] text-[var(--text-primary)] hover:border-[var(--accent)]/60 cursor-pointer disabled:opacity-50 min-h-[42px]"
-          >
-            <Play className="w-3.5 h-3.5 text-[var(--positive)]" />
-            <span>Chạy 1 chu kỳ</span>
-          </button>
         </div>
       </div>
 
       {/* Main Split: Company Selector + 4-Area Tycoon Workspace */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        {/* Left Company Selector Rail */}
+        {/* Left Company Selector Rail: Strictly Separated My Businesses vs Market Competitors */}
         <div className="lg:col-span-3 space-y-3">
-          <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-panel)] p-3.5 space-y-2.5">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-[var(--text-secondary)]">
-                Công ty của bạn ({myBusinesses.length})
-              </span>
-              <span className="text-[11px] font-mono text-[var(--text-muted)]">
-                Thị trường: {allBusinesses.length}
-              </span>
+          <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-panel)] p-3.5 space-y-3">
+            <div
+              role="tablist"
+              aria-label="Phân loại doanh nghiệp"
+              className="grid grid-cols-2 gap-1 rounded-xl bg-[var(--bg-surface)] p-1 border border-[var(--border-subtle)]"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={listScope === 'MINE'}
+                data-testid="business-scope-mine"
+                onClick={() => {
+                  setListScope('MINE');
+                  setSelectedBusinessId(myBusinesses[0]?.id ?? null);
+                }}
+                className={`py-2 px-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                  listScope === 'MINE'
+                    ? 'bg-[var(--accent)] text-[var(--text-on-accent)]'
+                    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                }`}
+              >
+                Của tôi ({myBusinesses.length})
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={listScope === 'MARKET'}
+                data-testid="business-scope-market"
+                onClick={() => {
+                  setListScope('MARKET');
+                  setSelectedBusinessId(marketBusinesses[0]?.id ?? null);
+                }}
+                className={`py-2 px-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                  listScope === 'MARKET'
+                    ? 'bg-[var(--bg-panel)] text-[var(--accent)] border border-[var(--border-subtle)]'
+                    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                }`}
+              >
+                Thị trường ({marketBusinesses.length})
+              </button>
             </div>
 
-            {myBusinesses.length === 0 && (
+            {listScope === 'MINE' && myBusinesses.length === 0 ? (
               <div className="rounded-xl border border-dashed border-[var(--accent)]/45 bg-[var(--bg-surface)] p-3.5 text-center space-y-2">
                 <div className="text-xs font-semibold text-[var(--text-primary)]">
                   Chưa có doanh nghiệp riêng
                 </div>
                 <p className="text-[11px] text-[var(--text-muted)] leading-relaxed">
-                  Mở công ty đầu tiên qua quy trình 3 bước để bắt đầu tạo doanh thu mỗi chu kỳ.
+                  Vốn khả dụng: <span className="font-mono font-semibold text-[var(--accent)] tabular-nums">{formatCR(player?.wallet.availableMinor ?? 0)} CR</span>. Chọn ngành bên phải để khai trương công ty đầu tiên.
                 </p>
                 <button
                   type="button"
@@ -529,143 +568,231 @@ export function BusinessEmpirePage() {
                     setWizardOpen(true);
                     setWizardStep(1);
                   }}
-                  className="w-full py-2 rounded-lg bg-[var(--accent)] text-[var(--text-on-accent)] text-xs font-bold cursor-pointer"
+                  className="w-full py-2 rounded-lg bg-[var(--accent)] text-[var(--text-on-accent)] text-xs font-bold cursor-pointer min-h-[40px]"
                 >
                   Khởi nghiệp ngay
                 </button>
               </div>
+            ) : (
+              <div className="space-y-2 max-h-[540px] overflow-y-auto">
+                {(listScope === 'MINE' ? myBusinesses : marketBusinesses).map((b) => {
+                  const isMine = listScope === 'MINE';
+                  const selected = activeBiz?.id === b.id;
+                  return (
+                    <button
+                      key={b.id}
+                      type="button"
+                      data-testid={`business-rail-item-${b.ticker}`}
+                      onClick={() => setSelectedBusinessId(b.id)}
+                      className={`w-full text-left p-3 rounded-xl border transition-colors cursor-pointer ${
+                        selected
+                          ? 'border-[var(--accent)] bg-[var(--bg-surface)]'
+                          : 'border-[var(--border-subtle)]/70 hover:bg-[var(--bg-surface)]/70'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-[var(--text-primary)] truncate">
+                          {b.businessName}
+                        </span>
+                        <span className="text-[10px] font-mono text-[var(--accent)] shrink-0">
+                          Lv.{b.level}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-[var(--text-muted)] mt-0.5 truncate">
+                        {b.cityName} · {isMine ? 'Bạn sở hữu' : `Đối thủ · ${b.ownerName}`}
+                      </div>
+                      <div className="flex items-center justify-between mt-1.5 text-[11px] font-mono tabular-nums">
+                        <span className="text-[var(--text-secondary)]">
+                          {formatCR(b.companyCashMinor)} CR
+                        </span>
+                        <span
+                          className={
+                            b.netProfitLastCycleMinor >= 0
+                              ? 'text-[var(--positive)] font-semibold'
+                              : 'text-[var(--negative)] font-semibold'
+                          }
+                        >
+                          {b.netProfitLastCycleMinor >= 0 ? '+' : ''}
+                          {formatCR(b.netProfitLastCycleMinor)}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
             )}
-
-            <div className="space-y-2 max-h-[540px] overflow-y-auto">
-              {[...allBusinesses]
-                .sort((a, b) => {
-                  const aMine =
-                    player && (a.ownerId === player.id || a.shareholders.some((s) => s.playerId === player.id))
-                      ? 1
-                      : 0;
-                  const bMine =
-                    player && (b.ownerId === player.id || b.shareholders.some((s) => s.playerId === player.id))
-                      ? 1
-                      : 0;
-                  return bMine - aMine;
-                })
-                .map((b) => {
-                const isMine = Boolean(
-                  player && (b.ownerId === player.id || b.shareholders.some((s) => s.playerId === player.id)),
-                );
-                const selected = activeBiz?.id === b.id;
-                return (
-                  <button
-                    key={b.id}
-                    type="button"
-                    onClick={() => setSelectedBizId(b.id)}
-                    className={`w-full text-left p-3 rounded-xl border transition-colors cursor-pointer ${
-                      selected
-                        ? 'border-[var(--accent)] bg-[var(--bg-surface)]'
-                        : 'border-[var(--border-subtle)]/70 hover:bg-[var(--bg-surface)]/70'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-bold text-[var(--text-primary)] truncate">
-                        {b.businessName}
-                      </span>
-                      <span className="text-[10px] font-mono text-[var(--accent)] shrink-0">
-                        Lv.{b.level}
-                      </span>
-                    </div>
-                    <div className="text-[11px] text-[var(--text-muted)] mt-0.5 truncate">
-                      {b.cityName} · {isMine ? 'Bạn sở hữu' : b.ownerName}
-                    </div>
-                    <div className="flex items-center justify-between mt-1.5 text-[11px] font-mono tabular-nums">
-                      <span className="text-[var(--text-secondary)]">
-                        {formatCR(b.companyCashMinor)} CR
-                      </span>
-                      <span
-                        className={
-                          b.netProfitLastCycleMinor >= 0
-                            ? 'text-[var(--positive)] font-semibold'
-                            : 'text-[var(--negative)] font-semibold'
-                        }
-                      >
-                        {b.netProfitLastCycleMinor >= 0 ? '+' : ''}
-                        {formatCR(b.netProfitLastCycleMinor)}
-                      </span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
           </div>
         </div>
 
-        {/* Right 4-Area Tycoon Workspace */}
+        {/* Right 4-Area Tycoon Workspace OR Startup Launchpad Empty State */}
         <div className="lg:col-span-9 space-y-4">
           {!activeBiz ? (
-            <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-panel)] p-10 text-center space-y-3">
-              <Building2 className="w-10 h-10 text-[var(--accent)] mx-auto" />
-              <div className="text-base font-bold text-[var(--text-primary)]">
-                Bắt đầu xây dựng doanh nghiệp đầu tiên của bạn
+            <div
+              data-testid="business-startup-launchpad"
+              className="rounded-2xl border border-[var(--border-strong)] bg-[var(--bg-panel)] p-6 sm:p-8 space-y-6"
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-[var(--border-subtle)]">
+                <div className="space-y-1.5 max-w-xl">
+                  <div className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--accent)]">
+                    Khởi nghiệp doanh nghiệp đầu tiên
+                  </div>
+                  <h3
+                    className={`text-xl sm:text-2xl font-bold text-[var(--text-primary)] ${
+                      playMode === 'CAREER' ? 'font-display-serif' : ''
+                    }`}
+                  >
+                    Bạn chưa sở hữu công ty nào
+                  </h3>
+                  <p className="text-xs sm:text-sm text-[var(--text-secondary)] leading-relaxed">
+                    Thay vì xem doanh nghiệp của người khác, hãy chọn một ngành phù hợp với vốn hiện có để mở trụ sở đầu tiên tại Sài Gòn và bắt đầu tạo dòng tiền mỗi kỳ kinh doanh.
+                  </p>
+                </div>
+                <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 py-3 text-left sm:text-right shrink-0">
+                  <div className="text-[11px] text-[var(--text-muted)]">Tiền mặt khả dụng</div>
+                  <div className="text-lg font-mono font-bold text-[var(--accent)] tabular-nums mt-0.5">
+                    {formatCR(player?.wallet.availableMinor ?? 0)} CR
+                  </div>
+                </div>
               </div>
-              <p className="text-xs text-[var(--text-secondary)] max-w-md mx-auto">
-                Chọn ngành nghề, đặt tên thương hiệu tại thành phố mong muốn và theo dõi lợi nhuận thực theo từng chu kỳ kinh doanh.
-              </p>
-              <button
-                type="button"
-                onClick={() => {
-                  setWizardOpen(true);
-                  setWizardStep(1);
-                }}
-                className="px-5 py-2.5 rounded-xl text-sm font-bold bg-[var(--accent)] text-[var(--text-on-accent)] cursor-pointer"
-              >
-                Mở Trình khởi nghiệp 3 bước
-              </button>
+
+              {/* Recommended Budget-Fitting Starter Industries */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <h4 className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">
+                    Ngành gợi ý phù hợp vốn của bạn
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setWizardOpen(true);
+                      setWizardStep(1);
+                    }}
+                    className="text-xs font-semibold text-[var(--accent)] hover:underline cursor-pointer"
+                  >
+                    Xem toàn bộ {data.catalog.length} ngành →
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  {pickRecommendedStarterCatalog(data.catalog, availableWalletCR, 4).map((item) => {
+                    const canAfford = availableWalletCR >= item.startupCostCR;
+                    return (
+                      <div
+                        key={item.typeId}
+                        className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] overflow-hidden flex flex-col justify-between hover:border-[var(--accent)]/60 transition-colors"
+                      >
+                        <div className="relative h-28 w-full overflow-hidden">
+                          <img
+                            src={getIndustryImageUrl(item.industry)}
+                            alt={item.name}
+                            className="w-full h-full object-cover"
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-t from-[var(--bg-surface)] via-[var(--bg-surface)]/30 to-transparent" />
+                          <div className="absolute bottom-2 left-3 right-3 flex items-end justify-between gap-2">
+                            <span className="text-sm font-bold text-[var(--text-primary)] drop-shadow">
+                              {item.name}
+                            </span>
+                            <span className="text-[11px] font-mono font-semibold text-[var(--accent)] tabular-nums">
+                              {item.startupCostCR.toLocaleString('en-US')} CR
+                            </span>
+                          </div>
+                        </div>
+                        <div className="p-3.5 space-y-3">
+                          <div className="flex items-center justify-between text-[11px] text-[var(--text-secondary)]">
+                            <span>{INDUSTRY_LABELS[item.industry]}</span>
+                            <span className={canAfford ? 'text-[var(--positive)] font-semibold' : 'text-[var(--warning)]'}>
+                              {canAfford ? 'Đủ vốn mở ngay' : 'Cần thêm vốn'}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            data-testid={`launchpad-start-${item.typeId}`}
+                            onClick={() => {
+                              setWizardOpen(true);
+                              pickIndustryForWizard(item);
+                            }}
+                            className="w-full py-2.5 px-3 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[var(--text-on-accent)] text-xs font-bold transition-colors cursor-pointer min-h-[40px]"
+                          >
+                            Khởi nghiệp ngành này
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-[var(--border-subtle)]">
+                <span className="text-xs text-[var(--text-muted)]">
+                  Muốn tham khảo đối thủ đang hoạt động trên thị trường? Chuyển sang tab <strong>Thị trường ({marketBusinesses.length})</strong> bên trái.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setWizardOpen(true);
+                    setWizardStep(1);
+                  }}
+                  className="px-5 py-2.5 rounded-xl text-sm font-bold bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[var(--text-on-accent)] cursor-pointer min-h-[44px]"
+                >
+                  Mở Trình khởi nghiệp 3 bước
+                </button>
+              </div>
             </div>
-          ) : (
+          ) : (() => {
+            const stage = getBusinessProgressionStage(activeBiz.level);
+            const actionItems = isController
+              ? buildBusinessActionItems(activeBiz, nextLevelSpec?.requiredCapitalCR)
+              : [];
+            return (
             <>
-              {/* Visual Company Hero Card */}
+              {/* Visual Company Hero Card with Progression Tier Artwork */}
               <div className="relative rounded-2xl overflow-hidden border border-[var(--border-strong)] bg-[var(--bg-panel)]">
-                <div className="relative h-36 sm:h-40 w-full overflow-hidden">
+                <div className="relative h-44 sm:h-48 w-full overflow-hidden">
                   <img
-                    src={getIndustryImageUrl(activeBiz.industry)}
-                    alt={activeBiz.businessName}
-                    className="w-full h-full object-cover opacity-55"
+                    src={activeBiz.level >= 3 ? stage.imageUrl : getIndustryImageUrl(activeBiz.industry)}
+                    alt={`${activeBiz.businessName} — ${stage.labelVi}`}
+                    className="w-full h-full object-cover object-center"
                   />
-                  <div className="absolute inset-0 bg-gradient-to-r from-[var(--bg-panel)] via-[var(--bg-panel)]/85 to-[var(--bg-panel)]/40" />
+                  <div className="absolute inset-0 bg-gradient-to-r from-[#100E0C]/95 via-[#100E0C]/75 to-[#100E0C]/30" />
                   <div className="absolute inset-0 p-5 flex flex-col justify-between">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#D6B26E]">
+                            {isController ? 'Doanh nghiệp của bạn' : `Thị trường · ${activeBiz.ownerName}`} · {stage.labelVi}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 flex-wrap mt-1">
                           <h3
-                            className={`text-xl sm:text-2xl font-bold text-[var(--text-primary)] ${
+                            className={`text-xl sm:text-2xl font-bold text-[#F6F1E7] ${
                               playMode === 'CAREER' ? 'font-display-serif' : ''
                             }`}
                           >
                             {activeBiz.businessName}
                           </h3>
-                          <span className="font-mono text-xs font-bold text-[var(--accent)]">
+                          <span className="font-mono text-xs font-bold text-[#D6B26E]">
                             {activeBiz.ticker}
                           </span>
                           <span
                             className={`text-xs font-semibold ${
                               activeBiz.status === 'ACTIVE'
-                                ? 'text-[var(--positive)]'
+                                ? 'text-emerald-400'
                                 : activeBiz.status === 'BANKRUPT'
-                                  ? 'text-[var(--negative)]'
-                                  : 'text-[var(--warning)]'
+                                  ? 'text-rose-400'
+                                  : 'text-amber-300'
                             }`}
                           >
-                            · {activeBiz.status}
+                            · {activeBiz.status === 'ACTIVE' ? 'Đang hoạt động' : activeBiz.status}
                           </span>
                         </div>
-                        <div className="text-xs text-[var(--text-secondary)] mt-1">
-                          {activeBiz.businessTypeName} · Level {activeBiz.level} ({activeBiz.levelTitle}) ·{' '}
-                          {activeBiz.cityName}
+                        <div className="text-xs text-[#CFC5B5] mt-1">
+                          {activeBiz.businessTypeName} · Cấp {activeBiz.level} ({activeBiz.levelTitle}) · {activeBiz.cityName}
                         </div>
                       </div>
 
-                      <div className="text-left sm:text-right font-mono tabular-nums">
-                        <div className="text-[11px] text-[var(--text-muted)]">Định giá công ty</div>
-                        <div className="text-xl font-bold text-[var(--accent)]">
+                      <div className="text-left sm:text-right font-mono tabular-nums bg-[#100E0C]/65 backdrop-blur-sm px-3 py-2 rounded-xl border border-[#383026]">
+                        <div className="text-[11px] text-[#A69A87]">Định giá công ty</div>
+                        <div className="text-lg sm:text-xl font-bold text-[#D6B26E]">
                           {formatCR(activeBiz.valuationMinor)} CR
                         </div>
                       </div>
@@ -673,24 +800,24 @@ export function BusinessEmpirePage() {
 
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono tabular-nums">
                       <div>
-                        <div className="text-[10px] text-[var(--text-muted)]">Tiền mặt công ty</div>
-                        <div className="font-bold text-[var(--text-primary)]">
+                        <div className="text-[10px] text-[#A69A87]">Tiền mặt công ty</div>
+                        <div className="font-bold text-[#F6F1E7]">
                           {formatCR(activeBiz.companyCashMinor)} CR
                         </div>
                       </div>
                       <div>
-                        <div className="text-[10px] text-[var(--text-muted)]">Doanh thu / CK</div>
-                        <div className="font-bold text-[var(--positive)]">
+                        <div className="text-[10px] text-[#A69A87]">Doanh thu / kỳ</div>
+                        <div className="font-bold text-emerald-400">
                           {formatCR(activeBiz.revenueLastCycleMinor)} CR
                         </div>
                       </div>
                       <div>
-                        <div className="text-[10px] text-[var(--text-muted)]">Lợi nhuận ròng</div>
+                        <div className="text-[10px] text-[#A69A87]">Lợi nhuận ròng</div>
                         <div
                           className={`font-bold ${
                             activeBiz.netProfitLastCycleMinor >= 0
-                              ? 'text-[var(--positive)]'
-                              : 'text-[var(--negative)]'
+                              ? 'text-emerald-400'
+                              : 'text-rose-400'
                           }`}
                         >
                           {activeBiz.netProfitLastCycleMinor >= 0 ? '+' : ''}
@@ -698,8 +825,8 @@ export function BusinessEmpirePage() {
                         </div>
                       </div>
                       <div>
-                        <div className="text-[10px] text-[var(--text-muted)]">Nhân sự · Uy tín</div>
-                        <div className="font-bold text-[var(--text-primary)]">
+                        <div className="text-[10px] text-[#A69A87]">Nhân sự · Uy tín</div>
+                        <div className="font-bold text-[#F6F1E7]">
                           {activeBiz.employeeCount} NV · {activeBiz.reputation.toFixed(0)}/100
                         </div>
                       </div>
@@ -753,6 +880,52 @@ export function BusinessEmpirePage() {
                 {/* 1. OVERVIEW */}
                 {activeTab === 'OVERVIEW' && (
                   <div className="space-y-5">
+                    {/* Real-Data Actionable Recommendations ("Việc cần làm") */}
+                    {isController && actionItems.length > 0 && (
+                      <div
+                        data-testid="business-action-recommendations"
+                        className="rounded-xl border border-[var(--accent)]/30 bg-[var(--bg-surface)] p-4 space-y-2.5"
+                      >
+                        <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--accent)]">
+                          Việc cần làm ưu tiên
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                          {actionItems.map((item) => (
+                            <div
+                              key={item.id}
+                              className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-panel)] p-3 flex flex-col justify-between gap-2.5"
+                            >
+                              <div className="space-y-1">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-xs font-bold text-[var(--text-primary)]">
+                                    {item.title}
+                                  </span>
+                                  <span className="text-[11px] font-mono text-[var(--accent)] tabular-nums shrink-0">
+                                    {item.estimatedCostText}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-[var(--text-secondary)] leading-relaxed">
+                                  {item.reason}
+                                </p>
+                              </div>
+                              <div className="flex items-center justify-between gap-2 pt-1 border-t border-[var(--border-subtle)]/60">
+                                <span className="text-[11px] text-[var(--text-muted)]">
+                                  Tác động: {item.affectedMetric}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setActiveTab(item.targetTab)}
+                                  className="text-xs font-bold text-[var(--accent)] hover:underline cursor-pointer shrink-0"
+                                >
+                                  {item.actionLabel} →
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     {/* 4 Direct Tycoon Action Cards */}
                     {isController && (
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -780,7 +953,7 @@ export function BusinessEmpirePage() {
                             Nâng cấp cơ sở
                           </div>
                           <div className="text-[11px] text-[var(--text-muted)] mt-0.5">
-                            Level {activeBiz.level} → {nextLevelSpec ? `Lv.${nextLevelSpec.level}` : 'Tối đa'}
+                            Cấp {activeBiz.level} → {nextLevelSpec ? `Cấp ${nextLevelSpec.level}` : 'Tối đa'}
                           </div>
                         </button>
 
@@ -1396,7 +1569,8 @@ export function BusinessEmpirePage() {
                 )}
               </div>
             </>
-          )}
+            );
+          })()}
         </div>
       </div>
 

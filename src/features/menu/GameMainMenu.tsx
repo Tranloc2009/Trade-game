@@ -52,7 +52,8 @@ export function GameMainMenu({
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [difficulty, setDifficulty] = useState<CareerDifficulty>('NORMAL');
-  const [preferredMode, setPreferredMode] = useState<GamePlayMode>('CAREER');
+  // AUTO omits preferredInitialMode so server resumes lastPlayedMode for returning accounts and starts new accounts in Career
+  const [modeChoice, setModeChoice] = useState<'AUTO' | GamePlayMode>('AUTO');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -109,7 +110,7 @@ export function GameMainMenu({
       password,
       preset: 'CUSTOM',
       difficulty,
-      preferredInitialMode: preferredMode,
+      preferredInitialMode: modeChoice === 'AUTO' ? undefined : modeChoice,
     });
   };
 
@@ -297,50 +298,63 @@ export function GameMainMenu({
               </div>
             ) : (
               /* Unauthenticated Mode Highlights */
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 max-w-xl">
-                <button
-                  type="button"
-                  onClick={() => setPreferredMode('CAREER')}
-                  className={`p-4 rounded-xl border text-left transition-colors cursor-pointer ${
-                    preferredMode === 'CAREER'
-                      ? 'border-[var(--accent)] bg-[var(--bg-panel)]/95'
-                      : 'border-[var(--border-subtle)] bg-[var(--bg-panel)]/70 hover:border-[var(--border-strong)]'
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="inline-flex items-center gap-2 text-sm font-bold text-[var(--text-primary)]">
-                      <BookOpen className="w-4 h-4 text-[var(--accent)]" />
-                      Career Mode
-                    </span>
-                    {preferredMode === 'CAREER' && (
-                      <span className="text-[10px] font-mono uppercase text-[var(--accent)]">Đề xuất</span>
-                    )}
-                  </div>
-                  <p className="mt-1.5 text-xs text-[var(--text-secondary)] leading-relaxed">
-                    Nhập vai doanh nhân trẻ tại Sài Gòn qua 6 chương cốt truyện, cố vấn NPC, lập công ty và định hình di sản.
-                  </p>
-                </button>
+              <div className="space-y-2.5 max-w-xl">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  <button
+                    type="button"
+                    data-testid="menu-select-career"
+                    onClick={() => setModeChoice((prev) => (prev === 'CAREER' ? 'AUTO' : 'CAREER'))}
+                    className={`p-4 rounded-xl border text-left transition-colors cursor-pointer ${
+                      modeChoice === 'CAREER' || modeChoice === 'AUTO'
+                        ? 'border-[var(--accent)] bg-[var(--bg-panel)]/95'
+                        : 'border-[var(--border-subtle)] bg-[var(--bg-panel)]/70 hover:border-[var(--border-strong)]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="inline-flex items-center gap-2 text-sm font-bold text-[var(--text-primary)]">
+                        <BookOpen className="w-4 h-4 text-[var(--accent)]" />
+                        Career Mode
+                      </span>
+                      <span className="text-[10px] font-mono uppercase text-[var(--accent)]">
+                        {modeChoice === 'CAREER' ? 'Bắt buộc Career' : 'Mặc định mới'}
+                      </span>
+                    </div>
+                    <p className="mt-1.5 text-xs text-[var(--text-secondary)] leading-relaxed">
+                      Nhập vai doanh nhân trẻ tại Sài Gòn qua 6 chương cốt truyện, cố vấn NPC, lập công ty và định hình di sản.
+                    </p>
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() => setPreferredMode('ONLINE')}
-                  className={`p-4 rounded-xl border text-left transition-colors cursor-pointer ${
-                    preferredMode === 'ONLINE'
-                      ? 'border-[#2DD4BF] bg-[var(--bg-panel)]/95'
-                      : 'border-[var(--border-subtle)] bg-[var(--bg-panel)]/70 hover:border-[var(--border-strong)]'
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="inline-flex items-center gap-2 text-sm font-bold text-[var(--text-primary)]">
-                      <Globe className="w-4 h-4 text-[#2DD4BF]" />
-                      Online Mode
-                    </span>
-                    <span className="text-[10px] font-mono uppercase text-[#2DD4BF]">WORLD-01</span>
-                  </div>
-                  <p className="mt-1.5 text-xs text-[var(--text-secondary)] leading-relaxed">
-                    Giao dịch Spot, Futures, Forex cùng người chơi khác, góp vốn đồng sáng lập qua Escrow và cạnh tranh đế chế.
-                  </p>
-                </button>
+                  <button
+                    type="button"
+                    data-testid="menu-select-online"
+                    onClick={() => setModeChoice((prev) => (prev === 'ONLINE' ? 'AUTO' : 'ONLINE'))}
+                    className={`p-4 rounded-xl border text-left transition-colors cursor-pointer ${
+                      modeChoice === 'ONLINE'
+                        ? 'border-[#2DD4BF] bg-[var(--bg-panel)]/95'
+                        : 'border-[var(--border-subtle)] bg-[var(--bg-panel)]/70 hover:border-[var(--border-strong)]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="inline-flex items-center gap-2 text-sm font-bold text-[var(--text-primary)]">
+                        <Globe className="w-4 h-4 text-[#2DD4BF]" />
+                        Online Mode
+                      </span>
+                      <span className="text-[10px] font-mono uppercase text-[#2DD4BF]">
+                        {modeChoice === 'ONLINE' ? 'Đã chọn' : 'WORLD-01'}
+                      </span>
+                    </div>
+                    <p className="mt-1.5 text-xs text-[var(--text-secondary)] leading-relaxed">
+                      Giao dịch Cổ phiếu, Crypto, Forex, Futures cùng người chơi khác, góp vốn đồng sáng lập qua Escrow và cạnh tranh đế chế.
+                    </p>
+                  </button>
+                </div>
+                <div className="text-[11px] text-[var(--text-muted)]">
+                  {modeChoice === 'AUTO'
+                    ? 'Tài khoản cũ tự động quay lại đúng chế độ lần chơi gần nhất · Tài khoản mới bắt đầu ở Career Mode.'
+                    : modeChoice === 'CAREER'
+                      ? 'Đang chọn vào thẳng Career Mode (nhấn lại thẻ để bật tự nhớ chế độ).'
+                      : 'Đang chọn vào thẳng Online WORLD-01 (nhấn lại thẻ để bật tự nhớ chế độ).'}
+                </div>
               </div>
             )}
           </div>
@@ -471,9 +485,9 @@ export function GameMainMenu({
                     </div>
                   </div>
 
-                  {preferredMode === 'CAREER' && (
+                  {modeChoice !== 'ONLINE' && (
                     <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                      <span className="text-[var(--text-secondary)]">Vốn khởi đầu Career:</span>
+                      <span className="text-[var(--text-secondary)]">Vốn khởi đầu Career (tài khoản mới):</span>
                       <div className="flex items-center gap-1.5">
                         {(
                           [
@@ -510,9 +524,11 @@ export function GameMainMenu({
                     <span>
                       {loading
                         ? 'Đang xác thực & tải thế giới...'
-                        : preferredMode === 'CAREER'
-                          ? 'Vào Career Mode'
-                          : 'Vào Online WORLD-01'}
+                        : modeChoice === 'ONLINE'
+                          ? 'Vào Online WORLD-01'
+                          : modeChoice === 'CAREER'
+                            ? 'Vào Career Mode'
+                            : 'Đăng nhập & Tiếp tục'}
                     </span>
                   </button>
 

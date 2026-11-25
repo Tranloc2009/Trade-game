@@ -25,10 +25,26 @@ test('Career Mode sidebar has 6 clean narrative sections', () => {
 });
 
 test('Legacy route redirects resolve cleanly to unified hubs with exact sub-tabs preserved', () => {
-  assert.deepEqual(resolveCanonicalNavigation('exchange'), { activePage: 'unified_exchange', exchangeTab: 'spot' });
-  assert.deepEqual(resolveCanonicalNavigation('futures'), { activePage: 'unified_exchange', exchangeTab: 'futures' });
-  assert.deepEqual(resolveCanonicalNavigation('forex'), { activePage: 'unified_exchange', exchangeTab: 'forex' });
-  assert.deepEqual(resolveCanonicalNavigation('discover'), { activePage: 'unified_exchange', exchangeTab: 'discover' });
+  assert.deepEqual(resolveCanonicalNavigation('exchange'), {
+    activePage: 'unified_exchange',
+    exchangeTab: 'stocks',
+    exchangeDiscoveryOpen: false,
+  });
+  assert.deepEqual(resolveCanonicalNavigation('futures'), {
+    activePage: 'unified_exchange',
+    exchangeTab: 'futures',
+    exchangeDiscoveryOpen: false,
+  });
+  assert.deepEqual(resolveCanonicalNavigation('forex'), {
+    activePage: 'unified_exchange',
+    exchangeTab: 'forex',
+    exchangeDiscoveryOpen: false,
+  });
+  assert.deepEqual(resolveCanonicalNavigation('discover'), {
+    activePage: 'unified_exchange',
+    exchangeTab: 'stocks',
+    exchangeDiscoveryOpen: true,
+  });
 
   assert.deepEqual(resolveCanonicalNavigation('business'), { activePage: 'my_empire', empireTab: 'business' });
   assert.deepEqual(resolveCanonicalNavigation('capital_hub'), { activePage: 'my_empire', empireTab: 'cofounder' });

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowDownRight, ArrowUpRight, Landmark, Zap, XCircle } from 'lucide-react';
+import { ArrowDownRight, ArrowUpRight, Landmark, XCircle } from 'lucide-react';
 import {
   ALL_CURRENCIES,
   CURRENCY_SPECS,
@@ -61,7 +61,6 @@ export function ForexPage() {
   const [mobileTab, setMobileTab] = useState<MobileTab>('CHART');
   const [prefilledPrice, setPrefilledPrice] = useState<number | null>(null);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
-  const [triggeringPolicy, setTriggeringPolicy] = useState(false);
 
   const fxPairs = useMemo(() => assets.filter((a) => a.marketClass === 'FOREX'), [assets]);
   const activePair = useMemo(
@@ -167,29 +166,6 @@ export function ForexPage() {
       });
     } finally {
       setCancellingId(null);
-    }
-  };
-
-  const handleTriggerPolicy = async () => {
-    setTriggeringPolicy(true);
-    try {
-      const res = await ForexService.triggerPolicyEvent();
-      setForexOverview(res.overview);
-      queryClient.invalidateQueries({ queryKey: ['orderbook', activeSymbol] });
-      queryClient.invalidateQueries({ queryKey: ['recentTrades', activeSymbol] });
-      pushToast({
-        tone: 'info',
-        title: `[${res.policyEvent.bankCode}] Sự kiện NHTW vừa công bố`,
-        description: `${res.policyEvent.title} · AI FX thực thi ${res.tradesExecuted} giao dịch trên sổ lệnh.`,
-      });
-    } catch (err) {
-      pushToast({
-        tone: 'error',
-        title: 'Không thể kích hoạt sự kiện NHTW',
-        description: err instanceof ApiClientError ? err.message : 'Lỗi máy chủ.',
-      });
-    } finally {
-      setTriggeringPolicy(false);
     }
   };
 
@@ -445,17 +421,6 @@ export function ForexPage() {
             </div>
           </div>
         </div>
-
-        <button
-          type="button"
-          onClick={handleTriggerPolicy}
-          disabled={triggeringPolicy}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-primary)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors cursor-pointer disabled:opacity-60 whitespace-nowrap"
-          title="Phát hành thông báo chính sách mới từ Ngân hàng Trung ương mô phỏng để AI FX phản ứng trên sổ lệnh"
-        >
-          <Zap className="w-3.5 h-3.5 text-[var(--warning)]" />
-          {triggeringPolicy ? 'Đang công bố NHTW...' : 'Sự kiện NHTW mới'}
-        </button>
       </header>
 
       {/* Mobile Compact View Switcher */}

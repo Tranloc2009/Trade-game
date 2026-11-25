@@ -3,13 +3,11 @@ import {
   Activity,
   ArrowRight,
   Calendar,
-  FastForward,
   Flame,
-  LineChart,
   RefreshCw,
 } from 'lucide-react';
 import { formatCompactCR } from '../../../shared/contracts/money';
-import type { MacroSimulationReport, V4EconomicPhase } from '../../../shared/contracts/v4';
+import type { V4EconomicPhase } from '../../../shared/contracts/v4';
 import { formatDateTimeShort } from '../../lib/indicators';
 import { V4Service, type V4MacroOverview } from '../../services/v4Api';
 import { useAppStore } from '../../store/useAppStore';
@@ -24,63 +22,26 @@ const PHASES: Array<{ id: V4EconomicPhase; label: string }> = [
 ];
 
 export function EconomyNewsPage() {
-  const { economy, news, gameClock, v4SyncSeq, openAssetInExchange, openForexPair, pushToast } = useAppStore();
+  const { economy, news, gameClock, v4SyncSeq, openAssetInExchange, openForexPair } = useAppStore();
 
   const [macroV4, setMacroV4] = useState<V4MacroOverview | null>(null);
-  const [simReport, setSimReport] = useState<MacroSimulationReport | null>(null);
-  const [simDays, setSimDays] = useState<number>(90);
-  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   const loadMacro = useCallback(async () => {
+    setLoading(true);
     try {
       const data = await V4Service.getWorldMacroV4();
       setMacroV4(data);
     } catch {
       // Fallback gracefully to existing world economy snapshot
+    } finally {
+      setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     loadMacro();
   }, [loadMacro, v4SyncSeq]);
-
-  const handleAdvanceCycle = async () => {
-    setBusy(true);
-    try {
-      await V4Service.devAdvanceCycle(1);
-      pushToast({
-        tone: 'info',
-        title: 'Đã chạy thêm 1 chu kỳ Kinh tế Thế giới V4',
-        description: 'Cập nhật 12 chỉ số vĩ mô, phản ứng dây chuyền và kết quả kinh doanh.',
-      });
-      await loadMacro();
-    } catch (err) {
-      pushToast({
-        tone: 'error',
-        title: 'Không thể đẩy chu kỳ kinh tế',
-        description: err instanceof Error ? err.message : 'Lỗi máy chủ.',
-      });
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleRunSimulation = async (days: number) => {
-    setSimDays(days);
-    setBusy(true);
-    try {
-      const report = await V4Service.devBalanceSimulation(days);
-      setSimReport(report);
-    } catch (err) {
-      pushToast({
-        tone: 'error',
-        title: 'Mô phỏng cân bằng kinh tế thất bại',
-        description: err instanceof Error ? err.message : 'Lỗi máy chủ.',
-      });
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const ind = macroV4?.indicators;
 
@@ -97,21 +58,12 @@ export function EconomyNewsPage() {
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            disabled={busy}
+            disabled={loading}
             onClick={loadMacro}
-            className="px-3 py-1.5 rounded-md text-xs font-medium bg-[var(--bg-panel)] border border-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] inline-flex items-center gap-1.5 cursor-pointer"
+            className="px-3 py-1.5 rounded-md text-xs font-medium bg-[var(--bg-panel)] border border-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
           >
             <RefreshCw className="w-3.5 h-3.5" />
             Làm mới
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={handleAdvanceCycle}
-            className="px-3 py-1.5 rounded-md text-xs font-semibold bg-[var(--accent)] text-[#0B0F17] disabled:opacity-40 inline-flex items-center gap-1.5 cursor-pointer"
-          >
-            <FastForward className="w-3.5 h-3.5" />
-            Chạy 1 chu kỳ Vĩ mô
           </button>
         </div>
       </div>
@@ -330,63 +282,6 @@ export function EconomyNewsPage() {
                 </div>
               ))}
             </div>
-          </div>
-
-          {/* 30 / 90 / 365-Day Economy Balance Stress Simulator */}
-          <div className="rounded-xl bg-[var(--bg-panel)] border border-[var(--border-subtle)] p-4 space-y-3 text-xs">
-            <h2 className="text-sm font-semibold flex items-center gap-1.5">
-              <LineChart className="w-4 h-4 text-blue-400" />
-              Kiểm thử Cân bằng Kinh tế (30 / 90 / 365 ngày)
-            </h2>
-            <p className="text-[11px] text-[var(--text-secondary)]">
-              Chạy mô phỏng định lượng không ảnh hưởng dữ liệu người chơi để kiểm tra ổn định lạm phát, phá sản và Gini.
-            </p>
-            <div className="grid grid-cols-3 gap-2">
-              {[30, 90, 365].map((days) => (
-                <button
-                  key={days}
-                  type="button"
-                  disabled={busy}
-                  onClick={() => handleRunSimulation(days)}
-                  className={`py-1.5 rounded font-mono text-xs font-semibold border cursor-pointer ${
-                    simReport?.daysSimulated === days
-                      ? 'bg-[var(--accent)] text-[#0B0F17] border-[var(--accent)]'
-                      : 'bg-[var(--bg-app)] border-[var(--border-subtle)] text-[var(--text-secondary)]'
-                  }`}
-                >
-                  {days} ngày
-                </button>
-              ))}
-            </div>
-
-            {simReport && (
-              <div className="p-3 rounded-lg bg-[var(--bg-app)] border border-[var(--border-subtle)] space-y-1.5 font-mono text-[11px]">
-                <div className="flex justify-between">
-                  <span className="font-sans text-[var(--text-muted)]">Kỳ hạn / Pha cuối</span>
-                  <span className="text-[var(--accent)]">
-                    {simDays}d · {simReport.finalPhase}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="font-sans text-[var(--text-muted)]">Lạm phát TB</span>
-                  <span>{simReport.avgInflationPct.toFixed(2)}%</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="font-sans text-[var(--text-muted)]">Biên LN doanh nghiệp TB</span>
-                  <span className="text-[var(--positive)]">{simReport.averageProfitMarginPct.toFixed(1)}%</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="font-sans text-[var(--text-muted)]">Tỷ lệ phá sản mô phỏng</span>
-                  <span className="text-[var(--warning)]">{simReport.businessFailureRatePct.toFixed(1)}%</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="font-sans text-[var(--text-muted)]">Gini Proxy / Nợ/VCSH</span>
-                  <span>
-                    {simReport.giniProxy.toFixed(2)} · {simReport.debtToEquityRatioPct.toFixed(1)}%
-                  </span>
-                </div>
-              </div>
-            )}
           </div>
         </aside>
       </div>

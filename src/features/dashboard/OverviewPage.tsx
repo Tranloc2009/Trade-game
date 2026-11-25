@@ -50,6 +50,7 @@ export function OverviewPage({ onEnterPracticeMode }: OverviewPageProps) {
     openForexPair,
     openFuturesContract,
     openBusinessCreationWizard,
+    setSelectedBusinessId,
     setActivePage,
   } = useAppStore();
 
@@ -301,7 +302,10 @@ export function OverviewPage({ onEnterPracticeMode }: OverviewPageProps) {
                 <button
                   key={b.id}
                   type="button"
-                  onClick={() => setActivePage('business')}
+                  onClick={() => {
+                    setSelectedBusinessId(b.id);
+                    setActivePage('business');
+                  }}
                   className="w-full px-4 py-3 flex items-center justify-between gap-3 hover:bg-[var(--bg-surface)]/70 transition-colors text-left cursor-pointer"
                 >
                   <div className="min-w-0">
@@ -353,6 +357,26 @@ export function OverviewPage({ onEnterPracticeMode }: OverviewPageProps) {
             </button>
           </div>
 
+          {pendingInvites.length > 0 && (
+            <div className="px-4 py-3 bg-[var(--accent)]/10 border-b border-[var(--border-subtle)] flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-xs font-bold text-[var(--accent)]">
+                  Bạn có {pendingInvites.length} lời mời đồng sáng lập đang chờ phản hồi
+                </div>
+                <div className="text-[11px] text-[var(--text-secondary)] truncate">
+                  Từ {pendingInvites[0].inviterName} · Kiểm tra điều khoản vốn &amp; cổ phần tại Capital Hub
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActivePage('capital_hub')}
+                className="px-3 py-1.5 rounded-lg bg-[var(--accent)] text-[var(--text-on-accent)] text-xs font-bold shrink-0 cursor-pointer"
+              >
+                Xem lời mời
+              </button>
+            </div>
+          )}
+
           {openCoFounderProjects.length === 0 ? (
             <div className="p-6 text-center space-y-3">
               <p className="text-xs text-[var(--text-secondary)] max-w-sm mx-auto leading-relaxed">
@@ -391,7 +415,7 @@ export function OverviewPage({ onEnterPracticeMode }: OverviewPageProps) {
                           </span>
                         </div>
                         <div className="text-[11px] text-[var(--text-muted)]">
-                          Sáng lập: {proj.founderName} · Tối thiểu {formatCR(proj.minContributionMinor)} CR
+                          Sáng lập: {proj.founderName} · {proj.contributions.length} người góp vốn · Tối thiểu {formatCR(proj.minContributionMinor)} CR
                         </div>
                       </div>
                       <span className="font-mono text-xs font-bold text-[var(--accent)] tabular-nums shrink-0">
@@ -403,6 +427,10 @@ export function OverviewPage({ onEnterPracticeMode }: OverviewPageProps) {
                         className="h-full rounded-full bg-[var(--accent)]"
                         style={{ width: `${pct}%` }}
                       />
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] font-mono tabular-nums text-[var(--text-muted)]">
+                      <span>Đã cam kết: {formatCR(proj.committedCapitalMinor)} CR</span>
+                      <span>Mục tiêu: {formatCR(proj.targetCapitalMinor)} CR</span>
                     </div>
                   </button>
                 );
