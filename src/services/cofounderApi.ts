@@ -20,7 +20,7 @@ import type {
   WorldMode,
 } from '../../shared/contracts/cofounder';
 import type { BusinessEntity, BusinessModelType, V4CityCode } from '../../shared/contracts/v4';
-import { ApiClientError, getAuthToken, resolveApiPath } from './api';
+import { ApiClientError, getAuthToken, notifyCareerFinancialMutation, resolveApiPath } from './api';
 
 async function cofounderRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
@@ -32,7 +32,8 @@ async function cofounderRequest<T>(path: string, init: RequestInit = {}): Promis
     headers.set('Authorization', `Bearer ${token}`);
   }
 
-  const res = await fetch(resolveApiPath(`/api/cofounder${path}`), { ...init, headers });
+  const targetPath = resolveApiPath(`/api/cofounder${path}`);
+  const res = await fetch(targetPath, { ...init, headers });
   let payload: { ok: boolean; data?: T; error?: { code: string; message: string } };
   try {
     payload = await res.json();
@@ -46,6 +47,7 @@ async function cofounderRequest<T>(path: string, init: RequestInit = {}): Promis
       res.status,
     );
   }
+  notifyCareerFinancialMutation(targetPath, init.method);
   return payload.data;
 }
 

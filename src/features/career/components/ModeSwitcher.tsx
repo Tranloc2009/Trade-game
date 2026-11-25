@@ -86,7 +86,8 @@ export function ModeSwitcher({ onSwitchMode, compact = false }: ModeSwitcherProp
         ) : (
           <Globe className="w-3.5 h-3.5 text-[#39B8AD]" />
         )}
-        <span>{isCareer ? 'CAREER MODE' : 'ONLINE MODE'}</span>
+        <span className="hidden sm:inline">{isCareer ? 'CAREER MODE' : 'ONLINE MODE'}</span>
+        <span className="sm:hidden">{isCareer ? 'CAREER' : 'ONLINE'}</span>
         <ChevronDown className="w-3.5 h-3.5 opacity-75" />
       </button>
 

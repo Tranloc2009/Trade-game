@@ -43,6 +43,7 @@ import {
   setApiWorldMode,
   setAuthToken,
   setCareerAuthToken,
+  subscribeCareerFinancialMutation,
 } from './services/api';
 import { CareerStoryService } from './services/careerStoryApi';
 import { realtimeClient } from './services/realtime';
@@ -348,12 +349,45 @@ function TradingEmpireWorkspace() {
         setCareerStory(res.careerStory);
         setPlayer(res.profile);
         applyWorldSnapshot(res.worldSnapshot);
+        void queryClient.invalidateQueries({ queryKey: ['career-wealth-details'] });
       })
       .catch(() => {});
     return () => {
       active = false;
     };
   }, [playMode, player?.id, orderSyncSeq, v4SyncSeq, cofounderSyncSeq, applyWorldSnapshot, setCareerStory, setPlayer]);
+
+  // Immediately refresh authoritative Career Wallet, World Snapshot & Company Treasuries after any Career financial mutation
+  useEffect(() => {
+    if (playMode !== 'CAREER' || !player) return;
+    let active = true;
+    let debounceTimer: number | null = null;
+    const unsubscribe = subscribeCareerFinancialMutation(() => {
+      if (debounceTimer !== null) {
+        window.clearTimeout(debounceTimer);
+      }
+      debounceTimer = window.setTimeout(async () => {
+        const st = useAppStore.getState();
+        if (!active || st.playMode !== 'CAREER' || st.modeSwitching) return;
+        try {
+          const payload = await CareerStoryService.getCareerState();
+          if (!active || useAppStore.getState().playMode !== 'CAREER') return;
+          applyWorldSnapshot(payload.worldSnapshot);
+          setPlayer(payload.profile);
+          setCareerStory(payload.careerStory);
+          setAccountOverview(payload.account);
+          void queryClient.invalidateQueries({ queryKey: ['career-wealth-details'] });
+        } catch {
+          // ignore transient sync error; next poll will reconcile
+        }
+      }, 150);
+    });
+    return () => {
+      active = false;
+      if (debounceTimer !== null) window.clearTimeout(debounceTimer);
+      unsubscribe();
+    };
+  }, [playMode, player?.id, applyWorldSnapshot, setAccountOverview, setCareerStory, setPlayer]);
 
   const handleUnifiedLogin = async (params: {
     username: string;
@@ -465,6 +499,7 @@ function TradingEmpireWorkspace() {
     setCareerStory(payload.careerStory);
     if (payload.worldSnapshot) applyWorldSnapshot(payload.worldSnapshot);
     if (payload.profile) setPlayer(payload.profile);
+    void queryClient.invalidateQueries({ queryKey: ['career-wealth-details'] });
     if (payload.careerStory.currentChapter > prevChapter) {
       careerSound.playChapterFanfare(careerSoundMuted);
       pushToast({

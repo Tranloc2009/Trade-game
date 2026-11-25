@@ -33,7 +33,7 @@ import type {
   WealthRankSpec,
   WorldMacroEventV4,
 } from '../../shared/contracts/v4';
-import { ApiClientError, getAuthToken, resolveApiPath } from './api';
+import { ApiClientError, getAuthToken, notifyCareerFinancialMutation, resolveApiPath } from './api';
 
 async function v4Request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
@@ -45,7 +45,8 @@ async function v4Request<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers.set('Authorization', `Bearer ${token}`);
   }
 
-  const res = await fetch(resolveApiPath(`/api/v4${path}`), { ...init, headers });
+  const targetPath = resolveApiPath(`/api/v4${path}`);
+  const res = await fetch(targetPath, { ...init, headers });
   let payload: { ok: boolean; data?: T; error?: { code: string; message: string } };
   try {
     payload = await res.json();
@@ -59,6 +60,7 @@ async function v4Request<T>(path: string, init: RequestInit = {}): Promise<T> {
       res.status,
     );
   }
+  notifyCareerFinancialMutation(targetPath, init.method);
   return payload.data;
 }
 

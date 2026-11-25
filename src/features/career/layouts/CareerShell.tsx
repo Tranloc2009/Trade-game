@@ -8,10 +8,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Compass,
-  FastForward,
   LogOut,
   Menu,
-  Pause,
   Phone,
   PieChart,
   Play,
@@ -30,6 +28,8 @@ import type {
   GamePlayMode,
 } from '../../../../shared/contracts/careerStory';
 import { useAppStore, type NavPage } from '../../../store/useAppStore';
+import { CareerClockMenu } from '../components/CareerClockMenu';
+import { CareerTopBarBalance } from '../components/CareerTopBarBalance';
 import { ModeSwitcher } from '../components/ModeSwitcher';
 
 interface CareerShellProps {
@@ -259,74 +259,48 @@ export function CareerShell({
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Topbar — Editorial Career Header with Clock Speed + Phone + Journal + ModeSwitcher */}
+        {/* Topbar — Cinematic Luxury Career Header with Fixed Balance + Compact Clock Menu + Story Tools */}
         <header className="h-14 shrink-0 px-3 lg:px-5 border-b border-[#342D24] bg-[#161411] flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2.5 min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
             <button
               type="button"
               onClick={() => setMobileMenuOpen(true)}
               aria-label="Mở menu Career"
-              className="lg:hidden p-2 -ml-1 rounded text-[#C5BAA8] hover:text-[#F5EFE6] cursor-pointer"
+              className="lg:hidden p-2 -ml-1 rounded text-[#C5BAA8] hover:text-[#F5EFE6] cursor-pointer shrink-0"
             >
               <Menu className="w-5 h-5" />
             </button>
 
             <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-[11px] uppercase tracking-wider text-[#D4AF6A] whitespace-nowrap">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="font-mono text-[11px] uppercase tracking-wider text-[#D6B26E] whitespace-nowrap shrink-0">
                   {chapterSpec.roman}
                 </span>
-                <span className="hidden sm:inline text-[#5C5246]">·</span>
-                <span className="hidden sm:inline font-display-serif text-sm font-semibold text-[#F5EFE6] truncate">
+                <span className="hidden lg:inline text-[#5C5246] shrink-0">·</span>
+                <span className="hidden lg:inline font-display-serif text-sm font-semibold text-[#F6F1E7] truncate">
                   {chapterSpec.titleVi}
                 </span>
               </div>
               {careerStory?.freePlayUnlocked && (
-                <div className="text-[10px] text-[#34D399] font-mono">
-                  FREE PLAY MỞ KHÓA · {careerStory.characterName}
+                <div className="hidden sm:block text-[10px] text-[#34D399] font-mono truncate">
+                  FREE PLAY · {careerStory.characterName}
                 </div>
               )}
             </div>
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            {/* Independent Career Game Clock Speed Controls (Pause / 1x / 2x / 5x / 10x) */}
+            {/* Fixed Live Career Balance (Mobile: Available Cash prioritized; Desktop: Available + Net Worth) */}
+            <CareerTopBarBalance onOpenAssetsPage={() => handleNav('portfolio')} />
+
+            {/* Compact Career Clock Speed Menu (replaces 6 sprawling inline buttons) */}
             {careerStory && (
-              <div
-                data-testid="career-clock-controls"
-                className="hidden xl:flex items-center rounded-md border border-[#342D24] bg-[#1D1914] p-0.5"
-                title="Tốc độ thời gian riêng của Career Save (không ảnh hưởng Online World)"
-              >
-                {CLOCK_SPEEDS.map((sp) => {
-                  const active = careerStory.clockSpeed === sp;
-                  return (
-                    <button
-                      key={sp}
-                      type="button"
-                      disabled={busy}
-                      onClick={() => void onSetClockSpeed(sp)}
-                      className={`px-2 py-1 rounded text-[11px] font-mono font-semibold transition-colors cursor-pointer whitespace-nowrap ${
-                        active
-                          ? 'bg-[#D4AF6A] text-[#11100E]'
-                          : 'text-[#A89C89] hover:text-[#F5EFE6]'
-                      }`}
-                    >
-                      {sp === 'PAUSE' ? <Pause className="w-3 h-3" /> : sp}
-                    </button>
-                  );
-                })}
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void onAdvanceCycle()}
-                  title="Chạy nhanh 1 chu kỳ kinh doanh Career"
-                  data-testid="career-advance-cycle-btn"
-                  className="ml-0.5 px-2 py-1 rounded text-[11px] font-medium text-[#D4AF6A] hover:bg-[#2A241C] inline-flex items-center gap-1 cursor-pointer whitespace-nowrap"
-                >
-                  <FastForward className="w-3 h-3" />
-                  <span>+1 kỳ</span>
-                </button>
-              </div>
+              <CareerClockMenu
+                clockSpeed={careerStory.clockSpeed}
+                busy={busy}
+                onSetClockSpeed={onSetClockSpeed}
+                onAdvanceCycle={onAdvanceCycle}
+              />
             )}
 
             {/* Quick Phone & Journal icon triggers on topbar */}
@@ -335,7 +309,7 @@ export function CareerShell({
               onClick={() => setJournalOpen(true)}
               aria-label="Mở Nhật ký Career"
               title="Nhật ký nhiệm vụ"
-              className="p-2 rounded-md text-[#C5BAA8] hover:text-[#D4AF6A] hover:bg-[#24201B] transition-colors cursor-pointer"
+              className="hidden sm:inline-flex p-2 rounded-md text-[#C5BAA8] hover:text-[#D6B26E] hover:bg-[#24201B] transition-colors cursor-pointer"
             >
               <BookMarked className="w-4 h-4" />
             </button>
@@ -346,11 +320,11 @@ export function CareerShell({
               aria-label="Mở Điện thoại nhân vật"
               title="Điện thoại & Tin nhắn NPC"
               data-testid="topbar-phone-btn"
-              className="relative p-2 rounded-md text-[#C5BAA8] hover:text-[#D4AF6A] hover:bg-[#24201B] transition-colors cursor-pointer"
+              className="relative p-2 rounded-md text-[#C5BAA8] hover:text-[#D6B26E] hover:bg-[#24201B] transition-colors cursor-pointer"
             >
               <Phone className="w-4 h-4" />
               {unreadMessages > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-sm bg-[#D4AF6A] text-[#11100E] text-[10px] font-mono font-bold flex items-center justify-center">
+                <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-sm bg-[#D6B26E] text-[#100E0C] text-[10px] font-mono font-bold flex items-center justify-center">
                   {unreadMessages}
                 </span>
               )}
@@ -361,7 +335,7 @@ export function CareerShell({
               onClick={toggleCareerSoundMuted}
               aria-label={careerSoundMuted ? 'Bật âm thanh Career' : 'Tắt âm thanh Career'}
               title={careerSoundMuted ? 'Bật âm thanh' : 'Tắt âm thanh'}
-              className="hidden sm:inline-flex p-2 rounded-md text-[#A89C89] hover:text-[#D4AF6A] hover:bg-[#24201B] transition-colors cursor-pointer"
+              className="hidden xl:inline-flex p-2 rounded-md text-[#A69A87] hover:text-[#D6B26E] hover:bg-[#24201B] transition-colors cursor-pointer"
             >
               {careerSoundMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
             </button>
@@ -371,21 +345,21 @@ export function CareerShell({
 
             {/* Profile Avatar */}
             {player && (
-              <div className="hidden sm:flex items-center gap-1.5 pl-2 border-l border-[#342D24]">
+              <div className="hidden sm:flex items-center gap-1 pl-2 border-l border-[#342D24]">
                 <button
                   type="button"
                   onClick={onSwitchAccount}
-                  className="flex items-center gap-2 px-2 py-1 rounded hover:bg-[#24201B] transition-colors cursor-pointer"
+                  className="flex items-center gap-2 px-1.5 py-1 rounded hover:bg-[#24201B] transition-colors cursor-pointer"
                   title="Đổi tài khoản"
                 >
-                  <span className="w-7 h-7 rounded bg-[#2A241C] border border-[#D4AF6A]/45 flex items-center justify-center text-[11px] font-mono font-bold text-[#D4AF6A]">
+                  <span className="w-7 h-7 rounded bg-[#2A241C] border border-[#D6B26E]/45 flex items-center justify-center text-[11px] font-mono font-bold text-[#D6B26E]">
                     {player.avatarInitials}
                   </span>
-                  <div className="hidden md:block text-left leading-tight">
-                    <div className="text-xs font-semibold text-[#F5EFE6] whitespace-nowrap">
+                  <div className="hidden 2xl:block text-left leading-tight">
+                    <div className="text-xs font-semibold text-[#F6F1E7] whitespace-nowrap">
                       {careerStory?.characterName ?? player.username}
                     </div>
-                    <div className="text-[10px] text-[#9E9280] whitespace-nowrap">
+                    <div className="text-[10px] text-[#A69A87] whitespace-nowrap">
                       {careerStory?.difficulty ?? 'NORMAL'}
                     </div>
                   </div>
@@ -395,7 +369,7 @@ export function CareerShell({
                   onClick={onLogout}
                   aria-label="Đăng xuất"
                   title="Đăng xuất"
-                  className="p-1.5 rounded text-[#8F8474] hover:text-[#F87171] hover:bg-[#24201B] cursor-pointer"
+                  className="p-1.5 rounded text-[#A69A87] hover:text-[#F87171] hover:bg-[#24201B] cursor-pointer"
                 >
                   <LogOut className="w-4 h-4" />
                 </button>
@@ -498,8 +472,33 @@ export function CareerShell({
               })}
 
               {careerStory && (
-                <div className="pt-4 mt-4 border-t border-[#342D24] space-y-2">
-                  <div className="px-2 text-[11px] font-mono text-[#9E9280]">Tốc độ Career</div>
+                <div className="pt-4 mt-4 border-t border-[#342D24] space-y-2.5">
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMobileMenuOpen(false);
+                        setJournalOpen(true);
+                      }}
+                      className="py-2 px-2.5 rounded-lg border border-[#3E352A] bg-[#1E1A15] text-xs font-medium text-[#F5EFE6] inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <BookMarked className="w-3.5 h-3.5 text-[#D6B26E]" />
+                      <span>Nhật ký</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => {
+                        setMobileMenuOpen(false);
+                        void onAdvanceCycle();
+                      }}
+                      className="py-2 px-2.5 rounded-lg border border-[#D6B26E]/45 bg-[#231F19] text-xs font-semibold text-[#D6B26E] inline-flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
+                    >
+                      <Play className="w-3.5 h-3.5" />
+                      <span>+1 chu kỳ</span>
+                    </button>
+                  </div>
+                  <div className="px-1 text-[11px] font-mono text-[#A69A87]">Tốc độ Career</div>
                   <div className="grid grid-cols-5 gap-1">
                     {CLOCK_SPEEDS.map((sp) => (
                       <button
@@ -508,7 +507,7 @@ export function CareerShell({
                         onClick={() => void onSetClockSpeed(sp)}
                         className={`py-1.5 rounded text-[11px] font-mono font-semibold cursor-pointer ${
                           careerStory.clockSpeed === sp
-                            ? 'bg-[#D4AF6A] text-[#11100E]'
+                            ? 'bg-[#D6B26E] text-[#100E0C]'
                             : 'bg-[#24201B] text-[#C5BAA8]'
                         }`}
                       >

@@ -169,6 +169,30 @@ export function resolveApiPath(path: string, mode: WorldMode = activeWorldMode):
   return path;
 }
 
+type CareerFinancialMutationListener = () => void;
+const careerMutationListeners = new Set<CareerFinancialMutationListener>();
+
+export function subscribeCareerFinancialMutation(listener: CareerFinancialMutationListener): () => void {
+  careerMutationListeners.add(listener);
+  return () => {
+    careerMutationListeners.delete(listener);
+  };
+}
+
+export function notifyCareerFinancialMutation(targetPath: string, method?: string): void {
+  const upperMethod = (method ?? 'GET').toUpperCase();
+  if (
+    activePlayMode === 'CAREER' &&
+    targetPath.startsWith('/api/career-world/') &&
+    upperMethod !== 'GET' &&
+    upperMethod !== 'HEAD'
+  ) {
+    for (const listener of careerMutationListeners) {
+      listener();
+    }
+  }
+}
+
 async function request<T>(path: string, init: RequestInit = {}, modeOverride?: WorldMode): Promise<T> {
   const effectiveMode = modeOverride ?? activeWorldMode;
   const targetPath = resolveApiPath(path, effectiveMode);
@@ -206,6 +230,7 @@ async function request<T>(path: string, init: RequestInit = {}, modeOverride?: W
     throw new ApiClientError(err.code, err.message, res.status);
   }
 
+  notifyCareerFinancialMutation(targetPath, init.method);
   return payload.data;
 }
 
