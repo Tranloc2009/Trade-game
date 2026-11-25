@@ -8,9 +8,12 @@ import {
   ChevronDown,
   ChevronUp,
   Coffee,
+  Coins,
   Compass,
   Crosshair,
   Diamond,
+  Globe2,
+  Hammer,
   Home,
   Landmark,
   List,
@@ -18,15 +21,19 @@ import {
   Maximize2,
   Minimize2,
   Minus,
+  Monitor,
   Moon,
   Phone,
   Plus,
   RotateCcw,
   Search,
+  ShieldAlert,
   Sparkles,
   Sun,
   Sunrise,
   Sunset,
+  TrendingUp,
+  Users,
   X,
 } from 'lucide-react';
 import {
@@ -38,19 +45,26 @@ import type { NpcCharacterId } from '../../../../shared/contracts/careerStory';
 import { formatCR } from '../../../../shared/contracts/money';
 import { V4Service } from '../../../services/v4Api';
 import { useAppStore } from '../../../store/useAppStore';
+import { getBusinessVisual } from '../../business-visuals/businessAssetResolver';
+import { IsoBuildingPreview } from '../../business-visuals/components/IsoBuildingPreview';
+import {
+  allocateCityBuildings,
+  GRAPHICS_QUALITY_PRESETS,
+  type GraphicsQuality,
+  type PlacedCityBuilding,
+} from '../../city-engine/isoMath';
+import {
+  SaigonCityCanvas,
+  type SaigonCityCanvasHandle,
+} from '../../city-engine/SaigonCityCanvas';
 import {
   DISTRICT_IMAGES,
   getNpcPortraitUrl,
   getSceneImageUrl,
-  SAIGON_CITY_MAP_IMAGE,
 } from '../careerAssets';
 import { careerSound } from '../soundEngine';
 import {
-  clampMapTransform,
-  focusMapPoint,
   LOCATION_BY_ID,
-  MAP_WORLD_HEIGHT,
-  MAP_WORLD_WIDTH,
   resolveCityTimeOfDay,
   resolveLocationForMission,
   resolveLocationView,
@@ -85,12 +99,20 @@ export function CareerWorldExplorePage({ onTriggerScene }: CareerWorldExplorePag
   const {
     careerStory,
     player,
+    worldId,
     gameClock,
     v4SyncSeq,
     careerSoundMuted,
     reducedMotionPref,
+    graphicsQuality,
+    setGraphicsQuality,
+    businessBrandColors,
     focusedCityLocationId,
     clearFocusedCityLocation,
+    focusedMapBusinessId,
+    newlyConstructedBusinessId,
+    clearFocusedMapBusiness,
+    clearNewlyConstructedBusiness,
     setActivePage,
     setPhoneOpen,
     openBusinessCreationWizard,
@@ -110,6 +132,23 @@ export function CareerWorldExplorePage({ onTriggerScene }: CareerWorldExplorePag
       (b) => b.ownerId === player.id || b.shareholders.some((s) => s.playerId === player.id),
     );
   }, [bizOverview?.businesses, player]);
+
+  // Deterministic, collision-free, world-scoped & city-scoped Saigon building allocation
+  const cityAllocation = useMemo(
+    () =>
+      allocateCityBuildings({
+        businesses: bizOverview?.businesses ?? [],
+        playerId: player?.id ?? null,
+        worldId: worldId || null,
+        gameClock,
+        brandColorOverrides: businessBrandColors,
+      }),
+    [bizOverview?.businesses, player?.id, worldId, gameClock, businessBrandColors],
+  );
+
+  const saigonBuildings = cityAllocation.saigonBuildings;
+  const otherCityCount =
+    cityAllocation.otherCityBusinesses.length + cityAllocation.otherCityBranches.length;
 
   const activeMission = useMemo(() => {
     if (!careerStory || careerStory.freePlayUnlocked) return null;
@@ -152,127 +191,36 @@ export function CareerWorldExplorePage({ onTriggerScene }: CareerWorldExplorePag
 
   const lighting = useMemo(() => resolveCityTimeOfDay(gameClock), [gameClock]);
 
+  const cityCanvasRef = useRef<SaigonCityCanvasHandle | null>(null);
+
   const [selectedLocId, setSelectedLocId] = useState<SaigonLocationId>(
     missionLocationId ?? 'coffee_shop',
   );
+  const [selectedBuildingKey, setSelectedBuildingKey] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [qualityMenuOpen, setQualityMenuOpen] = useState(false);
+  const [otherCitiesOpen, setOtherCitiesOpen] = useState(false);
   const [mobileListOpen, setMobileListOpen] = useState(false);
   const [mobileSheetExpanded, setMobileSheetExpanded] = useState(false);
   const [arrivalState, setArrivalState] = useState<ArrivalBannerState | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
+  const [engineMetrics, setEngineMetrics] = useState<{
+    fps: number;
+    rendererType: string;
+    cachedTextures: number;
+  }>({ fps: 60, rendererType: 'WebGL', cachedTextures: 0 });
 
-  // Unified Camera Transform State (single 1600x900 coordinate system)
-  const viewportRef = useRef<HTMLDivElement | null>(null);
-  const [viewportSize, setViewportSize] = useState({ width: 1120, height: 640 });
-  const [camera, setCamera] = useState({ tx: 0, ty: 0, scale: 0.8 });
-  const cameraInitializedRef = useRef(false);
-
-  // Pointer drag state (kept in ref for 60fps smooth dragging without stale closures)
-  const dragRef = useRef<{
-    active: boolean;
-    pointerId: number;
-    startX: number;
-    startY: number;
-    origTx: number;
-    origTy: number;
-    moved: boolean;
-  } | null>(null);
-
-  // Track container dimensions accurately on resize & fullscreen toggle
-  useEffect(() => {
-    const el = viewportRef.current;
-    if (!el) return;
-    const measure = () => {
-      const rect = el.getBoundingClientRect();
-      if (rect.width > 0 && rect.height > 0) {
-        setViewportSize({ width: rect.width, height: rect.height });
-      }
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    window.addEventListener('resize', measure);
-    return () => {
-      ro.disconnect();
-      window.removeEventListener('resize', measure);
-    };
-  }, [isFullscreen]);
-
-  const focusCameraOn = useCallback(
-    (locId: SaigonLocationId, preferredScale?: number) => {
-      const spec = LOCATION_BY_ID[locId];
-      if (!spec) return;
-      const vw = viewportSize.width;
-      const vh = viewportSize.height;
-      const fitScale = Math.max(vw / MAP_WORLD_WIDTH, vh / MAP_WORLD_HEIGHT);
-      const targetScale = preferredScale ?? Math.max(fitScale * 1.04, Math.min(1.08, fitScale * 1.12));
-      // On desktop (lg+), shift focus center left so the focused landmark never hides under the 340px right preview panel
-      const openViewportW = vw >= 920 ? Math.max(360, vw - 350) : vw;
-      const rawTx = openViewportW / 2 - spec.mapX * targetScale;
-      const rawTy = vh / 2 - spec.mapY * targetScale;
-      const next = clampMapTransform({
-        tx: rawTx,
-        ty: rawTy,
-        scale: targetScale,
-        viewportW: vw,
-        viewportH: vh,
-      });
-      setCamera({ tx: next.tx, ty: next.ty, scale: next.scale });
-    },
-    [viewportSize.height, viewportSize.width],
+  const selectedBuilding: PlacedCityBuilding | null = useMemo(
+    () =>
+      selectedBuildingKey
+        ? saigonBuildings.find((b) => b.entityKey === selectedBuildingKey) ?? null
+        : null,
+    [saigonBuildings, selectedBuildingKey],
   );
 
-  const resetCamera = useCallback(() => {
-    const vw = viewportSize.width;
-    const vh = viewportSize.height;
-    const fitScale = Math.max(vw / MAP_WORLD_WIDTH, vh / MAP_WORLD_HEIGHT);
-    const next = clampMapTransform({
-      tx: (vw - MAP_WORLD_WIDTH * fitScale) / 2,
-      ty: (vh - MAP_WORLD_HEIGHT * fitScale) / 2,
-      scale: fitScale,
-      viewportW: vw,
-      viewportH: vh,
-    });
-    setCamera({ tx: next.tx, ty: next.ty, scale: next.scale });
-  }, [viewportSize.height, viewportSize.width]);
-
-  // Initial camera framing + reclamp whenever viewport resizes
-  useEffect(() => {
-    if (viewportSize.width < 100 || viewportSize.height < 100) return;
-    if (!cameraInitializedRef.current) {
-      cameraInitializedRef.current = true;
-      if (focusedCityLocationId && LOCATION_BY_ID[focusedCityLocationId as SaigonLocationId]) {
-        const target = focusedCityLocationId as SaigonLocationId;
-        setSelectedLocId(target);
-        focusCameraOn(target);
-        clearFocusedCityLocation();
-      } else {
-        resetCamera();
-      }
-      return;
-    }
-    setCamera((prev) => {
-      const clamped = clampMapTransform({
-        tx: prev.tx,
-        ty: prev.ty,
-        scale: prev.scale,
-        viewportW: viewportSize.width,
-        viewportH: viewportSize.height,
-      });
-      return { tx: clamped.tx, ty: clamped.ty, scale: clamped.scale };
-    });
-  }, [
-    clearFocusedCityLocation,
-    focusCameraOn,
-    focusedCityLocationId,
-    resetCamera,
-    viewportSize.height,
-    viewportSize.width,
-  ]);
-
-  // React to deep-link focus requests (e.g., Phone "Xem địa điểm" or CareerHome quick jump)
+  // React to deep-link focus requests for static landmarks (Phone / CareerHome)
   useEffect(() => {
     if (!focusedCityLocationId) return;
     const target = focusedCityLocationId as SaigonLocationId;
@@ -280,56 +228,73 @@ export function CareerWorldExplorePage({ onTriggerScene }: CareerWorldExplorePag
       clearFocusedCityLocation();
       return;
     }
+    setSelectedBuildingKey(null);
     setSelectedLocId(target);
     setMobileSheetExpanded(true);
     setMobileListOpen(false);
-    focusCameraOn(target, Math.max(viewportSize.width / MAP_WORLD_WIDTH, viewportSize.height / MAP_WORLD_HEIGHT) * 1.2);
+    const timer = window.setTimeout(() => {
+      cityCanvasRef.current?.focusLandmark(target);
+    }, 80);
     clearFocusedCityLocation();
+    return () => window.clearTimeout(timer);
+  }, [clearFocusedCityLocation, focusedCityLocationId]);
+
+  // React to deep-link focus requests for dynamic player businesses (Opening Modal / Business Overview)
+  useEffect(() => {
+    if (!focusedMapBusinessId) return;
+    const match = saigonBuildings.find(
+      (b) => b.businessId === focusedMapBusinessId && !b.isBranch,
+    );
+    if (!match) return;
+    setSelectedBuildingKey(match.entityKey);
+    setMobileSheetExpanded(true);
+    setMobileListOpen(false);
+    const focusTimer = window.setTimeout(() => {
+      cityCanvasRef.current?.focusBuilding(match.entityKey);
+    }, 120);
+    clearFocusedMapBusiness();
+    const clearAnimTimer = window.setTimeout(() => {
+      clearNewlyConstructedBusiness();
+    }, 1600);
+    return () => {
+      window.clearTimeout(focusTimer);
+      window.clearTimeout(clearAnimTimer);
+    };
   }, [
-    clearFocusedCityLocation,
-    focusCameraOn,
-    focusedCityLocationId,
-    viewportSize.height,
-    viewportSize.width,
+    clearFocusedMapBusiness,
+    clearNewlyConstructedBusiness,
+    focusedMapBusinessId,
+    saigonBuildings,
   ]);
 
-  const zoomBy = useCallback(
-    (factor: number, anchorClientX?: number, anchorClientY?: number) => {
-      const el = viewportRef.current;
-      const vw = viewportSize.width;
-      const vh = viewportSize.height;
-      const rect = el?.getBoundingClientRect();
-      const ax = anchorClientX !== undefined && rect ? anchorClientX - rect.left : vw / 2;
-      const ay = anchorClientY !== undefined && rect ? anchorClientY - rect.top : vh / 2;
-
-      setCamera((prev) => {
-        const worldX = (ax - prev.tx) / prev.scale;
-        const worldY = (ay - prev.ty) / prev.scale;
-        const rawScale = prev.scale * factor;
-        const clampedProbe = clampMapTransform({
-          tx: prev.tx,
-          ty: prev.ty,
-          scale: rawScale,
-          viewportW: vw,
-          viewportH: vh,
-        });
-        const finalScale = clampedProbe.scale;
-        const rawTx = ax - worldX * finalScale;
-        const rawTy = ay - worldY * finalScale;
-        const next = clampMapTransform({
-          tx: rawTx,
-          ty: rawTy,
-          scale: finalScale,
-          viewportW: vw,
-          viewportH: vh,
-        });
-        return { tx: next.tx, ty: next.ty, scale: next.scale };
-      });
+  const handleSelectLocation = useCallback(
+    (locId: SaigonLocationId, shouldCenter = false) => {
+      setSelectedBuildingKey(null);
+      setSelectedLocId(locId);
+      setMobileSheetExpanded(true);
+      setSearchOpen(false);
+      careerSound.playLocationSelect(careerSoundMuted);
+      if (shouldCenter) {
+        cityCanvasRef.current?.focusLandmark(locId);
+      }
     },
-    [viewportSize.height, viewportSize.width],
+    [careerSoundMuted],
   );
 
-  // Keyboard navigation for accessibility & power users
+  const handleSelectBuilding = useCallback(
+    (entityKey: string, shouldCenter = false) => {
+      setSelectedBuildingKey(entityKey);
+      setMobileSheetExpanded(true);
+      setSearchOpen(false);
+      careerSound.playLocationSelect(careerSoundMuted);
+      if (shouldCenter) {
+        cityCanvasRef.current?.focusBuilding(entityKey);
+      }
+    },
+    [careerSoundMuted],
+  );
+
+  // Keyboard navigation
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement | null)?.tagName;
@@ -337,22 +302,23 @@ export function CareerWorldExplorePage({ onTriggerScene }: CareerWorldExplorePag
 
       if (e.key === 'Escape') {
         if (searchOpen) setSearchOpen(false);
+        else if (qualityMenuOpen) setQualityMenuOpen(false);
+        else if (otherCitiesOpen) setOtherCitiesOpen(false);
         else if (isFullscreen) setIsFullscreen(false);
         return;
       }
       if (e.key === '+' || e.key === '=') {
         e.preventDefault();
-        zoomBy(1.18);
+        cityCanvasRef.current?.zoomBy(1.18);
       } else if (e.key === '-' || e.key === '_') {
         e.preventDefault();
-        zoomBy(1 / 1.18);
+        cityCanvasRef.current?.zoomBy(1 / 1.18);
       } else if (e.key === '0') {
         e.preventDefault();
-        resetCamera();
+        cityCanvasRef.current?.resetCamera();
       } else if (e.key.toLowerCase() === 'f' && missionLocationId) {
         e.preventDefault();
-        setSelectedLocId(missionLocationId);
-        focusCameraOn(missionLocationId);
+        handleSelectLocation(missionLocationId, true);
       } else if (
         e.key === 'ArrowLeft' ||
         e.key === 'ArrowRight' ||
@@ -360,94 +326,22 @@ export function CareerWorldExplorePage({ onTriggerScene }: CareerWorldExplorePag
         e.key === 'ArrowDown'
       ) {
         e.preventDefault();
-        const step = 90;
+        const step = 95;
         const dx = e.key === 'ArrowLeft' ? step : e.key === 'ArrowRight' ? -step : 0;
         const dy = e.key === 'ArrowUp' ? step : e.key === 'ArrowDown' ? -step : 0;
-        setCamera((prev) => {
-          const next = clampMapTransform({
-            tx: prev.tx + dx,
-            ty: prev.ty + dy,
-            scale: prev.scale,
-            viewportW: viewportSize.width,
-            viewportH: viewportSize.height,
-          });
-          return { tx: next.tx, ty: next.ty, scale: next.scale };
-        });
+        cityCanvasRef.current?.panBy(dx, dy);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
-    focusCameraOn,
+    handleSelectLocation,
     isFullscreen,
     missionLocationId,
-    resetCamera,
+    otherCitiesOpen,
+    qualityMenuOpen,
     searchOpen,
-    viewportSize.height,
-    viewportSize.width,
-    zoomBy,
   ]);
-
-  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if ((e.target as HTMLElement).closest('button, input, a')) return;
-    dragRef.current = {
-      active: true,
-      pointerId: e.pointerId,
-      startX: e.clientX,
-      startY: e.clientY,
-      origTx: camera.tx,
-      origTy: camera.ty,
-      moved: false,
-    };
-    e.currentTarget.setPointerCapture(e.pointerId);
-  };
-
-  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    const d = dragRef.current;
-    if (!d || !d.active) return;
-    const dx = e.clientX - d.startX;
-    const dy = e.clientY - d.startY;
-    if (Math.hypot(dx, dy) > 5) {
-      d.moved = true;
-    }
-    if (!d.moved) return;
-    const next = clampMapTransform({
-      tx: d.origTx + dx,
-      ty: d.origTy + dy,
-      scale: camera.scale,
-      viewportW: viewportSize.width,
-      viewportH: viewportSize.height,
-    });
-    setCamera({ tx: next.tx, ty: next.ty, scale: next.scale });
-  };
-
-  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
-    const d = dragRef.current;
-    if (d && d.active) {
-      dragRef.current = null;
-      try {
-        e.currentTarget.releasePointerCapture(e.pointerId);
-      } catch {
-        // ignore
-      }
-    }
-  };
-
-  const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
-    zoomBy(factor, e.clientX, e.clientY);
-  };
-
-  const handleSelectLocation = (locId: SaigonLocationId, shouldCenter = false) => {
-    setSelectedLocId(locId);
-    setMobileSheetExpanded(true);
-    setSearchOpen(false);
-    careerSound.playLocationSelect(careerSoundMuted);
-    if (shouldCenter) {
-      focusCameraOn(locId);
-    }
-  };
 
   const executeLocationAction = async (
     locView: ResolvedLocationView,
@@ -465,12 +359,11 @@ export function CareerWorldExplorePage({ onTriggerScene }: CareerWorldExplorePag
       npcId: npcForArrival,
     });
 
-    const waitMs = reducedMotionPref ? 40 : 200;
+    const waitMs = reducedMotionPref ? 40 : 180;
     await new Promise((resolve) => window.setTimeout(resolve, waitMs));
 
     try {
       if (action.kind === 'TRIGGER_SCENE' && action.sceneId) {
-        // Respect server response strictly — never fake success if server rejects!
         await onTriggerScene(action.sceneId);
       } else if (action.kind === 'OPEN_WIZARD') {
         openBusinessCreationWizard();
@@ -506,6 +399,18 @@ export function CareerWorldExplorePage({ onTriggerScene }: CareerWorldExplorePag
     });
   }, [locationViews, searchQuery]);
 
+  const filteredSearchBuildings = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return saigonBuildings.filter((b) => b.ownership === 'OWNED' || b.ownership === 'CO_OWNED');
+    return saigonBuildings.filter(
+      (b) =>
+        b.labelName.toLowerCase().includes(q) ||
+        b.ticker.toLowerCase().includes(q) ||
+        b.businessTypeName.toLowerCase().includes(q) ||
+        b.plot.districtLabelVi.toLowerCase().includes(q),
+    );
+  }, [saigonBuildings, searchQuery]);
+
   const metNpcIds = useMemo(() => {
     if (!careerStory) return [];
     return (Object.keys(NPC_PROFILES) as NpcCharacterId[]).filter(
@@ -522,12 +427,202 @@ export function CareerWorldExplorePage({ onTriggerScene }: CareerWorldExplorePag
           ? Sunset
           : Moon;
 
-  // Inverse pin scale compensation keeps pins readable and prevents overlap when zoomed
-  const markerCompensation = Math.max(0.84, Math.min(1.12, 1 / Math.sqrt(camera.scale)));
+  // Render Company Inspector when a Dynamic Business Building is selected
+  const renderBuildingInspector = (b: PlacedCityBuilding, compact = false) => {
+    const visual = getBusinessVisual(
+      b.businessTypeId,
+      b.level,
+      'MAP',
+      b.business.industry,
+    );
+    const biz = b.business;
+    const isMine = b.ownership === 'OWNED' || b.ownership === 'CO_OWNED';
 
-  const renderPreviewBody = (compact = false) => (
+    return (
+      <div
+        data-testid="city-company-inspector"
+        data-inspector-can-manage={String(b.canManage)}
+        data-inspector-business-id={b.businessId}
+        className="flex flex-col h-full"
+      >
+        {/* Header Artwork */}
+        <div className={`relative w-full overflow-hidden shrink-0 ${compact ? 'h-28' : 'h-36'}`}>
+          <img
+            src={visual.imageUrl}
+            alt={b.labelName}
+            className="w-full h-full object-cover"
+          />
+          <div
+            className="absolute inset-0"
+            style={{
+              background:
+                'linear-gradient(to top, rgba(20,17,13,0.95) 0%, rgba(20,17,13,0.4) 55%, rgba(20,17,13,0.12) 100%)',
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => setSelectedBuildingKey(null)}
+            aria-label="Quay lại xem địa điểm"
+            className="absolute top-2.5 right-2.5 h-8 w-8 rounded-lg bg-black/60 text-white/90 hover:text-white flex items-center justify-center cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+          <div className="absolute bottom-2.5 inset-x-3.5">
+            <div className="flex items-center justify-between gap-2 text-[11px] font-semibold">
+              <span className="truncate text-[#34D399]">
+                {b.isBranch ? `Chi nhánh · ${b.branchSubtitle}` : b.roleLabelVi}
+              </span>
+              <span className="font-mono text-[#D6B26E] shrink-0">
+                Lv.{b.level} · {visual.tierSpec.labelVi}
+              </span>
+            </div>
+            <h2 className="font-display-serif text-lg font-bold text-[#F6F1E7] leading-snug truncate">
+              {b.labelName}
+            </h2>
+          </div>
+        </div>
+
+        {/* Inspector Body */}
+        <div className="p-4 space-y-3.5 overflow-y-auto flex-1">
+          <div className="flex items-center gap-3">
+            <IsoBuildingPreview
+              archetype={b.archetype}
+              tier={b.visualTier}
+              accentHex={b.brandAccentHex}
+              variant={b.spriteVariant}
+              isUpgrading={b.isUpgrading}
+              suspended={b.status === 'SUSPENDED'}
+              size="sm"
+              compact
+            />
+            <div className="min-w-0 flex-1 space-y-1">
+              <div className="text-xs font-bold text-[var(--text-primary)] truncate">
+                {b.businessTypeName}
+              </div>
+              <div className="text-[11px] text-[var(--text-muted)] truncate">
+                {b.plot.districtLabelVi}
+              </div>
+              <div className="text-[11px] text-[var(--accent)]">
+                {visual.tierStageTitleVi} · Mã {b.ticker}
+              </div>
+              {b.isUpgrading && (
+                <div className="inline-flex items-center gap-1 text-[11px] font-mono text-amber-300">
+                  <Hammer className="w-3 h-3" />
+                  <span>
+                    Đang nâng cấp → Lv.{b.upgradeTargetLevel} ({b.upgradeRemainingHours}h)
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Authoritative Server Financial Metrics */}
+          <div className="grid grid-cols-2 gap-2 text-xs font-mono tabular-nums">
+            <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-2.5">
+              <div className="text-[10px] text-[var(--text-muted)]">Tiền mặt công ty</div>
+              <div className="font-bold text-[var(--text-primary)] mt-0.5">
+                {formatCR(biz.companyCashMinor)} CR
+              </div>
+            </div>
+            <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-2.5">
+              <div className="text-[10px] text-[var(--text-muted)]">Định giá</div>
+              <div className="font-bold text-[var(--accent)] mt-0.5">
+                {formatCR(biz.valuationMinor)} CR
+              </div>
+            </div>
+            <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-2.5">
+              <div className="text-[10px] text-[var(--text-muted)]">Doanh thu / kỳ</div>
+              <div className="font-bold text-[var(--positive)] mt-0.5">
+                {formatCR(biz.revenueLastCycleMinor)} CR
+              </div>
+            </div>
+            <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-2.5">
+              <div className="text-[10px] text-[var(--text-muted)]">Lợi nhuận ròng</div>
+              <div
+                className={`font-bold mt-0.5 ${
+                  biz.netProfitLastCycleMinor >= 0
+                    ? 'text-[var(--positive)]'
+                    : 'text-[var(--negative)]'
+                }`}
+              >
+                {biz.netProfitLastCycleMinor >= 0 ? '+' : ''}
+                {formatCR(biz.netProfitLastCycleMinor)} CR
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between text-xs text-[var(--text-secondary)] px-1">
+            <span>Nhân sự: <strong>{biz.employeeCount}</strong></span>
+            <span>Uy tín: <strong>{biz.reputation.toFixed(0)}/100</strong></span>
+            <span>Chi nhánh: <strong>{biz.branches.length}</strong></span>
+          </div>
+
+          {/* Strict Ownership & Permission Enforcement (TEST 16) */}
+          {b.canManage ? (
+            <div className="space-y-2 pt-1">
+              <button
+                type="button"
+                data-testid="inspector-manage-overview"
+                onClick={() => openBusinessWorkspaceTab('OVERVIEW', biz.id)}
+                className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[var(--text-on-accent)] text-xs font-bold flex items-center justify-between cursor-pointer min-h-[42px]"
+              >
+                <span>Mở trung tâm điều hành doanh nghiệp</span>
+                <ArrowRight className="w-4 h-4 shrink-0" />
+              </button>
+              <div className="grid grid-cols-3 gap-1.5">
+                <button
+                  type="button"
+                  data-testid="inspector-manage-operations"
+                  onClick={() => openBusinessWorkspaceTab('OPERATIONS', biz.id)}
+                  className="px-2 py-2 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface)] hover:border-[var(--accent)] text-[11px] font-semibold text-[var(--text-primary)] flex flex-col items-center gap-1 cursor-pointer"
+                >
+                  <Users className="w-3.5 h-3.5 text-[var(--accent)]" />
+                  <span>Nhân sự</span>
+                </button>
+                <button
+                  type="button"
+                  data-testid="inspector-manage-growth"
+                  onClick={() => openBusinessWorkspaceTab('GROWTH', biz.id)}
+                  className="px-2 py-2 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface)] hover:border-[var(--accent)] text-[11px] font-semibold text-[var(--text-primary)] flex flex-col items-center gap-1 cursor-pointer"
+                >
+                  <TrendingUp className="w-3.5 h-3.5 text-[var(--accent)]" />
+                  <span>Nâng cấp</span>
+                </button>
+                <button
+                  type="button"
+                  data-testid="inspector-manage-finance"
+                  onClick={() => openBusinessWorkspaceTab('FINANCE', biz.id)}
+                  className="px-2 py-2 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface)] hover:border-[var(--accent)] text-[11px] font-semibold text-[var(--text-primary)] flex flex-col items-center gap-1 cursor-pointer"
+                >
+                  <Coins className="w-3.5 h-3.5 text-[var(--accent)]" />
+                  <span>Tài chính</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div
+              data-testid="inspector-readonly-notice"
+              className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3 flex items-start gap-2.5 text-xs text-[var(--text-secondary)]"
+            >
+              <ShieldAlert className="w-4 h-4 text-[var(--accent)] shrink-0 mt-0.5" />
+              <div>
+                <div className="font-semibold text-[var(--text-primary)]">
+                  {isMine ? 'Quyền Cổ đông (Chỉ xem)' : `Doanh nghiệp của ${biz.ownerName}`}
+                </div>
+                <p className="mt-0.5 text-[11px] text-[var(--text-muted)] leading-relaxed">
+                  Chỉ Chủ sở hữu hoặc CEO mới có quyền điều hành nhân sự, nâng cấp hoặc phân phối cổ tức.
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // Render Static Landmark Preview Panel
+  const renderLandmarkPreviewBody = (compact = false) => (
     <div className="flex flex-col h-full">
-      {/* Natural Color Location Header Image */}
       <div className={`relative w-full overflow-hidden shrink-0 ${compact ? 'h-28' : 'h-36'}`}>
         <img
           src={selectedHeroImage}
@@ -554,13 +649,11 @@ export function CareerWorldExplorePage({ onTriggerScene }: CareerWorldExplorePag
         </div>
       </div>
 
-      {/* Preview Details */}
       <div className="p-4 space-y-3.5 overflow-y-auto flex-1">
         <p className="text-xs sm:text-[13px] text-[var(--text-secondary)] leading-relaxed">
           {selectedView.displayDescription}
         </p>
 
-        {/* Active Mission or Appointment Callout */}
         {(selectedView.appointment || selectedView.isMissionTarget) && (
           <div className="rounded-xl border border-[var(--accent)]/40 bg-[var(--bg-surface)] p-3 space-y-1">
             <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--accent)]">
@@ -587,50 +680,38 @@ export function CareerWorldExplorePage({ onTriggerScene }: CareerWorldExplorePag
           </div>
         )}
 
-        {/* Player Businesses Present Here */}
-        {selectedView.playerBusinessesHere.length > 0 && (
+        {/* Quick Jump to Player Buildings Constructed on the Saigon Map */}
+        {saigonBuildings.filter((b) => b.ownership === 'OWNED' || b.ownership === 'CO_OWNED').length > 0 && (
           <div className="space-y-1.5">
             <div className="text-xs font-semibold text-[var(--text-muted)]">
-              Doanh nghiệp của bạn ({selectedView.playerBusinessesHere.length})
+              Công trình của bạn tại Sài Gòn ({saigonBuildings.filter((b) => b.ownership === 'OWNED' || b.ownership === 'CO_OWNED').length})
             </div>
             <div className="space-y-1.5">
-              {selectedView.playerBusinessesHere.slice(0, 3).map((biz) => (
-                <button
-                  key={biz.id}
-                  type="button"
-                  onClick={() => openBusinessWorkspaceTab('OVERVIEW', biz.id)}
-                  className="w-full p-2.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] hover:border-[var(--accent)]/60 transition-colors flex items-center justify-between gap-2 text-left cursor-pointer"
-                >
-                  <div className="min-w-0">
-                    <div className="text-xs font-semibold text-[var(--text-primary)] truncate">
-                      {biz.businessName}
+              {saigonBuildings
+                .filter((b) => b.ownership === 'OWNED' || b.ownership === 'CO_OWNED')
+                .slice(0, 3)
+                .map((b) => (
+                  <button
+                    key={b.entityKey}
+                    type="button"
+                    onClick={() => handleSelectBuilding(b.entityKey, true)}
+                    className="w-full p-2.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] hover:border-[#34D399]/70 transition-colors flex items-center justify-between gap-2 text-left cursor-pointer"
+                  >
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold text-[var(--text-primary)] truncate">
+                        {b.labelName} {b.isBranch ? '(Chi nhánh)' : ''}
+                      </div>
+                      <div className="text-[11px] text-[var(--text-muted)] truncate">
+                        Lv.{b.level} · {b.plot.districtLabelVi}
+                      </div>
                     </div>
-                    <div className="text-[11px] text-[var(--text-muted)] truncate">
-                      Lv.{biz.level} · {biz.businessTypeName}
-                    </div>
-                  </div>
-                  <div className="text-right font-mono tabular-nums text-xs shrink-0">
-                    <div className="text-[var(--text-primary)] font-semibold">
-                      {formatCR(biz.companyCashMinor)} CR
-                    </div>
-                    <div
-                      className={
-                        biz.netProfitLastCycleMinor >= 0
-                          ? 'text-[var(--positive)] text-[11px]'
-                          : 'text-[var(--negative)] text-[11px]'
-                      }
-                    >
-                      {biz.netProfitLastCycleMinor >= 0 ? '+' : ''}
-                      {formatCR(biz.netProfitLastCycleMinor)}
-                    </div>
-                  </div>
-                </button>
-              ))}
+                    <MapPin className="w-3.5 h-3.5 text-[#34D399] shrink-0" />
+                  </button>
+                ))}
             </div>
           </div>
         )}
 
-        {/* Visible NPCs at Location (Zero Future Spoilers) */}
         {selectedView.visibleNpcs.length > 0 && (
           <div className="space-y-2">
             <div className="text-xs font-semibold text-[var(--text-muted)]">
@@ -691,7 +772,6 @@ export function CareerWorldExplorePage({ onTriggerScene }: CareerWorldExplorePag
           </div>
         )}
 
-        {/* Multi-Action Buttons */}
         <div className="space-y-2 pt-1">
           {selectedView.actions.map((act) => (
             <button
@@ -731,190 +811,40 @@ export function CareerWorldExplorePage({ onTriggerScene }: CareerWorldExplorePag
           : 'space-y-4 max-w-[1600px] mx-auto'
       }
     >
-      {/* Interactive 2.5D Isometric Saigon Map Stage — 75-85% Viewport Presence on Desktop */}
+      {/* PIXIJS WEBGL ISOMETRIC 2.5D SAIGON CITY STAGE */}
       <section
-        aria-label="Bản đồ tương tác Thành phố Sài Gòn"
-        className={`relative rounded-2xl overflow-hidden border border-[var(--border-strong)] bg-[#14191F] ${
+        aria-label="Bản đồ 2.5D Thành phố Sài Gòn"
+        className={`relative rounded-2xl overflow-hidden border border-[var(--border-strong)] bg-[#141E26] ${
           isFullscreen
             ? 'flex-1 rounded-none border-0'
             : 'h-[74vh] min-h-[520px] max-h-[820px] lg:h-[calc(100vh-8.5rem)] lg:min-h-[580px]'
         }`}
       >
-        {/* Pan/Zoom Unified Coordinate Viewport */}
-        <div
-          ref={viewportRef}
-          data-testid="saigon-map-viewport"
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerCancel={handlePointerUp}
-          onWheel={handleWheel}
-          className="relative w-full h-full overflow-hidden select-none touch-none cursor-grab active:cursor-grabbing"
-        >
-          {/* SINGLE UNIFIED 1600x900 WORLD STAGE: Artwork + Lighting + Landmarks share exact transform */}
-          <div
-            data-testid="saigon-map-stage"
-            style={{
-              width: `${MAP_WORLD_WIDTH}px`,
-              height: `${MAP_WORLD_HEIGHT}px`,
-              transformOrigin: '0 0',
-              transform: `translate3d(${camera.tx}px, ${camera.ty}px, 0) scale(${camera.scale})`,
-              willChange: 'transform',
-            }}
-            className="relative"
-          >
-            {/* Base Illustrated 2.5D Saigon City Artwork (Natural Daylight Colors) */}
-            <img
-              src={SAIGON_CITY_MAP_IMAGE}
-              alt="Bản đồ thành phố Sài Gòn phong cách 2.5D"
-              draggable={false}
-              className="w-full h-full object-cover pointer-events-none select-none block"
-            />
+        <SaigonCityCanvas
+          ref={cityCanvasRef}
+          locationViews={locationViews}
+          buildings={saigonBuildings}
+          lighting={lighting}
+          quality={graphicsQuality}
+          reducedMotion={reducedMotionPref}
+          selectedLandmarkId={selectedBuilding ? null : selectedLocId}
+          selectedBuildingKey={selectedBuildingKey}
+          missionLocationId={missionLocationId}
+          newlyConstructedBusinessId={newlyConstructedBusinessId}
+          onSelectLandmark={(locId) => handleSelectLocation(locId, false)}
+          onSelectBuilding={(entityKey) => handleSelectBuilding(entityKey, false)}
+          onMetricsUpdate={setEngineMetrics}
+        />
 
-            {/* Day / Night Atmospheric Lighting synced to real GameClock */}
-            <div
-              aria-hidden
-              data-time-period={lighting.period}
-              className="absolute inset-0 pointer-events-none transition-all duration-700"
-              style={{ background: lighting.overlayCss }}
-            />
-
-            {/* Subtle SVG Landmark Highlight Ring for Active Mission & Selected Location */}
-            <svg
-              viewBox={`0 0 ${MAP_WORLD_WIDTH} ${MAP_WORLD_HEIGHT}`}
-              className="absolute inset-0 w-full h-full pointer-events-none"
-            >
-              {missionLocationId && LOCATION_BY_ID[missionLocationId] && (
-                <ellipse
-                  cx={LOCATION_BY_ID[missionLocationId].mapX}
-                  cy={LOCATION_BY_ID[missionLocationId].mapY}
-                  rx="48"
-                  ry="24"
-                  fill="rgba(214, 178, 110, 0.16)"
-                  stroke="#D6B26E"
-                  strokeWidth="2.5"
-                  strokeDasharray="8 6"
-                />
-              )}
-              {selectedView && (
-                <ellipse
-                  cx={selectedView.spec.mapX}
-                  cy={selectedView.spec.mapY}
-                  rx="40"
-                  ry="19"
-                  fill="rgba(246, 241, 231, 0.14)"
-                  stroke="#F6F1E7"
-                  strokeWidth="2.5"
-                />
-              )}
-            </svg>
-
-            {/* 7 Unified Architectural Landmark Markers */}
-            {locationViews.map((locView) => {
-              const loc = locView.spec;
-              const Icon = LOCATION_ICONS[loc.id];
-              const isSelected = selectedLocId === loc.id;
-              const isHighlighted = locView.hasAppointment || locView.isMissionTarget;
-              const isOwnedHere = locView.playerBusinessesHere.length > 0;
-              const isUnintroduced = locView.state === 'UNINTRODUCED';
-
-              return (
-                <button
-                  key={loc.id}
-                  type="button"
-                  data-testid={`city-marker-${loc.id}`}
-                  data-location-state={locView.state}
-                  aria-label={`${locView.displayName} — ${locView.stateLabel}`}
-                  aria-pressed={isSelected}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleSelectLocation(loc.id, false);
-                  }}
-                  onDoubleClick={(e) => {
-                    e.stopPropagation();
-                    handleSelectLocation(loc.id, true);
-                  }}
-                  style={{
-                    left: `${loc.mapX}px`,
-                    top: `${loc.mapY}px`,
-                    transform: `translate(-50%, -100%) scale(${markerCompensation})`,
-                    transformOrigin: '50% 100%',
-                    zIndex: isSelected ? 30 : isHighlighted ? 22 : isOwnedHere ? 18 : 12,
-                  }}
-                  className="absolute group flex flex-col items-center cursor-pointer focus:outline-none"
-                >
-                  {/* Status Tag (Only when Appointment, Mission Target, or Owned Business) */}
-                  {locView.hasAppointment && (
-                    <span className="mb-1 px-2 py-0.5 rounded bg-[#D6B26E] text-[#100E0C] text-[11px] font-bold shadow-md whitespace-nowrap">
-                      Có lịch hẹn
-                    </span>
-                  )}
-                  {!locView.hasAppointment && locView.isMissionTarget && (
-                    <span className="mb-1 px-2 py-0.5 rounded bg-[#D6B26E] text-[#100E0C] text-[11px] font-bold shadow-md whitespace-nowrap">
-                      Mục tiêu
-                    </span>
-                  )}
-                  {!locView.hasAppointment && !locView.isMissionTarget && isOwnedHere && (
-                    <span className="mb-1 px-2 py-0.5 rounded bg-[#15803D] text-[#F8FAFC] text-[11px] font-bold shadow-md whitespace-nowrap">
-                      Công ty của bạn · Lv.{locView.playerBusinessesHere[0].level}
-                    </span>
-                  )}
-
-                  {/* Landmark Pin Body */}
-                  <div
-                    className={`flex items-center gap-2 px-2.5 py-1.5 rounded-xl border shadow-lg transition-colors whitespace-nowrap ${
-                      isSelected
-                        ? 'bg-[#191612] border-[#D6B26E] text-[#F6F1E7] ring-2 ring-[#D6B26E]/60'
-                        : isHighlighted
-                          ? 'bg-[#191612]/95 border-[#D6B26E]/80 text-[#F6F1E7] group-hover:border-[#E2C282]'
-                          : isOwnedHere
-                            ? 'bg-[#132219]/95 border-[#34D399]/75 text-[#F6F1E7] group-hover:border-[#34D399]'
-                            : isUnintroduced
-                              ? 'bg-[#191612]/80 border-[#524636]/70 text-[#CFC5B5] group-hover:bg-[#191612]'
-                              : 'bg-[#191612]/92 border-[#524636] text-[#F6F1E7] group-hover:border-[#D6B26E]/80'
-                    }`}
-                  >
-                    <span
-                      className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
-                        isSelected || isHighlighted
-                          ? 'bg-[#D6B26E] text-[#100E0C]'
-                          : isOwnedHere
-                            ? 'bg-[#34D399]/20 text-[#34D399]'
-                            : 'bg-[#2A241D] text-[#D6B26E]'
-                      }`}
-                    >
-                      <Icon className="w-4 h-4" />
-                    </span>
-                    <span className="text-xs font-bold tracking-tight">
-                      {locView.displayShortName}
-                    </span>
-                  </div>
-
-                  {/* Pin Anchor Stem */}
-                  <div
-                    className={`w-2.5 h-2.5 rotate-45 -mt-1.5 border-r border-b ${
-                      isSelected || isHighlighted
-                        ? 'bg-[#191612] border-[#D6B26E]'
-                        : isOwnedHere
-                          ? 'bg-[#132219] border-[#34D399]/75'
-                          : 'bg-[#191612] border-[#524636]'
-                    }`}
-                  />
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* UNIFIED NON-OVERLAPPING TOP MAP BAR (Responsive Desktop + 390px Mobile) */}
+        {/* UNIFIED NON-OVERLAPPING TOP MAP BAR */}
         <div className="absolute inset-x-2.5 sm:inset-x-3 top-2.5 sm:top-3 z-30 flex items-start justify-between gap-2 pointer-events-none">
-          {/* Top-Left City & Time HUD */}
-          <div className="flex flex-wrap items-center gap-2 min-w-0">
+          {/* Top-Left City, Time & Multi-City HUD */}
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 min-w-0">
             <div className="pointer-events-auto flex items-center gap-2 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl bg-[#14120F]/92 backdrop-blur-md border border-[#3E352A] shadow-lg text-[#F6F1E7] min-w-0">
               <TimeIcon className="w-4 h-4 shrink-0" style={{ color: lighting.skyBadgeColor }} />
               <div className="min-w-0 leading-tight">
                 <div className="text-[11px] sm:text-xs font-bold truncate">
-                  <span className="hidden sm:inline">Thành phố </span>Sài Gòn
+                  <span className="hidden sm:inline">Thành phố </span>Sài Gòn 2.5D
                 </div>
                 <div className="text-[10px] sm:text-[11px] text-[#CFC5B5] font-mono tabular-nums truncate">
                   {lighting.labelVi}
@@ -923,12 +853,24 @@ export function CareerWorldExplorePage({ onTriggerScene }: CareerWorldExplorePag
               </div>
             </div>
 
+            {otherCityCount > 0 && (
+              <button
+                type="button"
+                data-testid="city-other-cities-btn"
+                onClick={() => setOtherCitiesOpen((v) => !v)}
+                className="pointer-events-auto inline-flex items-center gap-1.5 px-2.5 py-2 rounded-xl bg-[#14120F]/92 hover:bg-[#231F19] backdrop-blur-md border border-[#524636] text-[11px] font-semibold text-[#F6F1E7] shadow-lg cursor-pointer"
+              >
+                <Globe2 className="w-3.5 h-3.5 text-[#D6B26E]" />
+                <span>Thành phố khác ({otherCityCount})</span>
+              </button>
+            )}
+
             {activeMission && missionLocationId && (
               <button
                 type="button"
                 data-testid="city-focus-mission-btn"
                 onClick={() => handleSelectLocation(missionLocationId, true)}
-                className="pointer-events-auto hidden md:inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-[#191612]/92 hover:bg-[#231F19] backdrop-blur-md border border-[#D6B26E]/60 text-xs text-[#F6F1E7] shadow-lg transition-colors cursor-pointer max-w-[300px]"
+                className="pointer-events-auto hidden xl:inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-[#191612]/92 hover:bg-[#231F19] backdrop-blur-md border border-[#D6B26E]/60 text-xs text-[#F6F1E7] shadow-lg transition-colors cursor-pointer max-w-[280px]"
               >
                 <Crosshair className="w-3.5 h-3.5 text-[#D6B26E] shrink-0" />
                 <span className="truncate">
@@ -938,16 +880,81 @@ export function CareerWorldExplorePage({ onTriggerScene }: CareerWorldExplorePag
             )}
           </div>
 
-          {/* Top-Right Compact Map Controls */}
+          {/* Top-Right Controls: Search, Graphics Quality & FPS, Mobile List, Zoom/Reset/Fullscreen */}
           <div className="pointer-events-auto flex items-center gap-1 sm:gap-1.5 shrink-0">
-            {/* Quick Search / Location Picker */}
+            {/* Graphics Quality Preset Selector + Live Measured FPS */}
+            <div className="relative hidden sm:block">
+              <button
+                type="button"
+                data-testid="city-graphics-toggle"
+                onClick={() => {
+                  setQualityMenuOpen((v) => !v);
+                  setSearchOpen(false);
+                }}
+                aria-label="Cài đặt chất lượng đồ họa bản đồ"
+                className="h-9 px-2.5 rounded-xl bg-[#14120F]/92 hover:bg-[#231F19] backdrop-blur-md border border-[#3E352A] text-[#F6F1E7] text-xs font-mono inline-flex items-center gap-1.5 shadow-lg cursor-pointer"
+              >
+                <Monitor className="w-3.5 h-3.5 text-[#D6B26E]" />
+                <span>{GRAPHICS_QUALITY_PRESETS[graphicsQuality].shortLabel}</span>
+                <span
+                  data-testid="city-fps-badge"
+                  className="text-[10px] text-[#34D399] tabular-nums"
+                >
+                  {engineMetrics.fps} FPS
+                </span>
+              </button>
+
+              {qualityMenuOpen && (
+                <div
+                  data-testid="city-graphics-menu"
+                  className="absolute right-0 mt-2 w-64 rounded-xl border border-[#524636] bg-[#191612]/98 backdrop-blur-md shadow-2xl p-2 space-y-1 z-40"
+                >
+                  <div className="px-2 py-1 flex items-center justify-between text-[10px] font-mono text-[#A69A87] border-b border-[#332C23]">
+                    <span>PixiJS {engineMetrics.rendererType}</span>
+                    <span>{engineMetrics.fps} FPS · {engineMetrics.cachedTextures} tex</span>
+                  </div>
+                  {(['LOW', 'MEDIUM', 'HIGH', 'ULTRA'] as GraphicsQuality[]).map((q) => {
+                    const p = GRAPHICS_QUALITY_PRESETS[q];
+                    const active = graphicsQuality === q;
+                    return (
+                      <button
+                        key={q}
+                        type="button"
+                        data-testid={`map-quality-${q}`}
+                        onClick={() => {
+                          setGraphicsQuality(q);
+                          setQualityMenuOpen(false);
+                        }}
+                        className={`w-full px-2.5 py-2 rounded-lg text-left transition-colors cursor-pointer ${
+                          active
+                            ? 'bg-[#2A241D] text-[#D6B26E]'
+                            : 'hover:bg-[#231F19] text-[#F6F1E7]'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between text-xs font-semibold">
+                          <span>{p.labelVi}</span>
+                          <span className="font-mono text-[10px]">{p.maxFps} FPS</span>
+                        </div>
+                        <div className="text-[10px] text-[#A69A87] leading-snug mt-0.5">
+                          {p.descriptionVi}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Quick Search / Landmark & Company Picker */}
             <div className="relative">
               <button
                 type="button"
                 data-testid="city-search-toggle"
-                onClick={() => setSearchOpen((v) => !v)}
-                aria-label="Tìm địa điểm trên bản đồ"
-                title="Tìm địa điểm nhanh"
+                onClick={() => {
+                  setSearchOpen((v) => !v);
+                  setQualityMenuOpen(false);
+                }}
+                aria-label="Tìm địa điểm và công ty trên bản đồ"
                 className="h-9 px-2 sm:px-2.5 rounded-xl bg-[#14120F]/92 hover:bg-[#231F19] backdrop-blur-md border border-[#3E352A] text-[#F6F1E7] text-xs font-medium inline-flex items-center gap-1.5 shadow-lg cursor-pointer"
               >
                 <Search className="w-3.5 h-3.5 text-[#D6B26E]" />
@@ -962,11 +969,37 @@ export function CareerWorldExplorePage({ onTriggerScene }: CareerWorldExplorePag
                       type="text"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Tìm địa điểm, quận, nhân vật..."
+                      placeholder="Tìm địa điểm, công ty, quận..."
                       className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-[#231F19] border border-[#3E352A] text-xs text-[#F6F1E7] placeholder:text-[#A69A87] focus:outline-none focus:border-[#D6B26E]"
                     />
                   </div>
-                  <div className="max-h-60 overflow-y-auto space-y-1">
+                  <div className="max-h-64 overflow-y-auto space-y-1">
+                    {filteredSearchBuildings.length > 0 && (
+                      <div className="px-2 pt-1 text-[10px] font-semibold uppercase tracking-wider text-[#34D399]">
+                        Công trình Doanh nghiệp
+                      </div>
+                    )}
+                    {filteredSearchBuildings.map((b) => (
+                      <button
+                        key={b.entityKey}
+                        type="button"
+                        onClick={() => handleSelectBuilding(b.entityKey, true)}
+                        className="w-full px-2.5 py-2 rounded-lg text-left flex items-center gap-2.5 hover:bg-[#231F19] text-[#F6F1E7] cursor-pointer"
+                      >
+                        <Building2 className="w-4 h-4 shrink-0 text-[#34D399]" />
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs font-semibold truncate">
+                            {b.labelName} {b.isBranch ? '(Chi nhánh)' : ''}
+                          </div>
+                          <div className="text-[11px] text-[#A69A87] truncate">
+                            Lv.{b.level} · {b.plot.districtLabelVi}
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                    <div className="px-2 pt-1 text-[10px] font-semibold uppercase tracking-wider text-[#D6B26E]">
+                      7 Địa điểm Sài Gòn
+                    </div>
                     {filteredSearchLocations.map((lv) => {
                       const Icon = LOCATION_ICONS[lv.spec.id];
                       return (
@@ -975,7 +1008,7 @@ export function CareerWorldExplorePage({ onTriggerScene }: CareerWorldExplorePag
                           type="button"
                           onClick={() => handleSelectLocation(lv.spec.id, true)}
                           className={`w-full px-2.5 py-2 rounded-lg text-left flex items-center gap-2.5 transition-colors cursor-pointer ${
-                            selectedLocId === lv.spec.id
+                            !selectedBuilding && selectedLocId === lv.spec.id
                               ? 'bg-[#2A241D] text-[#D6B26E]'
                               : 'hover:bg-[#231F19] text-[#F6F1E7]'
                           }`}
@@ -1000,19 +1033,19 @@ export function CareerWorldExplorePage({ onTriggerScene }: CareerWorldExplorePag
               type="button"
               data-testid="city-mobile-list-toggle"
               onClick={() => setMobileListOpen((v) => !v)}
-              aria-label="Danh sách địa điểm"
+              aria-label="Danh sách địa điểm và công ty"
               className="lg:hidden h-9 px-2 rounded-xl bg-[#14120F]/92 hover:bg-[#231F19] border border-[#3E352A] text-[#F6F1E7] text-xs font-medium inline-flex items-center gap-1 shadow-lg cursor-pointer"
             >
               <List className="w-3.5 h-3.5 text-[#D6B26E]" />
               <span>DS</span>
             </button>
 
-            {/* Zoom & Camera Controls */}
+            {/* Camera Zoom / Reset / Fullscreen Controls */}
             <div className="flex items-center rounded-xl bg-[#14120F]/92 backdrop-blur-md border border-[#3E352A] shadow-lg overflow-hidden">
               <button
                 type="button"
                 data-testid="city-zoom-in"
-                onClick={() => zoomBy(1.18)}
+                onClick={() => cityCanvasRef.current?.zoomBy(1.18)}
                 aria-label="Phóng to bản đồ"
                 title="Phóng to (+)"
                 className="w-8 sm:w-9 h-9 flex items-center justify-center text-[#F6F1E7] hover:bg-[#231F19] cursor-pointer"
@@ -1022,7 +1055,7 @@ export function CareerWorldExplorePage({ onTriggerScene }: CareerWorldExplorePag
               <button
                 type="button"
                 data-testid="city-zoom-out"
-                onClick={() => zoomBy(1 / 1.18)}
+                onClick={() => cityCanvasRef.current?.zoomBy(1 / 1.18)}
                 aria-label="Thu nhỏ bản đồ"
                 title="Thu nhỏ (-)"
                 className="w-8 sm:w-9 h-9 flex items-center justify-center text-[#F6F1E7] hover:bg-[#231F19] border-l border-[#3E352A] cursor-pointer"
@@ -1032,7 +1065,7 @@ export function CareerWorldExplorePage({ onTriggerScene }: CareerWorldExplorePag
               <button
                 type="button"
                 data-testid="city-reset-camera"
-                onClick={resetCamera}
+                onClick={() => cityCanvasRef.current?.resetCamera()}
                 aria-label="Đặt lại góc nhìn toàn cảnh"
                 title="Toàn cảnh (0)"
                 className="w-8 sm:w-9 h-9 flex items-center justify-center text-[#F6F1E7] hover:bg-[#231F19] border-l border-[#3E352A] cursor-pointer"
@@ -1064,30 +1097,118 @@ export function CareerWorldExplorePage({ onTriggerScene }: CareerWorldExplorePag
           </div>
         </div>
 
-        {/* DESKTOP FLOATING LOCATION PREVIEW PANEL (Right Side — Map Remains Primary Focus) */}
+        {/* MULTI-CITY PANEL FOR NON-HCMC BUSINESSES & BRANCHES (TEST 13) */}
+        {otherCitiesOpen && otherCityCount > 0 && (
+          <div
+            data-testid="city-other-cities-drawer"
+            className="absolute left-3 top-16 z-30 w-80 max-w-[calc(100%-1.5rem)] rounded-2xl border border-[#524636] bg-[#16130F]/96 backdrop-blur-md shadow-2xl p-4 space-y-3"
+          >
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-bold text-[#F6F1E7] flex items-center gap-1.5">
+                <Globe2 className="w-4 h-4 text-[#D6B26E]" />
+                <span>Doanh nghiệp ngoài TP.HCM</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOtherCitiesOpen(false)}
+                aria-label="Đóng danh sách thành phố khác"
+                className="text-[#CFC5B5] hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-[11px] text-[#A69A87] leading-relaxed">
+              Các trụ sở và chi nhánh tại thành phố khác không đặt trên bản đồ Sài Gòn 2.5D để đảm bảo chính xác địa lý.
+            </p>
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {cityAllocation.otherCityBusinesses.map((biz) => (
+                <button
+                  key={biz.id}
+                  type="button"
+                  onClick={() => openBusinessWorkspaceTab('OVERVIEW', biz.id)}
+                  className="w-full p-2.5 rounded-xl border border-[#3E352A] bg-[#201C16] hover:border-[#D6B26E] text-left cursor-pointer"
+                >
+                  <div className="flex items-center justify-between text-xs font-bold text-[#F6F1E7]">
+                    <span className="truncate">{biz.businessName}</span>
+                    <span className="text-[#D6B26E] font-mono shrink-0">{biz.cityName}</span>
+                  </div>
+                  <div className="text-[11px] text-[#A69A87] mt-0.5">
+                    Trụ sở chính · Lv.{biz.level} · {formatCR(biz.companyCashMinor)} CR
+                  </div>
+                </button>
+              ))}
+              {cityAllocation.otherCityBranches.map(({ business, branch }) => (
+                <button
+                  key={`${business.id}_${branch.id}`}
+                  type="button"
+                  onClick={() => openBusinessWorkspaceTab('GROWTH', business.id)}
+                  className="w-full p-2.5 rounded-xl border border-[#3E352A] bg-[#201C16] hover:border-[#D6B26E] text-left cursor-pointer"
+                >
+                  <div className="flex items-center justify-between text-xs font-bold text-[#F6F1E7]">
+                    <span className="truncate">{business.businessName}</span>
+                    <span className="text-[#34D399] font-mono shrink-0">{branch.cityName}</span>
+                  </div>
+                  <div className="text-[11px] text-[#A69A87] mt-0.5">
+                    Chi nhánh · {branch.locationLabel}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* DESKTOP FLOATING PANEL: COMPANY INSPECTOR OR LANDMARK PREVIEW */}
         <aside
           data-testid="city-location-preview"
-          aria-label="Chi tiết địa điểm đang chọn"
-          className="hidden lg:flex flex-col absolute right-3.5 bottom-3.5 top-16 w-[340px] max-w-[32%] rounded-2xl border border-[#524636] bg-[#16130F]/95 backdrop-blur-md shadow-2xl overflow-hidden z-20"
+          aria-label={selectedBuilding ? 'Thông tin công trình doanh nghiệp' : 'Chi tiết địa điểm đang chọn'}
+          className="hidden lg:flex flex-col absolute right-3.5 bottom-3.5 top-16 w-[344px] max-w-[32%] rounded-2xl border border-[#524636] bg-[#16130F]/95 backdrop-blur-md shadow-2xl overflow-hidden z-20"
         >
-          {renderPreviewBody(false)}
+          {selectedBuilding
+            ? renderBuildingInspector(selectedBuilding, false)
+            : renderLandmarkPreviewBody(false)}
         </aside>
 
-        {/* MOBILE ALTERNATE LOCATION LIST OVERLAY */}
+        {/* MOBILE ALTERNATE LIST OVERLAY */}
         {mobileListOpen && (
           <div className="lg:hidden absolute inset-0 z-30 bg-[#100E0C]/95 backdrop-blur-md flex flex-col">
             <div className="px-4 py-3 border-b border-[#332C23] flex items-center justify-between">
-              <div className="text-sm font-bold text-[#F6F1E7]">7 địa điểm tại Sài Gòn</div>
+              <div className="text-sm font-bold text-[#F6F1E7]">Địa điểm &amp; Công trình Sài Gòn</div>
               <button
                 type="button"
                 onClick={() => setMobileListOpen(false)}
-                aria-label="Đóng danh sách địa điểm"
+                aria-label="Đóng danh sách"
                 className="p-2 text-[#CFC5B5] cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-3 space-y-2">
+              {saigonBuildings
+                .filter((b) => b.ownership === 'OWNED' || b.ownership === 'CO_OWNED')
+                .map((b) => (
+                  <button
+                    key={b.entityKey}
+                    type="button"
+                    onClick={() => {
+                      handleSelectBuilding(b.entityKey, true);
+                      setMobileListOpen(false);
+                    }}
+                    className="w-full p-3 rounded-xl border border-[#34D399]/50 bg-[#132219] text-left flex items-center gap-3 cursor-pointer"
+                  >
+                    <span className="w-9 h-9 rounded-lg bg-[#1E3B2B] text-[#34D399] flex items-center justify-center shrink-0">
+                      <Building2 className="w-4 h-4" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-semibold text-[#F6F1E7] truncate">
+                        {b.labelName} {b.isBranch ? '(Chi nhánh)' : ''}
+                      </div>
+                      <div className="text-xs text-[#A69A87] truncate">
+                        Lv.{b.level} · {b.plot.districtLabelVi}
+                      </div>
+                    </div>
+                    <ArrowRight className="w-4 h-4 text-[#34D399] shrink-0" />
+                  </button>
+                ))}
               {locationViews.map((lv) => {
                 const Icon = LOCATION_ICONS[lv.spec.id];
                 return (
@@ -1099,7 +1220,7 @@ export function CareerWorldExplorePage({ onTriggerScene }: CareerWorldExplorePag
                       setMobileListOpen(false);
                     }}
                     className={`w-full p-3 rounded-xl border text-left flex items-center gap-3 cursor-pointer ${
-                      selectedLocId === lv.spec.id
+                      !selectedBuilding && selectedLocId === lv.spec.id
                         ? 'border-[#D6B26E] bg-[#231F19]'
                         : 'border-[#332C23] bg-[#191612]'
                     }`}
@@ -1134,13 +1255,19 @@ export function CareerWorldExplorePage({ onTriggerScene }: CareerWorldExplorePag
               onClick={() => setMobileSheetExpanded((v) => !v)}
               className="min-w-0 flex-1 flex items-center gap-2 text-left cursor-pointer"
             >
-              <MapPin className="w-4 h-4 text-[#D6B26E] shrink-0" />
+              <MapPin
+                className={`w-4 h-4 shrink-0 ${
+                  selectedBuilding ? 'text-[#34D399]' : 'text-[#D6B26E]'
+                }`}
+              />
               <div className="min-w-0">
                 <div className="text-xs font-bold text-[#F6F1E7] truncate">
-                  {selectedView.displayName}
+                  {selectedBuilding ? selectedBuilding.labelName : selectedView.displayName}
                 </div>
                 <div className="text-[11px] text-[#CFC5B5] truncate">
-                  {selectedView.spec.district} · {selectedView.stateLabel}
+                  {selectedBuilding
+                    ? `Lv.${selectedBuilding.level} · ${selectedBuilding.plot.districtLabelVi}`
+                    : `${selectedView.spec.district} · ${selectedView.stateLabel}`}
                 </div>
               </div>
               <span className="text-[#D6B26E] shrink-0 ml-auto">
@@ -1151,7 +1278,16 @@ export function CareerWorldExplorePage({ onTriggerScene }: CareerWorldExplorePag
                 )}
               </span>
             </button>
-            {!mobileSheetExpanded && selectedView.actions[0] && (
+            {!mobileSheetExpanded && selectedBuilding && selectedBuilding.canManage && (
+              <button
+                type="button"
+                onClick={() => openBusinessWorkspaceTab('OVERVIEW', selectedBuilding.businessId)}
+                className="px-3 py-2 rounded-lg bg-[#34D399] text-[#0D1A14] text-[11px] font-bold shrink-0 cursor-pointer whitespace-nowrap min-h-[36px]"
+              >
+                Quản lý
+              </button>
+            )}
+            {!mobileSheetExpanded && !selectedBuilding && selectedView.actions[0] && (
               <button
                 type="button"
                 disabled={actionBusy}
@@ -1163,11 +1299,15 @@ export function CareerWorldExplorePage({ onTriggerScene }: CareerWorldExplorePag
             )}
           </div>
           {mobileSheetExpanded && (
-            <div className="max-h-[52vh] overflow-y-auto">{renderPreviewBody(true)}</div>
+            <div className="max-h-[52vh] overflow-y-auto">
+              {selectedBuilding
+                ? renderBuildingInspector(selectedBuilding, true)
+                : renderLandmarkPreviewBody(true)}
+            </div>
           )}
         </div>
 
-        {/* SCENE-BASED ARRIVAL TRANSITION OVERLAY (~200ms) */}
+        {/* ARRIVAL TRANSITION OVERLAY */}
         {arrivalState && (
           <div
             data-testid="city-arrival-overlay"

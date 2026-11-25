@@ -1,0 +1,1316 @@
+# TRADING EMPIRE — BUILD YOUR EMPIRE
+## DYNAMIC BUILDINGS, UNIQUE BUSINESS ASSETS & CITY-BUILDING EXPERIENCE
+
+# 01. VAI TRÒ
+
+Bạn là đội ngũ phát triển game chuyên nghiệp gồm:
+
+- Game Director.
+- Art Director.
+- City Builder Game Designer.
+- Technical Artist.
+- Environment Designer.
+- Gameplay Programmer.
+- Senior React & TypeScript Engineer.
+- UI/UX Designer.
+- Game QA Engineer.
+
+Hãy tiếp tục nâng cấp Trading Empire hiện tại.
+
+Repository:
+
+https://github.com/Tranloc2009/Trade-game
+
+Tái sử dụng bộ UI UX Pro Max đã lưu tại docs/ui-ux-pro-max/.
+
+Tham khảo nguyên tắc thiết kế môi trường và cảm giác tiến triển của các game City Builder, Business Tycoon và Strategy RPG.
+
+Không sao chép mã nguồn, hình ảnh hoặc tài sản có bản quyền của các trò chơi khác.
+
+# 02. VẤN ĐỀ HIỆN TẠI
+
+Trading Empire vẫn chưa tạo được cảm giác người chơi đang trực tiếp xây dựng một đế chế kinh doanh.
+
+Các vấn đề quan trọng:
+
+1. Trong Wizard thành lập doanh nghiệp, nhiều loại hình kinh doanh sử dụng cùng một ảnh.
+2. Xe cà phê, quán cà phê, tiệm trà sữa, quán ăn Việt Nam, nhà hàng và nhà hàng cao cấp nhìn gần như giống hệt nhau.
+3. Các doanh nghiệp cùng nhóm ngành không có bản sắc thị giác riêng.
+4. Khi thành lập doanh nghiệp, người chơi chủ yếu nhìn thấy số dư thay đổi và một doanh nghiệp mới trong danh sách.
+5. Bản đồ chưa thể hiện đầy đủ sự phát triển của từng doanh nghiệp.
+6. Nâng cấp công ty chủ yếu thay đổi cấp độ và số liệu.
+7. Mở chi nhánh chưa tạo cảm giác doanh nghiệp đang mở rộng trên thế giới game.
+8. Người chơi chưa có cảm giác sở hữu một công trình thực sự.
+
+Tôi không muốn một ứng dụng quản lý tài chính có thêm bản đồ trang trí.
+
+Tôi muốn một trò chơi xây dựng đế chế kinh doanh, trong đó các quyết định kinh tế tạo ra thay đổi hữu hình trong thành phố.
+
+# 03. MỤC TIÊU CỐT LÕI
+
+Khi người chơi thành lập quán cà phê:
+
+- Chọn loại hình kinh doanh.
+- Nhìn thấy hình ảnh riêng của quán cà phê.
+- Chọn địa điểm kinh doanh.
+- Xem trước công trình.
+- Xác nhận thành lập.
+- Server thực hiện nghiệp vụ hiện có.
+- Sau khi thành công, công trình xuất hiện trên bản đồ.
+- Tên doanh nghiệp xuất hiện trên công trình.
+- Người chơi có thể nhấn vào công trình để quản lý.
+- Khi nâng cấp, công trình phát triển về mặt hình ảnh.
+- Khi mở chi nhánh, bản đồ xuất hiện thêm một công trình.
+
+Đây phải là gameplay thực sự, không phải animation chạy trên dữ liệu giả.
+
+# 04. KIỂM TRA MÃ NGUỒN TRƯỚC KHI TRIỂN KHAI
+
+Kiểm tra các file và module hiện có:
+
+- src/features/career/careerAssets.ts
+- src/features/career/pages/CareerWorldExplorePage.tsx
+- src/features/career/pages/CareerHomePage.tsx
+- src/features/v4/BusinessEmpirePage.tsx
+- src/components/feedback/GameFeedbackModal.tsx
+- src/lib/navigation.ts
+- locationRegistry.ts nếu đã được triển khai.
+- src/store/useAppStore.ts
+- shared/contracts/v4.ts
+- Business catalog phía server.
+- Business creation response.
+- Business upgrade response.
+- Branch creation response.
+- Company ownership.
+- City configuration.
+
+Xác định phiên bản nào thực sự đang được App.tsx render.
+
+Trước đây đã xảy ra tình trạng báo cáo hoàn thành nhưng Preview vẫn hiển thị bản đồ cũ.
+
+Không được lặp lại tình trạng đó.
+
+Nếu Living World 2.0 chưa xuất hiện trong Preview, xác minh và sửa việc tích hợp trước khi xây dựng hệ thống công trình động.
+
+# 05. UNIQUE BUSINESS VISUAL ASSETS
+
+## 05.1. Loại bỏ cơ chế sử dụng một hình ảnh chung cho cả ngành
+
+Hiện getIndustryImageUrl có thể trả về cùng một ảnh cho toàn bộ nhóm FNB, RETAIL hoặc TECHNOLOGY.
+
+Không sử dụng cơ chế đó làm nguồn hình ảnh chính trong Wizard.
+
+Tạo hệ thống mới dựa trên ID loại hình kinh doanh thực tế trong catalog.
+
+Ví dụ:
+
+getBusinessVisual(businessTypeId, businessLevel, context)
+
+Context có thể gồm:
+
+- CATALOG.
+- MAP.
+- BUSINESS_OVERVIEW.
+- OPENING_CINEMATIC.
+- UPGRADE_PREVIEW.
+
+Phải kiểm tra đúng ID hiện có trong repository.
+
+Không tự đổi ID ngành nghề hoặc tạo catalog tài chính mới.
+
+Không sửa mức vốn tối thiểu, doanh thu, chi phí hoặc điều kiện thành lập chỉ để phù hợp với hình ảnh.
+
+## 05.2. Business Visual Registry
+
+Tạo một nguồn ánh xạ tài nguyên thống nhất.
+
+Ví dụ cấu trúc:
+
+src/features/business-visuals/
+
+- businessVisualRegistry.ts
+- buildingArchetypes.ts
+- buildingTiers.ts
+- businessAssetResolver.ts
+- components/
+- tests/
+
+Mỗi loại hình kinh doanh có thể chứa:
+
+- businessTypeId.
+- displayName.
+- catalogImage.
+- buildingArchetype.
+- mapSpriteVariants.
+- levelVisualVariants.
+- interiorImage.
+- openingSceneImage.
+- upgradePreviewImage.
+- fallbackAsset.
+- assetStatus.
+
+Mọi tên và ID phải được đối chiếu với catalog hiện có.
+
+Không phân loại ngành nghề chỉ bằng cách đoán từ tên tiếng Việt.
+
+## 05.3. Phạm vi hình ảnh
+
+Audit toàn bộ danh mục ngành nghề thực tế, dự kiến khoảng 38 loại hình theo phiên bản trước.
+
+Mỗi loại hình phải có ảnh catalog riêng biệt về nội dung.
+
+Không được sử dụng cùng một ảnh rồi chỉ:
+
+- Đổi độ sáng.
+- Crop lại.
+- Đổi màu.
+- Thêm tên khác.
+- Thay icon.
+- Áp dụng gradient khác.
+
+Đó không được tính là hình ảnh riêng.
+
+Có thể dùng chung một kiến trúc sprite cơ sở giữa những doanh nghiệp tương đồng, nhưng phải có chi tiết thị giác giúp nhận diện loại hình.
+
+# 06. ART DIRECTION CHO TỪNG LOẠI HÌNH
+
+## 06.1. Xe cà phê mang đi
+
+- Quầy cà phê nhỏ.
+- Xe đẩy hoặc kiosk.
+- Máy pha cà phê.
+- Mái che.
+- Vỉa hè hoặc mặt bằng nhỏ.
+- Không gian kinh doanh tiết kiệm.
+
+Không sử dụng hình ảnh nhà hàng hoặc quán cà phê cao cấp.
+
+## 06.2. Quán cà phê
+
+- Mặt tiền riêng.
+- Cửa kính lớn.
+- Bàn ghế.
+- Nội thất gỗ.
+- Cây xanh.
+- Không khí phù hợp một quán cà phê Việt Nam hiện đại.
+
+## 06.3. Tiệm trà sữa
+
+- Mặt tiền trẻ trung.
+- Quầy pha chế.
+- Màu nhận diện sáng hơn.
+- Khu vực chờ khách.
+- Kiến trúc khác quán cà phê.
+
+## 06.4. Quán ăn Việt Nam
+
+- Mặt bằng gần gũi.
+- Không gian ăn uống.
+- Bàn ghế phổ thông.
+- Kiến trúc nhà phố Việt Nam.
+- Khu vực phục vụ khách hàng rõ ràng.
+
+## 06.5. Nhà hàng
+
+- Diện tích lớn hơn.
+- Khu vực tiếp khách.
+- Nội thất chuyên nghiệp.
+- Mặt tiền rộng.
+- Không gian phục vụ có tổ chức.
+
+## 06.6. Nhà hàng cao cấp
+
+- Kiến trúc sang trọng.
+- Lối vào riêng.
+- Kính lớn.
+- Đèn nội thất tinh tế.
+- Không gian fine dining.
+- Có thể có khu vực đón khách hoặc sân vườn.
+
+Nhìn hình ảnh phải thấy ngay sự khác biệt về quy mô so với quán ăn bình thường.
+
+## 06.7. Bán lẻ
+
+Đối chiếu các loại hình Retail thực tế.
+
+Ví dụ:
+
+- Cửa hàng tiện lợi.
+- Siêu thị.
+- Cửa hàng thời trang.
+- Cửa hàng điện tử.
+- Showroom.
+
+Mỗi loại hình cần mặt tiền, cách bố trí và đặc điểm nhận diện riêng.
+
+## 06.8. Công nghệ
+
+- Startup nhỏ: văn phòng nhỏ hoặc coworking.
+- Công ty phần mềm: văn phòng hiện đại.
+- Doanh nghiệp công nghệ lớn: khuôn viên hoặc tòa nhà công nghệ.
+- Trung tâm dữ liệu nếu có trong catalog: công trình kỹ thuật phù hợp.
+
+## 06.9. Logistics và sản xuất
+
+Tùy theo catalog thực tế:
+
+- Kho hàng.
+- Trung tâm phân phối.
+- Xưởng sản xuất.
+- Nhà máy.
+- Khu công nghiệp.
+- Cơ sở vận tải.
+
+Không sử dụng ảnh văn phòng chung cho tất cả.
+
+## 06.10. Khách sạn và dịch vụ lưu trú
+
+- Cơ sở lưu trú nhỏ.
+- Khách sạn trung cấp.
+- Khách sạn cao cấp.
+- Khu nghỉ dưỡng nếu có.
+
+Quy mô, số tầng và kiến trúc cần thể hiện đúng loại hình.
+
+## 06.11. Tài chính
+
+Tùy thuộc các loại hình có thật trong engine:
+
+- Văn phòng tư vấn.
+- Công ty đầu tư.
+- Công ty tài chính.
+- Trụ sở tổ chức tài chính.
+
+Không biến mọi doanh nghiệp tài chính mới thành lập thành một tòa nhà chọc trời.
+
+## 06.12. Bất động sản
+
+- Văn phòng môi giới.
+- Văn phòng phát triển dự án.
+- Trụ sở tập đoàn bất động sản.
+- Công trình bất động sản tương ứng nếu hệ thống hỗ trợ.
+
+Tất cả công trình phải phù hợp với dữ liệu sở hữu thực tế.
+
+# 07. TẠO HỆ THỐNG ASSET CHUYÊN NGHIỆP
+
+Mỗi doanh nghiệp sử dụng hai loại hình ảnh chính.
+
+## A. Catalog Art
+
+Dùng trong Wizard thành lập doanh nghiệp, danh sách ngành nghề và phần giới thiệu.
+
+Yêu cầu:
+
+- Góc nhìn mặt tiền hoặc không gian đặc trưng.
+- Tỷ lệ ảnh thống nhất, ưu tiên 16:9 hoặc 4:3.
+- Độ sáng tự nhiên.
+- Kiến trúc Việt Nam hiện đại.
+- Không có chữ hoặc logo AI bị lỗi.
+- Không có watermark.
+- Không có UI được vẽ trực tiếp lên ảnh.
+- Không dùng một ảnh chung cho toàn bộ ngành.
+
+## B. Map Building Sprite
+
+Dùng để hiển thị công trình trên bản đồ.
+
+Yêu cầu:
+
+- Isometric 2.5D.
+- Cùng góc camera.
+- Cùng hướng chiếu sáng.
+- Cùng tỷ lệ tương đối.
+- Cùng quy tắc phối cảnh.
+- Nền trong suốt nếu sử dụng sprite raster.
+- Điểm neo ở chân công trình.
+- Đổ bóng nhất quán.
+- Có thể nhận diện khi thu nhỏ.
+- Không có chữ được vẽ trực tiếp lên asset.
+
+Tên công ty, cấp độ, nhãn HQ và trạng thái phải được render bằng React.
+
+Không nhúng các thông tin này vào ảnh.
+
+# 08. PHƯƠNG ÁN TẠO ASSET
+
+Nếu môi trường AI Studio thực sự có khả năng tạo hình ảnh, sử dụng công cụ đó để tạo asset riêng.
+
+Không yêu cầu người dùng mua API hoặc nhập API key.
+
+Không gọi công cụ tạo ảnh mỗi lần người chơi thành lập doanh nghiệp.
+
+Tất cả asset được tạo trong giai đoạn phát triển và lưu vào project.
+
+Nếu không thể tạo đủ ảnh:
+
+- Triển khai bộ asset ưu tiên trước.
+- Xây dựng sprite vector có chất lượng và phong cách thống nhất.
+- Ghi rõ asset nào hoàn chỉnh.
+- Ghi rõ asset nào còn thiếu.
+- Không báo cáo đã tạo 38 ảnh riêng nếu thực tế vẫn sử dụng tám ảnh chung.
+
+Không thay thế ảnh thật bằng emoji hoặc icon đơn giản rồi đánh dấu hoàn thành.
+
+# 09. PROMPT MẪU ĐỂ TẠO HÌNH ẢNH CATALOG
+
+Sử dụng mô tả sau làm base prompt, thay đổi nội dung theo từng businessTypeId.
+
+Premium realistic architectural environment concept art for a modern Vietnamese business tycoon video game, depicting a specific small business storefront in Ho Chi Minh City. Distinct business identity, realistic architectural proportions, thoughtfully designed entrance, detailed materials, warm natural daylight, clean cinematic composition, sophisticated atmosphere, grounded contemporary Vietnamese urban architecture, high visual clarity. No UI, no watermark, no fictional text, no floating icons, no misleading luxury elements. Consistent visual direction across the full business catalog.
+
+Ví dụ cho xe cà phê:
+
+A compact Vietnamese takeaway coffee cart with a small wooden counter, espresso equipment, modest canopy and takeaway cups on a clean urban sidewalk. Affordable startup business scale. No large indoor dining area.
+
+Ví dụ cho quán cà phê:
+
+A distinctive independent Vietnamese coffee shop occupying a small urban shophouse, glass facade, warm wood furniture, indoor plants, welcoming entrance, realistic medium-sized business.
+
+Ví dụ cho tiệm trà sữa:
+
+A youthful contemporary bubble tea storefront with a compact beverage preparation counter, bright neutral pastel palette, takeaway area and modern Vietnamese street architecture.
+
+Ví dụ cho nhà hàng cao cấp:
+
+An elegant high-end Vietnamese fine dining restaurant with refined contemporary architecture, premium materials, landscaped entrance, sophisticated warm lighting and upscale dining atmosphere.
+
+Mỗi loại hình phải có phần mô tả riêng.
+
+# 10. PROMPT MẪU CHO MAP BUILDING SPRITE
+
+Create an individual isometric 2.5D building asset for a premium Vietnamese city-building business simulation game.
+
+Subject: [SPECIFIC BUSINESS TYPE].
+
+Development tier: [STARTUP / ESTABLISHED / FLAGSHIP / EMPIRE].
+
+Consistent three-quarter top-down isometric projection, approximately 30-degree horizontal axes, realistic building proportions, coherent roof and facade geometry, detailed but readable miniature architecture, natural warm daylight from the upper left, subtle ambient shadows, modern Vietnamese urban design.
+
+The building must be fully visible and isolated, with a transparent background or a clean removable background.
+
+No text, no labels, no UI, no surrounding city, no watermark, no exaggerated perspective, no oversized decorative objects.
+
+All building assets must align with a shared map grid and use the same camera and lighting direction.
+
+Tạo một visual reference chuẩn trước khi tạo các công trình còn lại để tránh mỗi sprite có một góc nhìn khác nhau.
+
+# 11. BUILDING ARCHETYPES
+
+Tạo khoảng 8–12 nhóm kiến trúc dùng chung có thể mở rộng.
+
+Ví dụ:
+
+- STREET_KIOSK.
+- CAFE_SHOPHOUSE.
+- RESTAURANT.
+- RETAIL_STORE.
+- COMMERCIAL_SHOWROOM.
+- STARTUP_OFFICE.
+- OFFICE_TOWER.
+- INDUSTRIAL_FACILITY.
+- LOGISTICS_WAREHOUSE.
+- HOTEL.
+- CORPORATE_HQ.
+- MIXED_USE_COMPLEX.
+
+Các archetype là nhóm kiến trúc thị giác, không phải loại hình tài chính mới.
+
+Từng businessTypeId ánh xạ tới archetype phù hợp.
+
+Ví dụ:
+
+Xe cà phê → STREET_KIOSK.
+
+Quán cà phê → CAFE_SHOPHOUSE.
+
+Nhà hàng → RESTAURANT.
+
+Công ty phần mềm → STARTUP_OFFICE hoặc OFFICE_TOWER tùy cấp.
+
+Không yêu cầu tạo một engine kinh tế mới cho mỗi archetype.
+
+# 12. BUILDING DEVELOPMENT TIERS
+
+Business Engine hiện có nhiều cấp độ doanh nghiệp.
+
+Không thay đổi hệ thống level hiện tại.
+
+Ánh xạ các cấp thực tế sang bốn giai đoạn hình ảnh.
+
+Đề xuất nếu engine vẫn sử dụng 10 cấp:
+
+- Tier I: Level 1–2.
+- Tier II: Level 3–5.
+- Tier III: Level 6–8.
+- Tier IV: Level 9–10.
+
+Kiểm tra cấu trúc level thực tế trước khi áp dụng.
+
+## Quán cà phê
+
+Tier I:
+
+Quán nhỏ, mặt tiền đơn giản.
+
+Tier II:
+
+Quán lớn hơn, có thêm chỗ ngồi và cây xanh.
+
+Tier III:
+
+Cửa hàng flagship, kiến trúc chuyên nghiệp.
+
+Tier IV:
+
+Công trình biểu tượng của thương hiệu, quy mô phù hợp ngành cà phê.
+
+## Cửa hàng bán lẻ
+
+Tier I:
+
+Cửa hàng nhỏ.
+
+Tier II:
+
+Cửa hàng lớn, trưng bày chuyên nghiệp.
+
+Tier III:
+
+Showroom hoặc trung tâm bán lẻ.
+
+Tier IV:
+
+Flagship thương hiệu hoặc khu thương mại nếu phù hợp.
+
+## Công ty công nghệ
+
+Tier I:
+
+Văn phòng startup nhỏ.
+
+Tier II:
+
+Văn phòng nhiều tầng hoặc diện tích lớn hơn.
+
+Tier III:
+
+Trung tâm công nghệ.
+
+Tier IV:
+
+Trụ sở hoặc campus hiện đại.
+
+## Nhà máy
+
+Tier I:
+
+Xưởng nhỏ.
+
+Tier II:
+
+Nhà xưởng mở rộng.
+
+Tier III:
+
+Nhà máy chuyên nghiệp.
+
+Tier IV:
+
+Tổ hợp sản xuất lớn.
+
+## Khách sạn
+
+Tier I:
+
+Cơ sở quy mô nhỏ phù hợp loại hình.
+
+Tier II:
+
+Khách sạn mở rộng.
+
+Tier III:
+
+Công trình cao cấp.
+
+Tier IV:
+
+Khách sạn flagship hoặc tổ hợp nghỉ dưỡng phù hợp.
+
+Không áp dụng quy tắc mọi ngành đều biến thành skyscraper.
+
+# 13. CITY MAP ARCHITECTURE
+
+Bản đồ phải có hai lớp chính.
+
+## Static City Layer
+
+Bao gồm:
+
+- Sông Sài Gòn.
+- Đường phố.
+- Cầu.
+- Công viên.
+- Khu dân cư.
+- Khu tài chính.
+- Khu thương mại.
+- Khu công nghiệp.
+- Công trình cảnh quan.
+
+Lớp này tạo nên môi trường chung.
+
+## Dynamic Building Layer
+
+Bao gồm:
+
+- Doanh nghiệp người chơi.
+- Trụ sở chính.
+- Chi nhánh.
+- Công trình thuộc doanh nghiệp góp vốn chung.
+- Công trình đối thủ nếu dữ liệu cho phép.
+
+Dynamic Building Layer render từ trạng thái doanh nghiệp thật.
+
+Không vẽ trước công ty người chơi vào background rồi chỉ đổi tên.
+
+Mỗi công trình cần có định danh duy nhất gắn với business ID hoặc branch ID.
+
+Công ty biến mất, nâng cấp hoặc đổi trạng thái phải được phản ánh đúng trên bản đồ.
+
+# 14. BUILDING PLOTS — HỆ THỐNG VỊ TRÍ CÔNG TRÌNH
+
+Tạo hệ thống vị trí xây dựng trên bản đồ.
+
+Mỗi plot có thể gồm:
+
+- plotId.
+- mapId.
+- cityId.
+- districtId.
+- anchorX.
+- anchorY.
+- footprintWidth.
+- footprintHeight.
+- supportedArchetypes.
+- visualCapacity.
+- orientation.
+
+Các plot phải nằm trên vùng đất phù hợp.
+
+Không đặt nhà máy giữa sông.
+
+Không đặt tòa nhà đè lên đường phố.
+
+Không đặt cửa hàng lên cầu.
+
+Không để hai doanh nghiệp cùng sử dụng một vị trí khi hiển thị cạnh nhau.
+
+Không tự động tạo thêm chi phí mua đất nếu Business Engine chưa có cơ chế đó.
+
+Plot trong phiên bản này chỉ là vị trí thể hiện trực quan của doanh nghiệp.
+
+Nếu engine không lưu vị trí chính xác, dùng cơ chế phân bổ ổn định từ business ID và city ID, hoặc lưu mapping trình bày riêng theo world/save nếu phù hợp kiến trúc hiện có.
+
+Không sinh tọa độ ngẫu nhiên mỗi lần render.
+
+Không khiến công ty đổi chỗ khi reload.
+
+Không tuyên bố hệ thống plot là quyền sở hữu đất có thẩm quyền nếu backend chưa hỗ trợ.
+
+Nếu cần persistence phía server để lưu vị trí chính xác, ghi blocker và bàn giao cho Codex.
+
+# 15. CITY LOCATION SELECTION
+
+Trong Wizard thành lập công ty, nâng cấp bước chọn địa điểm.
+
+Hiển thị:
+
+- Thành phố.
+- Khu vực phù hợp nếu có dữ liệu.
+- Hình ảnh môi trường kinh doanh.
+- Công trình xem trước.
+- Chi phí theo engine.
+- Vốn còn lại.
+- Điều kiện thành lập.
+
+Nếu người chơi chọn thành phố khác TP.HCM, không tự động đặt công trình ở bản đồ Sài Gòn.
+
+Tôn trọng cityId hiện có.
+
+Nếu chưa có bản đồ trực quan cho thành phố khác:
+
+- Hiển thị thành phố trong danh sách thế giới.
+- Hiển thị doanh nghiệp tương ứng.
+- Cho phép mở trang quản lý.
+- Ghi rõ bản đồ chi tiết chưa được hỗ trợ.
+
+Không giả tạo bản đồ tám thành phố bằng cách dùng chung ảnh Sài Gòn rồi đổi tên.
+
+# 16. NÂNG CẤP WIZARD THÀNH LẬP DOANH NGHIỆP
+
+Giữ quy trình ba bước hiện có.
+
+## BƯỚC 1 — CHỌN LOẠI HÌNH KINH DOANH
+
+Mỗi thẻ bao gồm:
+
+- Hình ảnh riêng.
+- Tên doanh nghiệp.
+- Mô tả ngắn.
+- Vốn tối thiểu.
+- Đặc điểm kinh doanh.
+- Trạng thái đủ vốn hoặc chưa đủ vốn.
+
+Tất cả dữ liệu chi phí lấy từ catalog hiện có.
+
+Bổ sung:
+
+- Tìm kiếm theo tên.
+- Bộ lọc ngành.
+- Bộ lọc phù hợp ngân sách.
+- Sắp xếp theo vốn tối thiểu.
+
+Mặc định không hiển thị hàng chục thẻ khiến người chơi phải cuộn quá dài.
+
+Có thể phân nhóm ngành ở thanh điều hướng ngang.
+
+Không tự đặt nhãn lợi nhuận cao hoặc rủi ro thấp nếu engine không có dữ liệu hỗ trợ.
+
+## BƯỚC 2 — THIẾT KẾ DOANH NGHIỆP
+
+Người chơi nhập:
+
+- Tên công ty.
+- Thành phố.
+- Hình thức sở hữu nếu hỗ trợ.
+
+Bên cạnh biểu mẫu phải có bản xem trước công trình.
+
+Tên công ty được hiển thị bằng HTML trên biển hiệu hoặc nhãn cạnh công trình.
+
+Không tạo ảnh mới bằng AI chỉ vì người chơi đổi tên.
+
+Nếu cần tùy chỉnh nhận diện thương hiệu, sử dụng màu sắc có sẵn trong frontend và không thay đổi dữ liệu tài chính.
+
+## BƯỚC 3 — XÁC NHẬN XÂY DỰNG
+
+Hiển thị rõ:
+
+- Công trình sắp thành lập.
+- Loại hình kinh doanh.
+- Chi phí thực tế.
+- Vốn góp.
+- Số tiền khả dụng hiện tại.
+- Số tiền còn lại sau giao dịch.
+- Địa điểm kinh doanh.
+
+CTA:
+
+THÀNH LẬP DOANH NGHIỆP.
+
+Không trừ tiền hoặc spawn công trình trước khi backend xác nhận.
+
+Vô hiệu hóa nút trong khi yêu cầu đang xử lý để tránh thao tác lặp.
+
+Nếu thành lập thất bại, giữ dữ liệu biểu mẫu và giải thích lỗi.
+
+# 17. BUILDING SPAWN EXPERIENCE
+
+Khi backend xác nhận tạo công ty thành công:
+
+1. Cập nhật danh sách doanh nghiệp.
+2. Cập nhật ví và trạng thái game từ nguồn có thẩm quyền.
+3. Xác định business ID vừa được tạo.
+4. Xác định thành phố và vị trí hiển thị phù hợp.
+5. Đưa công trình vào Dynamic Building Layer.
+6. Hiển thị màn hình khai trương.
+7. Cho phép người chơi nhấn Xem công trình trên bản đồ.
+8. Di chuyển camera đến công trình vừa thành lập.
+
+Tái sử dụng GameFeedbackModal hiện có.
+
+Màn hình khai trương nên có:
+
+- Hình ảnh doanh nghiệp.
+- Tên công ty.
+- Địa điểm.
+- Cấp độ hiện tại.
+- Chi phí thành lập thật.
+- NPC phản hồi nếu có nội dung hợp lệ.
+
+Hai CTA:
+
+- Xem công trình.
+- Bắt đầu kinh doanh.
+
+Không tự hoàn thành nhiệm vụ bằng animation.
+
+StoryDirector vẫn xác nhận tiến trình theo nghiệp vụ thực tế.
+
+# 18. BUILDING CONSTRUCTION ANIMATION
+
+Sau khi server xác nhận thành lập, có thể trình bày công trình bằng một animation ngắn.
+
+Ví dụ:
+
+- Camera di chuyển đến vị trí xây dựng.
+- Vùng đất được đánh dấu nhẹ.
+- Công trình xuất hiện dần từ chân lên.
+- Bóng công trình ổn định.
+- Tên doanh nghiệp xuất hiện.
+- Hiệu ứng khai trương.
+
+Thời lượng mục tiêu khoảng 1–2 giây.
+
+Có thể bỏ qua.
+
+Đây chỉ là hiệu ứng trình bày, không phải thời gian xây dựng kinh tế mới.
+
+Nếu Business Engine có thời gian xây dựng hoặc nâng cấp thực tế, sử dụng trạng thái đó.
+
+Không tạo thanh thi công giả hoặc bắt người chơi chờ thêm chỉ để xem hiệu ứng.
+
+Hỗ trợ reduced motion.
+
+Không phát lại animation mỗi khi reload bản đồ.
+
+# 19. BUILDING UPGRADE SYSTEM
+
+Khi người chơi nâng cấp doanh nghiệp:
+
+- Kiểm tra level trước và sau.
+- Kiểm tra trạng thái pendingUpgrade.
+- Kiểm tra thời điểm nâng cấp hoàn thành theo GameClock nếu có.
+
+Nếu quá trình nâng cấp đang diễn ra:
+
+- Giữ hình ảnh công trình hiện tại.
+- Có thể hiển thị giàn giáo hoặc trạng thái đang nâng cấp.
+- Hiển thị thời gian còn lại từ dữ liệu thật.
+
+Khi engine xác nhận nâng cấp hoàn thành:
+
+- Cập nhật level.
+- Thay đổi sprite nếu đã đạt tier hình ảnh mới.
+- Hiển thị hiệu ứng chuyển đổi công trình.
+- Cập nhật thông tin doanh nghiệp.
+
+Không đổi công trình sang cấp cao hơn ngay khi yêu cầu nâng cấp chưa hoàn tất.
+
+Không tự tăng cấp độ bằng frontend.
+
+Không tạo chi phí nâng cấp mới.
+
+# 20. BRANCH SYSTEM — MẠNG LƯỚI CHI NHÁNH
+
+Mỗi chi nhánh phải có hình ảnh riêng trên bản đồ nếu dữ liệu engine hỗ trợ.
+
+Ví dụ người chơi sở hữu:
+
+Saigon Coffee — Trụ sở chính.
+
+Saigon Coffee — Chi nhánh Quận 3.
+
+Saigon Coffee — Chi nhánh Thủ Đức.
+
+Khi mở chi nhánh:
+
+- Tái sử dụng brand identity.
+- Hiển thị công trình tại thành phố phù hợp.
+- Gắn nhãn Chi nhánh.
+- Liên kết tới business ID của công ty mẹ.
+- Liên kết tới branch ID nếu có.
+
+HQ và chi nhánh phải dễ phân biệt.
+
+Không biến chi nhánh thành một công ty độc lập mới.
+
+Không nhân đôi tài sản, định giá, doanh thu hoặc quyền sở hữu.
+
+Nếu chưa có dữ liệu cấp độ riêng cho chi nhánh, sử dụng visual variant phù hợp nhưng không hiển thị level giả.
+
+# 21. COMPANY OWNERSHIP ON MAP
+
+Công trình của người chơi:
+
+- Viền chọn nhẹ.
+- Nhãn tên thương hiệu.
+- Biểu tượng sở hữu khi cần.
+- Có thể quản lý trực tiếp.
+
+Công trình đồng sở hữu:
+
+- Nhãn doanh nghiệp chung.
+- Hiển thị tỷ lệ sở hữu thực tế.
+- Hiển thị vai trò CEO, cổ đông hoặc đồng sáng lập.
+
+Công trình NPC:
+
+- Màu trung tính.
+- Chỉ hiển thị thông tin được phép công khai.
+- Không gắn nhãn sở hữu của người chơi.
+
+Công trình đối thủ:
+
+- Có thể hiển thị tên và trạng thái công khai.
+- Không cung cấp thông tin tài chính riêng tư không được server cho phép.
+
+Không chỉ dựa vào tên tài khoản để xác định quyền sở hữu.
+
+Sử dụng định danh và quyền hạn thật từ backend.
+
+# 22. TƯƠNG TÁC TRỰC TIẾP VỚI TÒA NHÀ
+
+Khi nhấn vào công trình do người chơi sở hữu, mở Company Inspector.
+
+Hiển thị:
+
+- Ảnh công trình.
+- Tên doanh nghiệp.
+- Ngành nghề.
+- Cấp độ.
+- Trạng thái hoạt động.
+- Địa điểm.
+- Tiền mặt doanh nghiệp.
+- Doanh thu kỳ gần nhất.
+- Lợi nhuận kỳ gần nhất.
+- Số nhân viên.
+- Tình trạng nâng cấp.
+
+CTA chính:
+
+QUẢN LÝ DOANH NGHIỆP.
+
+Các thao tác phụ:
+
+- Xem báo cáo.
+- Tuyển nhân viên.
+- Nâng cấp.
+- Xem chi nhánh.
+
+Mỗi thao tác phải mở đúng company ID.
+
+Không mở công ty đầu tiên trong danh sách nếu người chơi vừa chọn một công trình khác.
+
+Không cho phép người chơi quản lý công trình không có quyền điều hành.
+
+# 23. LIVING BUILDINGS
+
+Tòa nhà cần phản ánh tình trạng hoạt động của doanh nghiệp.
+
+Ví dụ:
+
+Đang hoạt động:
+
+- Công trình hiển thị bình thường.
+- Ban đêm có ánh sáng cửa sổ.
+
+Đang nâng cấp:
+
+- Hiệu ứng thi công nhẹ.
+- Trạng thái nâng cấp.
+
+Tạm ngừng hoạt động:
+
+- Giảm ánh sáng.
+- Hiển thị trạng thái tạm ngừng.
+
+Đang gặp khó khăn:
+
+- Biểu tượng cảnh báo nhỏ nếu dữ liệu tài chính xác nhận.
+- Có thể mở giải thích nguyên nhân.
+
+Phá sản:
+
+- Hiển thị trạng thái thực tế từ engine.
+- Không tự động xóa công trình hoặc tài sản nếu nghiệp vụ chưa quy định.
+
+Không tự tạo lượng khách hàng giả như số liệu kinh doanh thật.
+
+Có thể dùng nhân vật hoặc phương tiện trang trí để tăng không khí, nhưng phải tách biệt khỏi simulation.
+
+# 24. DAY & NIGHT VISUALS
+
+Sử dụng GameClock hiện có.
+
+Buổi sáng:
+
+- Ánh sáng ấm nhẹ.
+- Thành phố bắt đầu ngày mới.
+
+Buổi trưa:
+
+- Công trình rõ nét.
+- Màu sắc tự nhiên.
+
+Hoàng hôn:
+
+- Ánh sáng vàng.
+- Bóng đổ dài hơn nếu phù hợp.
+
+Ban đêm:
+
+- Đèn đường.
+- Ánh sáng công trình.
+- Mặt nước và không khí đô thị.
+
+Không cần render bóng động phức tạp.
+
+Có thể sử dụng lighting overlay hoặc sprite night variant.
+
+Không phủ toàn bộ bản đồ bằng lớp màu đen khiến không nhìn thấy kiến trúc.
+
+Không thay đổi công thức vận hành doanh nghiệp theo hiệu ứng thị giác.
+
+# 25. MAP CAMERA & SCALE
+
+Bản đồ phải hỗ trợ:
+
+- Pan.
+- Zoom in.
+- Zoom out.
+- Reset camera.
+- Focus doanh nghiệp.
+- Focus nhiệm vụ.
+- Focus chi nhánh.
+- Fullscreen nếu phù hợp.
+
+Sử dụng một hệ tọa độ chung cho bản đồ và công trình.
+
+Khi camera zoom, toàn bộ background, sprite, hitbox và marker phải di chuyển đồng bộ.
+
+Không để công trình trượt khỏi vị trí.
+
+Render theo thứ tự chiều sâu phù hợp, ưu tiên vị trí chân công trình để tránh các tòa nhà phía sau đè lên sai thứ tự.
+
+Trên mobile:
+
+- Chạm để chọn.
+- Kéo để di chuyển.
+- Nút zoom dễ sử dụng.
+- Bottom sheet quản lý công trình.
+- Không để menu che toàn bộ thành phố.
+
+# 26. PROGRESSION — CẢM NHẬN ĐẾ CHẾ ĐANG LỚN LÊN
+
+Người chơi bắt đầu với một căn hộ và chưa sở hữu doanh nghiệp.
+
+Sau khi thành lập quán cà phê:
+
+Thành phố xuất hiện công trình đầu tiên.
+
+Sau khi mở chi nhánh:
+
+Thành phố xuất hiện thêm cơ sở.
+
+Sau khi phát triển nhiều ngành:
+
+Bản đồ hiển thị nhiều loại công trình khác nhau.
+
+Khi sở hữu tập đoàn:
+
+Nếu engine xác nhận có trụ sở hoặc tài sản tương ứng, hiển thị công trình trụ sở phù hợp.
+
+Không tự cấp tòa nhà HQ chỉ vì tài sản ròng vượt một mốc.
+
+Tất cả sự phát triển phải dựa trên quyền sở hữu, level và nghiệp vụ đã được xác nhận.
+
+Mục tiêu là người chơi nhìn bản đồ và nhận ra hành trình mà mình đã xây dựng.
+
+# 27. BUSINESS OVERVIEW REDESIGN
+
+Đồng bộ hình ảnh trong ba khu vực:
+
+- Wizard chọn loại hình.
+- Bản đồ.
+- Trang quản lý doanh nghiệp.
+
+Khi người chơi mở trang công ty, hình ảnh phải tương ứng với loại hình và giai đoạn phát triển.
+
+Ưu tiên:
+
+- Công trình.
+- Tình trạng hoạt động.
+- Lợi nhuận.
+- Công suất.
+- Việc cần xử lý.
+
+Các báo cáo chuyên sâu nằm trong vùng mở rộng.
+
+Giữ bốn tab quản trị hiện tại.
+
+Không tạo thêm sidebar hoặc nhiều dashboard lồng nhau.
+
+Người chơi mới chỉ cần hiểu:
+
+Công ty đang hoạt động thế nào?
+
+Có vấn đề gì cần xử lý?
+
+Tôi có thể làm gì tiếp theo?
+
+# 28. ASSET PERFORMANCE
+
+Không tải tất cả ảnh catalog và sprite ở độ phân giải lớn ngay khi khởi động game.
+
+Ưu tiên:
+
+- WebP.
+- AVIF nếu phù hợp.
+- PNG hoặc WebP alpha cho sprite.
+- Lazy loading.
+- Ảnh thumbnail.
+- Asset cache.
+- Responsive images.
+- Tải theo khu vực đang xem.
+
+Có thể sử dụng sprite atlas nếu số lượng công trình lớn.
+
+Không sử dụng hàng trăm file ảnh dung lượng nhiều MB cho mỗi cấp độ.
+
+Không thêm Three.js hoặc engine 3D nặng nếu hệ thống 2.5D đã đáp ứng.
+
+Đo dung lượng asset và hiệu suất thực tế.
+
+Không tuyên bố đạt 60 FPS nếu chưa đo.
+
+# 29. QUY TẮC AN TOÀN VÀ PHẠM VI
+
+Giữ nguyên:
+
+- Wallet.
+- Ledger.
+- Matching Engine.
+- Forex.
+- Futures.
+- Escrow.
+- Business Engine.
+- Các công thức kinh tế.
+- StoryDirector.
+- Career save.
+- Online world.
+- Quyền sở hữu và phân quyền.
+
+Không thêm nguồn tiền mới.
+
+Không thu thêm chi phí xây dựng nếu nghiệp vụ hiện tại chưa có.
+
+Không tạo công ty hoặc chi nhánh từ dữ liệu frontend giả.
+
+Không hardcode công trình của người chơi.
+
+Không mất các tính năng Living World 2.0.
+
+Không thêm AI API trả phí.
+
+Không thêm database bên ngoài.
+
+Không tự deploy.
+
+Phần persistence, API, bảo mật và lưu trữ R2 thuộc phạm vi xử lý riêng của Codex.
+
+Nếu cần thêm dữ liệu backend để lưu vị trí công trình lâu dài, tạo tài liệu yêu cầu tích hợp, không phá kiến trúc hiện tại.
+
+# 30. THỨ TỰ TRIỂN KHAI
+
+## PHASE A — UNIQUE BUSINESS CATALOG
+
+- Audit toàn bộ loại hình kinh doanh.
+- Tạo Business Visual Registry.
+- Thay thế các hình ảnh dùng chung.
+- Hoàn thiện sáu loại hình F&B đang xuất hiện trong ảnh người dùng.
+- Tiếp tục các loại hình Retail, Technology, Finance, Logistics, Manufacturing và Hospitality.
+- Nâng cấp Wizard thành lập doanh nghiệp.
+- Kiểm thử trên desktop và mobile.
+
+## PHASE B — DYNAMIC BUILDINGS
+
+- Xác minh bản đồ 2.5D thực sự đang render.
+- Tạo Building Archetypes.
+- Tạo Dynamic Building Layer.
+- Tạo vị trí công trình.
+- Liên kết business ID.
+- Spawn công trình sau khi thành lập thành công.
+- Camera focus.
+- Company Inspector.
+
+## PHASE C — BUSINESS DEVELOPMENT
+
+- Bốn tier hình ảnh.
+- Trạng thái đang nâng cấp.
+- Thay đổi công trình sau khi hoàn thành nâng cấp.
+- Chi nhánh.
+- HQ và công ty đồng sở hữu.
+- Tình trạng hoạt động.
+
+## PHASE D — POLISH
+
+- Day/night lighting.
+- Animation khai trương.
+- Asset optimization.
+- Mobile map.
+- Tối ưu camera.
+- Đồng bộ Business Overview.
+- Kiểm thử toàn bộ hành trình.
+
+Hoàn thành Phase A và B thực sự hoạt động trước khi mở rộng toàn bộ hệ thống.
+
+Không dành toàn bộ thời gian để viết tài liệu mà không triển khai.
+
+# 31. ACCEPTANCE TESTS
+
+TEST 01:
+
+Mở Wizard chọn ngành nghề.
+
+Xác nhận xe cà phê, quán cà phê, tiệm trà sữa, quán ăn Việt Nam, nhà hàng và nhà hàng cao cấp có hình ảnh khác biệt rõ ràng.
+
+TEST 02:
+
+Kiểm tra hình ảnh của toàn bộ catalog.
+
+Liệt kê businessTypeId nào còn dùng fallback hoặc trùng asset.
+
+Không được che giấu asset còn thiếu.
+
+TEST 03:
+
+Tạo Career mới.
+
+Chưa có doanh nghiệp thì chưa có công trình thuộc sở hữu người chơi.
+
+TEST 04:
+
+Thành lập quán cà phê.
+
+Backend xác nhận thành công, số dư cập nhật đúng và công trình quán cà phê xuất hiện trên bản đồ.
+
+TEST 05:
+
+Thành lập tiệm trà sữa.
+
+Bản đồ xuất hiện một công trình khác biệt, không sử dụng cùng sprite không thay đổi với quán cà phê.
+
+TEST 06:
+
+Tạo nhiều công ty.
+
+Các công trình không chồng lấn và có tên đúng.
+
+TEST 07:
+
+Nhấn vào từng công trình.
+
+Mở đúng doanh nghiệp tương ứng.
+
+TEST 08:
+
+Reload bản đồ.
+
+Công trình không đổi vị trí ngẫu nhiên, không bị nhân đôi.
+
+TEST 09:
+
+Nâng cấp doanh nghiệp qua một mốc visual tier.
+
+Công trình thay đổi sau khi nâng cấp hoàn tất.
+
+TEST 10:
+
+Mở chi nhánh.
+
+Hiển thị đúng chi nhánh và liên kết tới công ty mẹ.
+
+TEST 11:
+
+Thử thành lập doanh nghiệp khi không đủ vốn.
+
+Không spawn công trình, không hiển thị khai trương giả.
+
+TEST 12:
+
+Chuyển Career/Online.
+
+Không hiển thị công trình của sai World.
+
+TEST 13:
+
+Tạo doanh nghiệp ở thành phố khác.
+
+Không đặt doanh nghiệp sai vị trí trên bản đồ TP.HCM.
+
+TEST 14:
+
+Kiểm tra pan và zoom.
+
+Sprite, hitbox, tên công trình và background không lệch tọa độ.
+
+TEST 15:
+
+Kiểm tra mobile 390×844.
+
+Không tràn ngang, không chồng nhãn, có thể chọn công trình.
+
+TEST 16:
+
+Kiểm tra quyền sở hữu.
+
+Không điều hành được doanh nghiệp NPC hoặc doanh nghiệp không có quyền.
+
+TEST 17:
+
+Chơi từ Chương I đến khi thành lập và nâng cấp doanh nghiệp đầu tiên.
+
+Toàn bộ cốt truyện, nhiệm vụ, số dư và tương tác vẫn hoạt động.
+
+TEST 18:
+
+Chạy typecheck, production build và regression tests.
+
+# 32. BÁO CÁO NGHIỆM THU
+
+Cung cấp:
+
+1. Danh sách file đã thay đổi.
+2. Tổng số businessTypeId trong catalog.
+3. Số loại hình có ảnh riêng thực sự.
+4. Số sprite công trình đã tạo.
+5. Số archetype đã hỗ trợ.
+6. Số tier hình ảnh đã hỗ trợ.
+7. Danh sách asset chưa hoàn thiện.
+8. Ảnh Wizard trước và sau.
+9. Ảnh bản đồ trước khi thành lập doanh nghiệp.
+10. Ảnh bản đồ sau khi thành lập quán cà phê.
+11. Ảnh bản đồ sau khi thành lập thêm doanh nghiệp khác.
+12. Ảnh công trình trước và sau khi nâng cấp.
+13. Ảnh chi nhánh.
+14. Ảnh mobile.
+15. Kết quả kiểm thử thực tế.
+16. Những blocker dành cho Codex.
+
+Chỉ báo cáo những gì đã thực sự triển khai và kiểm chứng.
+
+Không tuyên bố hoàn thành chỉ vì đã tạo file asset hoặc viết component mới nhưng App.tsx vẫn render bản cũ.
+
+# FINAL DIRECTIVE
+
+Trading Empire phải cho người chơi thấy được đế chế của mình đang hình thành.
+
+Một xe cà phê nhỏ phải khác một quán cà phê.
+
+Một quán cà phê phải khác một nhà hàng cao cấp.
+
+Một startup nhỏ phải khác một tập đoàn lớn.
+
+Khi người chơi thành lập doanh nghiệp, thành phố phải thay đổi.
+
+Khi doanh nghiệp phát triển, công trình phải phát triển.
+
+Khi mở rộng chi nhánh, mạng lưới kinh doanh phải xuất hiện trên bản đồ.
+
+Các quyết định kinh tế phải tạo ra kết quả hữu hình.
+
+Đừng biến Trading Empire thành một trang quản lý doanh nghiệp với vài tấm ảnh trang trí.
+
+HÃY XÂY DỰNG MỘT BUSINESS TYCOON GAME THỰC SỰ.
+
+Bắt đầu trực tiếp bằng việc sửa hình ảnh trùng lặp trong Wizard và triển khai công trình động trên bản đồ bằng mã nguồn thực tế.

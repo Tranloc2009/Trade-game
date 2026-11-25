@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import { Component, lazy, Suspense, useCallback, useEffect, useState, type ComponentType, type ErrorInfo, type ReactNode } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import type { WorldMode } from '../shared/contracts/beginner';
 import { STORY_SCENES } from '../shared/contracts/careerCampaignData';
@@ -21,6 +21,7 @@ import { InGamePhoneDrawer } from './features/career/components/InGamePhoneDrawe
 import { NpcCornerBanner } from './features/career/components/NpcCornerBanner';
 import { CareerShell } from './features/career/layouts/CareerShell';
 import { CareerHomePage } from './features/career/pages/CareerHomePage';
+import { CareerWorldExplorePage } from './features/career/pages/CareerWorldExplorePage';
 import { careerSound } from './features/career/soundEngine';
 import { OverviewPage } from './features/dashboard/OverviewPage';
 import { GameMainMenu } from './features/menu/GameMainMenu';
@@ -43,24 +44,100 @@ import { CareerStoryService } from './services/careerStoryApi';
 import { realtimeClient } from './services/realtime';
 import { useAppStore, type NavPage } from './store/useAppStore';
 
-const CareerWorldExplorePage = lazy(() =>
-  import('./features/career/pages/CareerWorldExplorePage').then((m) => ({
-    default: m.CareerWorldExplorePage,
-  })),
+function lazyWithRetry<T extends ComponentType<any>>(
+  loader: () => Promise<{ default: T }>,
+  chunkKey: string,
+) {
+  return lazy(async () => {
+    try {
+      const mod = await loader();
+      try {
+        sessionStorage.removeItem(`te_chunk_retry_${chunkKey}`);
+      } catch {
+        // ignore storage errors
+      }
+      return mod;
+    } catch (firstError) {
+      await new Promise((r) => window.setTimeout(r, 350));
+      try {
+        return await loader();
+      } catch (secondError) {
+        try {
+          const retryKey = `te_chunk_retry_${chunkKey}`;
+          if (!sessionStorage.getItem(retryKey)) {
+            sessionStorage.setItem(retryKey, '1');
+            window.location.reload();
+            return new Promise<never>(() => {});
+          }
+        } catch {
+          // ignore storage errors
+        }
+        throw secondError ?? firstError;
+      }
+    }
+  });
+}
+
+class RouteErrorBoundary extends Component<
+  { children: ReactNode; resetKey: string },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError(): { hasError: boolean } {
+    return { hasError: true };
+  }
+
+  componentDidUpdate(prevProps: { resetKey: string }) {
+    if (prevProps.resetKey !== this.props.resetKey && this.state.hasError) {
+      this.setState({ hasError: false });
+    }
+  }
+
+  componentDidCatch(_error: Error, _info: ErrorInfo) {
+    // Handled via graceful fallback UI below
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="p-10 text-center space-y-3">
+          <div className="text-sm font-semibold text-[var(--text-primary)]">
+            Không thể tải khu vực này do phiên bản vừa cập nhật.
+          </div>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 rounded-lg bg-[var(--accent)] text-[var(--text-on-accent)] text-xs font-bold cursor-pointer"
+          >
+            Tải lại trang
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+const CareerSettingsPage = lazyWithRetry(
+  () =>
+    import('./features/career/pages/CareerSettingsPage').then((m) => ({
+      default: m.CareerSettingsPage,
+    })),
+  'career_settings',
 );
-const CareerSettingsPage = lazy(() =>
-  import('./features/career/pages/CareerSettingsPage').then((m) => ({
-    default: m.CareerSettingsPage,
-  })),
+const SettingsPage = lazyWithRetry(
+  () => import('./features/settings/SettingsPage').then((m) => ({ default: m.SettingsPage })),
+  'settings',
 );
-const SettingsPage = lazy(() =>
-  import('./features/settings/SettingsPage').then((m) => ({ default: m.SettingsPage })),
+const LifestyleHubPage = lazyWithRetry(
+  () =>
+    import('./features/unified/LifestyleHubPage').then((m) => ({ default: m.LifestyleHubPage })),
+  'lifestyle',
 );
-const LifestyleHubPage = lazy(() =>
-  import('./features/unified/LifestyleHubPage').then((m) => ({ default: m.LifestyleHubPage })),
-);
-const WorldHubPage = lazy(() =>
-  import('./features/unified/WorldHubPage').then((m) => ({ default: m.WorldHubPage })),
+const WorldHubPage = lazyWithRetry(
+  () => import('./features/unified/WorldHubPage').then((m) => ({ default: m.WorldHubPage })),
+  'world',
 );
 
 const VALID_PAGES = new Set<NavPage>([
@@ -866,20 +943,22 @@ function TradingEmpireWorkspace() {
         );
       case 'career_world':
         return (
-          <Suspense fallback={<PageLoadingFallback />}>
+          <RouteErrorBoundary resetKey="career_world">
             <CareerWorldExplorePage onTriggerScene={handleTriggerScene} />
-          </Suspense>
+          </RouteErrorBoundary>
         );
       case 'career_settings':
         return (
-          <Suspense fallback={<PageLoadingFallback />}>
-            <CareerSettingsPage
-              onRenameCharacter={handleRenameCharacter}
-              onCreateSave={handleCreateCareerSave}
-              onSwitchSave={handleSwitchPlayMode}
-              busy={careerBusy}
-            />
-          </Suspense>
+          <RouteErrorBoundary resetKey="career_settings">
+            <Suspense fallback={<PageLoadingFallback />}>
+              <CareerSettingsPage
+                onRenameCharacter={handleRenameCharacter}
+                onCreateSave={handleCreateCareerSave}
+                onSwitchSave={handleSwitchPlayMode}
+                busy={careerBusy}
+              />
+            </Suspense>
+          </RouteErrorBoundary>
         );
       case 'unified_exchange':
       case 'discover':

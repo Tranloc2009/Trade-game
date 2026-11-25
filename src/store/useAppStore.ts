@@ -85,6 +85,8 @@ export type {
 
 export const resolveLegacyPageRedirect = resolveCanonicalNavigation;
 
+import type { GraphicsQuality } from '../features/city-engine/isoMath';
+
 export interface GameFeedbackEvent {
   id: string;
   kind: 'COMPANY_OPENING' | 'UPGRADE' | 'DEAL_SUCCESS' | 'FAILURE';
@@ -105,6 +107,9 @@ export interface GameFeedbackEvent {
   nextObjective?: string;
   ctaLabel?: string;
   ctaTargetPage?: NavPage;
+  secondaryCtaLabel?: string;
+  secondaryCtaTargetPage?: NavPage;
+  secondaryCtaBusinessId?: string;
 }
 
 export type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'polling';
@@ -139,6 +144,8 @@ interface UiPrefs {
   careerTypewriterEnabled: boolean;
   careerSubtitlesEnabled: boolean;
   reducedMotionPref: boolean;
+  graphicsQuality: GraphicsQuality;
+  businessBrandColors: Record<string, string>;
 }
 
 const DEFAULT_UI_PREFS: UiPrefs = {
@@ -153,6 +160,8 @@ const DEFAULT_UI_PREFS: UiPrefs = {
   careerTypewriterEnabled: true,
   careerSubtitlesEnabled: true,
   reducedMotionPref: false,
+  graphicsQuality: 'HIGH',
+  businessBrandColors: {},
 };
 
 function resolveInitialTradingModeFromUrl(): TradingExperienceMode | null {
@@ -190,6 +199,17 @@ function loadUiPrefs(): UiPrefs {
       careerSubtitlesEnabled:
         typeof parsed.careerSubtitlesEnabled === 'boolean' ? parsed.careerSubtitlesEnabled : true,
       reducedMotionPref: Boolean(parsed.reducedMotionPref),
+      graphicsQuality:
+        parsed.graphicsQuality === 'LOW' ||
+        parsed.graphicsQuality === 'MEDIUM' ||
+        parsed.graphicsQuality === 'HIGH' ||
+        parsed.graphicsQuality === 'ULTRA'
+          ? parsed.graphicsQuality
+          : 'HIGH',
+      businessBrandColors:
+        parsed.businessBrandColors && typeof parsed.businessBrandColors === 'object'
+          ? parsed.businessBrandColors
+          : {},
     };
   } catch {
     return { ...DEFAULT_UI_PREFS, tradingMode: urlMode ?? DEFAULT_UI_PREFS.tradingMode };
@@ -245,6 +265,10 @@ interface AppState {
   careerTypewriterEnabled: boolean;
   careerSubtitlesEnabled: boolean;
   reducedMotionPref: boolean;
+  graphicsQuality: GraphicsQuality;
+  businessBrandColors: Record<string, string>;
+  focusedMapBusinessId: string | null;
+  newlyConstructedBusinessId: string | null;
   mainMenuOpen: boolean;
   phoneOpen: boolean;
   journalOpen: boolean;
@@ -339,6 +363,11 @@ interface AppState {
   toggleCareerTypewriter: () => void;
   toggleCareerSubtitles: () => void;
   toggleReducedMotion: () => void;
+  setGraphicsQuality: (quality: GraphicsQuality) => void;
+  setBusinessBrandColor: (businessId: string, hex: string) => void;
+  focusBusinessOnMap: (businessId: string, withConstructionAnim?: boolean) => void;
+  clearFocusedMapBusiness: () => void;
+  clearNewlyConstructedBusiness: () => void;
   setMainMenuOpen: (open: boolean) => void;
   setPhoneOpen: (open: boolean) => void;
   setJournalOpen: (open: boolean) => void;
@@ -375,6 +404,8 @@ function persistFromState(s: AppState, overrides: Partial<UiPrefs> = {}): void {
     careerTypewriterEnabled: overrides.careerTypewriterEnabled ?? s.careerTypewriterEnabled,
     careerSubtitlesEnabled: overrides.careerSubtitlesEnabled ?? s.careerSubtitlesEnabled,
     reducedMotionPref: overrides.reducedMotionPref ?? s.reducedMotionPref,
+    graphicsQuality: overrides.graphicsQuality ?? s.graphicsQuality,
+    businessBrandColors: overrides.businessBrandColors ?? s.businessBrandColors,
   });
 }
 
@@ -417,6 +448,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   careerTypewriterEnabled: initialPrefs.careerTypewriterEnabled,
   careerSubtitlesEnabled: initialPrefs.careerSubtitlesEnabled,
   reducedMotionPref: initialPrefs.reducedMotionPref,
+  graphicsQuality: initialPrefs.graphicsQuality,
+  businessBrandColors: initialPrefs.businessBrandColors,
+  focusedMapBusinessId: null,
+  newlyConstructedBusinessId: null,
   mainMenuOpen: false,
   phoneOpen: false,
   journalOpen: false,
@@ -665,6 +700,27 @@ export const useAppStore = create<AppState>((set, get) => ({
       persistFromState(state, { reducedMotionPref: next });
       return { reducedMotionPref: next };
     }),
+  setGraphicsQuality: (graphicsQuality) =>
+    set((state) => {
+      persistFromState(state, { graphicsQuality });
+      return { graphicsQuality };
+    }),
+  setBusinessBrandColor: (businessId, hex) =>
+    set((state) => {
+      const next = { ...state.businessBrandColors, [businessId]: hex };
+      persistFromState(state, { businessBrandColors: next });
+      return { businessBrandColors: next };
+    }),
+  focusBusinessOnMap: (businessId, withConstructionAnim = false) =>
+    set({
+      activePage: 'career_world',
+      focusedMapBusinessId: businessId,
+      newlyConstructedBusinessId: withConstructionAnim ? businessId : null,
+      phoneOpen: false,
+      journalOpen: false,
+    }),
+  clearFocusedMapBusiness: () => set({ focusedMapBusinessId: null }),
+  clearNewlyConstructedBusiness: () => set({ newlyConstructedBusinessId: null }),
   setMainMenuOpen: (mainMenuOpen) => set({ mainMenuOpen }),
   // Unified overlay mutual exclusion: Phone and Journal never stack unintentionally
   setPhoneOpen: (phoneOpen) =>

@@ -10,6 +10,7 @@ import {
   Coins,
   MapPin,
   Plus,
+  Search,
   ShieldAlert,
   TrendingUp,
   Users,
@@ -29,7 +30,10 @@ import type {
 } from '../../../shared/contracts/v4';
 import { V4Service } from '../../services/v4Api';
 import { useAppStore, type BusinessTycoonTab } from '../../store/useAppStore';
-import { getBusinessProgressionStage, getIndustryImageUrl } from '../career/careerAssets';
+import { BRAND_VISUAL_PALETTES } from '../business-visuals/buildingArchetypes';
+import { resolveUpgradeProgressInfo } from '../business-visuals/buildingTiers';
+import { getBusinessVisual } from '../business-visuals/businessAssetResolver';
+import { IsoBuildingPreview } from '../business-visuals/components/IsoBuildingPreview';
 import { careerSound } from '../career/soundEngine';
 import {
   buildBusinessActionItems,
@@ -171,6 +175,10 @@ export function BusinessEmpirePage() {
     setSelectedBusinessId,
     clearBusinessIntents,
     showGameFeedback,
+    gameClock,
+    businessBrandColors,
+    setBusinessBrandColor,
+    focusBusinessOnMap,
   } = useAppStore();
   const qc = useQueryClient();
 
@@ -182,6 +190,9 @@ export function BusinessEmpirePage() {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardStep, setWizardStep] = useState<1 | 2 | 3>(1);
   const [industryFilter, setIndustryFilter] = useState<'ALL' | V4BusinessIndustry>('ALL');
+  const [catalogSearch, setCatalogSearch] = useState('');
+  const [affordableOnly, setAffordableOnly] = useState(false);
+  const [capitalSort, setCapitalSort] = useState<'DEFAULT' | 'ASC' | 'DESC'>('DEFAULT');
   const [selectedCatalogItem, setSelectedCatalogItem] = useState<BusinessCatalogItem | null>(null);
   const [bizName, setBizName] = useState('');
   const [bizTicker, setBizTicker] = useState('');
@@ -189,6 +200,7 @@ export function BusinessEmpirePage() {
   const [bizLocation, setBizLocation] = useState('Quận 1 — Trung tâm thương mại');
   const [bizModel, setBizModel] = useState<BusinessModelType>('MASS_MARKET');
   const [bizCapitalCR, setBizCapitalCR] = useState(25_000);
+  const [bizBrandColor, setBizBrandColor] = useState<string>(BRAND_VISUAL_PALETTES[0].hex);
 
   // Operational controls state
   const [injectAmount, setInjectAmount] = useState(10_000);
@@ -225,6 +237,7 @@ export function BusinessEmpirePage() {
     mutationFn: V4Service.createBusiness,
     onSuccess: (res) => {
       setPlayer(res.profile);
+      setBusinessBrandColor(res.business.id, bizBrandColor);
       setWizardOpen(false);
       setWizardStep(1);
       setSelectedCatalogItem(null);
@@ -234,11 +247,19 @@ export function BusinessEmpirePage() {
       careerSound.playCompanyOpeningCue(careerSoundMuted);
       invalidateAll();
 
+      const openingVisual = getBusinessVisual(
+        res.business.businessTypeId,
+        res.business.level,
+        'OPENING_CINEMATIC',
+        res.business.industry,
+      );
+      const isSaigon = res.business.cityCode === 'HCMC';
+
       showGameFeedback({
         kind: 'COMPANY_OPENING',
         title: `Khai trương ${res.business.businessName}`,
         subtitle: `${res.business.businessTypeName} tại ${res.business.cityName} đã chính thức đi vào hoạt động với tài khoản công ty độc lập.`,
-        imageUrl: getIndustryImageUrl(res.business.industry),
+        imageUrl: openingVisual.imageUrl,
         metrics: [
           {
             label: 'Tiền mặt công ty',
@@ -262,12 +283,15 @@ export function BusinessEmpirePage() {
                 npcId: 'gia_han',
                 name: 'Trần Gia Hân',
                 message:
-                  'Chúc mừng công ty đầu tiên của bạn chính thức mở cửa! Giờ hãy theo dõi dòng tiền, tuyển thêm nhân sự và giữ chất lượng ổn định.',
+                  'Chúc mừng công ty đầu tiên của bạn chính thức mở cửa! Công trình của bạn đã hiện diện tại Sài Gòn — hãy theo dõi dòng tiền và tuyển nhân sự ngay nhé.',
               }
             : undefined,
-        nextObjective:
-          'Vào mục Vận hành để tuyển nhân sự, hoặc chạy 1 chu kỳ để nhận doanh thu đầu tiên.',
-        ctaLabel: 'Vào quản trị doanh nghiệp',
+        nextObjective: isSaigon
+          ? 'Xem công trình mới dựng trên bản đồ Sài Gòn 2.5D hoặc vào mục Vận hành để tuyển nhân sự.'
+          : 'Vào mục Vận hành để tuyển nhân sự, hoặc theo dõi doanh nghiệp trong bảng Đa Thành Phố.',
+        secondaryCtaLabel: isSaigon ? 'Xem công trình trên bản đồ' : undefined,
+        secondaryCtaBusinessId: isSaigon ? res.business.id : undefined,
+        ctaLabel: 'Bắt đầu kinh doanh',
       });
     },
     onError: (err: Error) => {
@@ -302,11 +326,17 @@ export function BusinessEmpirePage() {
     onSuccess: (res) => {
       setPlayer(res.profile);
       invalidateAll();
+      const upVisual = getBusinessVisual(
+        res.business.businessTypeId,
+        res.business.level,
+        'BUSINESS_OVERVIEW',
+        res.business.industry,
+      );
       showGameFeedback({
         kind: 'UPGRADE',
         title: `Nâng cấp ${res.business.businessName}`,
-        subtitle: `Doanh nghiệp đã khởi động tiến trình nâng cấp lên Level ${res.business.pendingUpgrade?.targetLevel ?? res.business.level + 1}.`,
-        imageUrl: getIndustryImageUrl(res.business.industry),
+        subtitle: `Doanh nghiệp đã khởi động tiến trình thi công nâng cấp lên Level ${res.business.pendingUpgrade?.targetLevel ?? res.business.level + 1}.`,
+        imageUrl: upVisual.imageUrl,
         metrics: [
           { label: 'Cấp hiện tại', value: `Level ${res.business.level}`, tone: 'neutral' },
           {
@@ -320,7 +350,9 @@ export function BusinessEmpirePage() {
             tone: 'positive',
           },
         ],
-        nextObjective: 'Tiếp tục vận hành thêm chu kỳ để hoàn tất nâng cấp và mở rộng công suất.',
+        nextObjective: 'Giàn giáo thi công đã xuất hiện trên bản đồ thành phố. Tiếp tục vận hành để hoàn tất nâng cấp.',
+        secondaryCtaLabel: res.business.cityCode === 'HCMC' ? 'Xem thi công trên bản đồ' : undefined,
+        secondaryCtaBusinessId: res.business.cityCode === 'HCMC' ? res.business.id : undefined,
         ctaLabel: 'Quay lại doanh nghiệp',
       });
     },
@@ -436,11 +468,33 @@ export function BusinessEmpirePage() {
     player && activeBiz && (activeBiz.ownerId === player.id || activeBiz.ceoId === player.id),
   );
 
+  const availableWalletCR = Math.floor((player?.wallet.availableMinor ?? 0) / 100);
+
   const filteredCatalog = useMemo(() => {
-    const list = data?.catalog ?? [];
-    if (industryFilter === 'ALL') return list;
-    return list.filter((c) => c.industry === industryFilter);
-  }, [data?.catalog, industryFilter]);
+    let list = data?.catalog ?? [];
+    if (industryFilter !== 'ALL') {
+      list = list.filter((c) => c.industry === industryFilter);
+    }
+    const q = catalogSearch.trim().toLowerCase();
+    if (q) {
+      list = list.filter(
+        (c) =>
+          c.name.toLowerCase().includes(q) ||
+          c.description.toLowerCase().includes(q) ||
+          c.industryLabel.toLowerCase().includes(q) ||
+          c.typeId.toLowerCase().includes(q),
+      );
+    }
+    if (affordableOnly) {
+      list = list.filter((c) => c.startupCostCR <= availableWalletCR);
+    }
+    if (capitalSort === 'ASC') {
+      list = [...list].sort((a, b) => a.startupCostCR - b.startupCostCR);
+    } else if (capitalSort === 'DESC') {
+      list = [...list].sort((a, b) => b.startupCostCR - a.startupCostCR);
+    }
+    return list;
+  }, [data?.catalog, industryFilter, catalogSearch, affordableOnly, availableWalletCR, capitalSort]);
 
   const pickIndustryForWizard = (item: BusinessCatalogItem) => {
     setSelectedCatalogItem(item);
@@ -451,12 +505,13 @@ export function BusinessEmpirePage() {
         .slice(0, 4)
         .toUpperCase() + Math.floor(10 + Math.random() * 89),
     );
-    const availableCR = Math.floor((player?.wallet.availableMinor ?? 0) / 100);
+    const visual = getBusinessVisual(item.typeId, 1, 'CATALOG', item.industry);
+    setBizBrandColor(visual.brandAccentHex);
     const suggested = Math.round(item.startupCostCR * 1.25);
     setBizCapitalCR(
-      availableCR >= suggested
+      availableWalletCR >= suggested
         ? suggested
-        : Math.max(item.startupCostCR, Math.min(availableCR, suggested)),
+        : Math.max(item.startupCostCR, Math.min(availableWalletCR, suggested)),
     );
     setWizardStep(2);
   };
@@ -471,7 +526,6 @@ export function BusinessEmpirePage() {
 
   const nextLevelSpec = activeBiz ? data.levels.find((l) => l.level === activeBiz.level + 1) : null;
   const latestFin = activeBiz?.financialHistory[activeBiz.financialHistory.length - 1] ?? null;
-  const availableWalletCR = Math.floor((player?.wallet.availableMinor ?? 0) / 100);
 
   return (
     <div data-testid="business-tycoon-page" className="space-y-5 max-w-[1440px] mx-auto">
@@ -676,6 +730,7 @@ export function BusinessEmpirePage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                   {pickRecommendedStarterCatalog(data.catalog, availableWalletCR, 4).map((item) => {
                     const canAfford = availableWalletCR >= item.startupCostCR;
+                    const itemVisual = getBusinessVisual(item.typeId, 1, 'CATALOG', item.industry);
                     return (
                       <div
                         key={item.typeId}
@@ -683,7 +738,7 @@ export function BusinessEmpirePage() {
                       >
                         <div className="relative h-28 w-full overflow-hidden">
                           <img
-                            src={getIndustryImageUrl(item.industry)}
+                            src={itemVisual.imageUrl}
                             alt={item.name}
                             className="w-full h-full object-cover"
                           />
@@ -739,27 +794,34 @@ export function BusinessEmpirePage() {
               </div>
             </div>
           ) : (() => {
-            const stage = getBusinessProgressionStage(activeBiz.level);
+            const bizVisual = getBusinessVisual(
+              activeBiz.businessTypeId,
+              activeBiz.level,
+              'BUSINESS_OVERVIEW',
+              activeBiz.industry,
+            );
+            const accentHex = businessBrandColors[activeBiz.id] ?? bizVisual.brandAccentHex;
+            const upgradeState = resolveUpgradeProgressInfo(activeBiz, gameClock);
             const actionItems = isController
               ? buildBusinessActionItems(activeBiz, nextLevelSpec?.requiredCapitalCR)
               : [];
             return (
             <>
-              {/* Visual Company Hero Card with Progression Tier Artwork */}
+              {/* Visual Company Hero Card Synchronized with Unique Business Asset & 2.5D Isometric Building */}
               <div className="relative rounded-2xl overflow-hidden border border-[var(--border-strong)] bg-[var(--bg-panel)]">
-                <div className="relative h-44 sm:h-48 w-full overflow-hidden">
+                <div className="relative min-h-[200px] sm:min-h-[212px] w-full overflow-hidden">
                   <img
-                    src={activeBiz.level >= 3 ? stage.imageUrl : getIndustryImageUrl(activeBiz.industry)}
-                    alt={`${activeBiz.businessName} — ${stage.labelVi}`}
-                    className="w-full h-full object-cover object-center"
+                    src={bizVisual.imageUrl}
+                    alt={`${activeBiz.businessName} — ${bizVisual.tierStageTitleVi}`}
+                    className="absolute inset-0 w-full h-full object-cover object-center"
                   />
-                  <div className="absolute inset-0 bg-gradient-to-r from-[#100E0C]/95 via-[#100E0C]/75 to-[#100E0C]/30" />
-                  <div className="absolute inset-0 p-5 flex flex-col justify-between">
+                  <div className="absolute inset-0 bg-gradient-to-r from-[#100E0C]/95 via-[#100E0C]/80 to-[#100E0C]/45" />
+                  <div className="relative z-10 p-5 flex flex-col justify-between gap-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
+                      <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#D6B26E]">
-                            {isController ? 'Doanh nghiệp của bạn' : `Thị trường · ${activeBiz.ownerName}`} · {stage.labelVi}
+                            {isController ? 'Doanh nghiệp của bạn' : `Thị trường · ${activeBiz.ownerName}`} · {bizVisual.tierSpec.labelVi} · {bizVisual.tierStageTitleVi}
                           </span>
                         </div>
                         <div className="flex items-center gap-2 flex-wrap mt-1">
@@ -788,12 +850,44 @@ export function BusinessEmpirePage() {
                         <div className="text-xs text-[#CFC5B5] mt-1">
                           {activeBiz.businessTypeName} · Cấp {activeBiz.level} ({activeBiz.levelTitle}) · {activeBiz.cityName}
                         </div>
+                        <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                          {activeBiz.cityCode === 'HCMC' && (
+                            <button
+                              type="button"
+                              data-testid="overview-view-on-map-btn"
+                              onClick={() => focusBusinessOnMap(activeBiz.id, false)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#D6B26E] hover:bg-[#C6A05B] text-[#100E0C] text-xs font-bold cursor-pointer transition-colors"
+                            >
+                              <MapPin className="w-3.5 h-3.5" />
+                              <span>Xem công trình trên bản đồ</span>
+                            </button>
+                          )}
+                          {upgradeState.isUpgrading && (
+                            <span className="text-xs font-mono text-amber-300">
+                              Đang thi công nâng cấp → Lv.{upgradeState.targetLevel} (còn {upgradeState.remainingGameHours}h game)
+                            </span>
+                          )}
+                        </div>
                       </div>
 
-                      <div className="text-left sm:text-right font-mono tabular-nums bg-[#100E0C]/65 backdrop-blur-sm px-3 py-2 rounded-xl border border-[#383026]">
-                        <div className="text-[11px] text-[#A69A87]">Định giá công ty</div>
-                        <div className="text-lg sm:text-xl font-bold text-[#D6B26E]">
-                          {formatCR(activeBiz.valuationMinor)} CR
+                      <div className="flex items-center gap-3 shrink-0">
+                        <div className="hidden md:block">
+                          <IsoBuildingPreview
+                            archetype={bizVisual.archetype}
+                            tier={bizVisual.tier}
+                            accentHex={accentHex}
+                            variant={bizVisual.spriteVariant}
+                            isUpgrading={upgradeState.isUpgrading}
+                            suspended={activeBiz.status === 'SUSPENDED'}
+                            size="sm"
+                            compact
+                          />
+                        </div>
+                        <div className="text-left sm:text-right font-mono tabular-nums bg-[#100E0C]/75 backdrop-blur-sm px-3.5 py-2.5 rounded-xl border border-[#383026]">
+                          <div className="text-[11px] text-[#A69A87]">Định giá công ty</div>
+                          <div className="text-lg sm:text-xl font-bold text-[#D6B26E]">
+                            {formatCR(activeBiz.valuationMinor)} CR
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -1633,269 +1727,410 @@ export function BusinessEmpirePage() {
 
             {/* Wizard Body */}
             <div className="flex-1 overflow-y-auto p-5">
-              {/* STEP 1: SELECT INDUSTRY */}
+              {/* STEP 1: SELECT INDUSTRY (UNIQUE ASSET PER BUSINESS TYPE + SEARCH/BUDGET/SORT) */}
               {wizardStep === 1 && (
                 <div className="space-y-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex flex-wrap gap-1.5">
-                      {(Object.keys(INDUSTRY_LABELS) as Array<'ALL' | V4BusinessIndustry>).map((ind) => (
-                        <button
-                          key={ind}
-                          type="button"
-                          onClick={() => setIndustryFilter(ind)}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
-                            industryFilter === ind
-                              ? 'border-[var(--accent)] bg-[var(--accent)]/15 text-[var(--accent)]'
-                              : 'border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-                          }`}
-                        >
-                          {INDUSTRY_LABELS[ind]}
-                        </button>
-                      ))}
+                  {/* Search, Budget Filter & Capital Sort Toolbar */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                    <div className="relative flex-1 max-w-md">
+                      <Search className="w-3.5 h-3.5 text-[var(--text-muted)] absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        data-testid="wizard-search-input"
+                        value={catalogSearch}
+                        onChange={(e) => setCatalogSearch(e.target.value)}
+                        placeholder="Tìm mô hình kinh doanh (Cà phê, Trà sữa, Phần mềm...)"
+                        className="w-full pl-9 pr-3 py-2 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)]"
+                      />
                     </div>
-                    <div className="text-xs font-mono text-[var(--text-secondary)] tabular-nums">
-                      Ví khả dụng:{' '}
-                      <strong className="text-[var(--accent)]">
-                        {formatCR(player?.wallet.availableMinor ?? 0)} CR
-                      </strong>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        data-testid="wizard-affordable-toggle"
+                        onClick={() => setAffordableOnly((v) => !v)}
+                        className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-colors cursor-pointer ${
+                          affordableOnly
+                            ? 'border-[var(--positive)] bg-[var(--positive)]/15 text-[var(--positive)]'
+                            : 'border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                        }`}
+                      >
+                        {affordableOnly ? '✓ Đủ vốn mở ngay' : 'Lọc phù hợp vốn'}
+                      </button>
+                      <select
+                        aria-label="Sắp xếp theo vốn khởi điểm"
+                        data-testid="wizard-sort-select"
+                        value={capitalSort}
+                        onChange={(e) => setCapitalSort(e.target.value as 'DEFAULT' | 'ASC' | 'DESC')}
+                        className="px-3 py-2 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-xs text-[var(--text-primary)] cursor-pointer"
+                      >
+                        <option value="DEFAULT">Sắp xếp mặc định</option>
+                        <option value="ASC">Vốn thấp → cao</option>
+                        <option value="DESC">Vốn cao → thấp</option>
+                      </select>
+                      <div className="text-xs font-mono text-[var(--text-secondary)] tabular-nums px-2">
+                        Ví:{' '}
+                        <strong className="text-[var(--accent)]">
+                          {formatCR(player?.wallet.availableMinor ?? 0)} CR
+                        </strong>
+                      </div>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
-                    {filteredCatalog.map((item) => {
-                      const lockedFinance =
-                        item.requiresFinanceUnlock && (!player || player.netWorthMinor < 250_000_00);
-                      const affordable = availableWalletCR >= item.startupCostCR;
-                      return (
-                        <button
-                          key={item.typeId}
-                          type="button"
-                          disabled={Boolean(lockedFinance)}
-                          data-testid={`wizard-industry-${item.typeId}`}
-                          onClick={() => pickIndustryForWizard(item)}
-                          className={`group text-left rounded-2xl overflow-hidden border transition-colors flex flex-col ${
-                            lockedFinance
-                              ? 'border-[var(--border-subtle)] bg-[var(--bg-surface)] opacity-55 cursor-not-allowed'
-                              : 'border-[var(--border-subtle)] bg-[var(--bg-surface)] hover:border-[var(--accent)] cursor-pointer'
-                          }`}
-                        >
-                          <div className="relative h-24 w-full overflow-hidden">
-                            <img
-                              src={getIndustryImageUrl(item.industry)}
-                              alt={item.name}
-                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                            />
-                            <div className="absolute inset-0 bg-gradient-to-t from-[var(--bg-surface)] via-black/30 to-transparent" />
-                            <span className="absolute top-2 left-2 rounded-md bg-black/70 px-2 py-0.5 text-[10px] font-mono text-[var(--accent)]">
-                              {item.industryLabel}
-                            </span>
-                          </div>
-                          <div className="p-3.5 flex-1 flex flex-col justify-between gap-2.5">
-                            <div>
-                              <div className="text-sm font-bold text-[var(--text-primary)]">
-                                {item.name}
-                              </div>
-                              <p className="text-[11px] text-[var(--text-secondary)] line-clamp-2 mt-0.5">
-                                {item.description}
-                              </p>
-                            </div>
-                            <div className="pt-2 border-t border-[var(--border-subtle)] flex items-center justify-between text-xs font-mono tabular-nums">
-                              <span className="text-[var(--text-muted)]">Vốn tối thiểu</span>
-                              <span
-                                className={
-                                  affordable
-                                    ? 'font-bold text-[var(--positive)]'
-                                    : 'font-bold text-[var(--warning)]'
-                                }
-                              >
-                                {item.startupCostCR.toLocaleString('en-US')} CR
+                  {/* Industry Filter Tabs */}
+                  <div className="flex flex-wrap gap-1.5">
+                    {(Object.keys(INDUSTRY_LABELS) as Array<'ALL' | V4BusinessIndustry>).map((ind) => (
+                      <button
+                        key={ind}
+                        type="button"
+                        data-testid={`wizard-filter-${ind}`}
+                        onClick={() => setIndustryFilter(ind)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
+                          industryFilter === ind
+                            ? 'border-[var(--accent)] bg-[var(--accent)]/15 text-[var(--accent)]'
+                            : 'border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                        }`}
+                      >
+                        {INDUSTRY_LABELS[ind]}
+                      </button>
+                    ))}
+                  </div>
+
+                  {filteredCatalog.length === 0 ? (
+                    <div className="p-8 rounded-xl border border-dashed border-[var(--border-subtle)] text-center text-xs text-[var(--text-muted)]">
+                      Không tìm thấy mô hình kinh doanh phù hợp bộ lọc hiện tại. Hãy xóa từ khóa hoặc tắt lọc vốn.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                      {filteredCatalog.map((item) => {
+                        const lockedFinance =
+                          item.requiresFinanceUnlock && (!player || player.netWorthMinor < 250_000_00);
+                        const affordable = availableWalletCR >= item.startupCostCR;
+                        const visual = getBusinessVisual(item.typeId, 1, 'CATALOG', item.industry);
+                        return (
+                          <button
+                            key={item.typeId}
+                            type="button"
+                            disabled={Boolean(lockedFinance)}
+                            data-testid={`wizard-industry-${item.typeId}`}
+                            data-visual-asset={visual.catalogAssetKey}
+                            data-visual-archetype={visual.archetype}
+                            onClick={() => pickIndustryForWizard(item)}
+                            className={`group text-left rounded-2xl overflow-hidden border transition-colors flex flex-col ${
+                              lockedFinance
+                                ? 'border-[var(--border-subtle)] bg-[var(--bg-surface)] opacity-55 cursor-not-allowed'
+                                : 'border-[var(--border-subtle)] bg-[var(--bg-surface)] hover:border-[var(--accent)] cursor-pointer'
+                            }`}
+                          >
+                            <div className="relative h-28 w-full overflow-hidden">
+                              <img
+                                src={visual.imageUrl}
+                                alt={item.name}
+                                loading="lazy"
+                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                              />
+                              <div className="absolute inset-0 bg-gradient-to-t from-[var(--bg-surface)] via-black/25 to-transparent" />
+                              <span className="absolute top-2 left-2 rounded-md bg-black/75 px-2 py-0.5 text-[10px] font-mono text-[var(--accent)]">
+                                {item.industryLabel}
+                              </span>
+                              <span className="absolute bottom-2 right-2 rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-[#E6DEC9]">
+                                {visual.archetypeLabelVi}
                               </span>
                             </div>
+                            <div className="p-3.5 flex-1 flex flex-col justify-between gap-2.5">
+                              <div>
+                                <div className="text-sm font-bold text-[var(--text-primary)]">
+                                  {item.name}
+                                </div>
+                                <p className="text-[11px] text-[var(--text-secondary)] line-clamp-2 mt-0.5">
+                                  {item.description}
+                                </p>
+                              </div>
+                              <div className="pt-2 border-t border-[var(--border-subtle)] flex items-center justify-between text-xs font-mono tabular-nums">
+                                <span className="text-[var(--text-muted)]">Vốn tối thiểu</span>
+                                <span
+                                  className={
+                                    affordable
+                                      ? 'font-bold text-[var(--positive)]'
+                                      : 'font-bold text-[var(--warning)]'
+                                  }
+                                >
+                                  {item.startupCostCR.toLocaleString('en-US')} CR
+                                </span>
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* STEP 2: BRANDING, LOCATION, COLOR & LIVE 2.5D ARCHITECTURAL PREVIEW */}
+              {wizardStep === 2 && selectedCatalogItem && (() => {
+                const previewVisual = getBusinessVisual(
+                  selectedCatalogItem.typeId,
+                  1,
+                  'CATALOG',
+                  selectedCatalogItem.industry,
+                );
+                return (
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+                    {/* Left: Live 2.5D Isometric Building Preview & Brand Color Selector */}
+                    <div className="lg:col-span-5 space-y-3">
+                      <IsoBuildingPreview
+                        archetype={previewVisual.archetype}
+                        tier={1}
+                        accentHex={bizBrandColor}
+                        variant={previewVisual.spriteVariant}
+                        nameplate={bizName.trim() || selectedCatalogItem.name}
+                        tierLabel={`${previewVisual.tierSpec.labelVi} · ${previewVisual.tierStageTitleVi}`}
+                        size="lg"
+                      />
+
+                      <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3 space-y-2">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-semibold text-[var(--text-primary)]">
+                            Màu nhận diện mặt tiền
+                          </span>
+                          <span className="text-[10px] text-[var(--text-muted)]">
+                            Trang trí kiến trúc trên bản đồ
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {BRAND_VISUAL_PALETTES.map((pal) => {
+                            const selected = bizBrandColor === pal.hex;
+                            return (
+                              <button
+                                key={pal.id}
+                                type="button"
+                                data-testid={`wizard-color-${pal.id}`}
+                                title={pal.labelVi}
+                                aria-label={`Chọn màu thương hiệu ${pal.labelVi}`}
+                                onClick={() => setBizBrandColor(pal.hex)}
+                                className={`w-8 h-8 rounded-lg border-2 transition-transform cursor-pointer ${
+                                  selected
+                                    ? 'border-[#F6F1E7] scale-110 ring-2 ring-[var(--accent)]/60'
+                                    : 'border-black/40 hover:scale-105'
+                                }`}
+                                style={{ backgroundColor: pal.hex }}
+                              />
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Right: Brand Identity, City & Model Form */}
+                    <div className="lg:col-span-7 space-y-4">
+                      <div className="flex items-center gap-3.5 p-3.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
+                        <img
+                          src={previewVisual.imageUrl}
+                          alt={selectedCatalogItem.name}
+                          className="w-16 h-14 rounded-lg object-cover shrink-0"
+                        />
+                        <div className="min-w-0">
+                          <div className="text-xs font-mono text-[var(--accent)]">
+                            {selectedCatalogItem.industryLabel} · {previewVisual.archetypeLabelVi}
                           </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* STEP 2: BRANDING, LOCATION & MODEL */}
-              {wizardStep === 2 && selectedCatalogItem && (
-                <div className="max-w-2xl mx-auto space-y-4">
-                  <div className="flex items-center gap-3.5 p-3.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
-                    <img
-                      src={getIndustryImageUrl(selectedCatalogItem.industry)}
-                      alt={selectedCatalogItem.name}
-                      className="w-16 h-14 rounded-lg object-cover shrink-0"
-                    />
-                    <div>
-                      <div className="text-xs font-mono text-[var(--accent)]">
-                        {selectedCatalogItem.industryLabel}
+                          <div className="text-base font-bold text-[var(--text-primary)] truncate">
+                            {selectedCatalogItem.name}
+                          </div>
+                          <div className="text-xs text-[var(--text-secondary)]">
+                            Vốn tối thiểu: {selectedCatalogItem.startupCostCR.toLocaleString('en-US')} CR
+                          </div>
+                        </div>
                       </div>
-                      <div className="text-base font-bold text-[var(--text-primary)]">
-                        {selectedCatalogItem.name}
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                        <div className="sm:col-span-2 space-y-1">
+                          <label htmlFor="v4-biz-name" className="text-[var(--text-secondary)] font-medium">
+                            Tên thương hiệu doanh nghiệp
+                          </label>
+                          <input
+                            id="v4-biz-name"
+                            data-testid="wizard-biz-name-input"
+                            required
+                            minLength={3}
+                            value={bizName}
+                            onChange={(e) => setBizName(e.target.value)}
+                            className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-sm text-[var(--text-primary)]"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label htmlFor="v4-biz-ticker" className="text-[var(--text-secondary)] font-medium">
+                            Mã (Ticker)
+                          </label>
+                          <input
+                            id="v4-biz-ticker"
+                            required
+                            minLength={2}
+                            maxLength={8}
+                            value={bizTicker}
+                            onChange={(e) => setBizTicker(e.target.value.toUpperCase())}
+                            className="w-full px-3.5 py-2.5 rounded-xl font-mono bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-sm text-[var(--text-primary)]"
+                          />
+                        </div>
                       </div>
-                      <div className="text-xs text-[var(--text-secondary)]">
-                        Vốn tối thiểu: {selectedCatalogItem.startupCostCR.toLocaleString('en-US')} CR
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                        <div className="space-y-1">
+                          <label htmlFor="v4-biz-city" className="text-[var(--text-secondary)] font-medium">
+                            Thành phố đặt trụ sở
+                          </label>
+                          <select
+                            id="v4-biz-city"
+                            data-testid="wizard-city-select"
+                            value={bizCity}
+                            onChange={(e) => setBizCity(e.target.value as V4CityCode)}
+                            className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-sm text-[var(--text-primary)]"
+                          >
+                            {data.cities.map((c) => (
+                              <option key={c.code} value={c.code}>
+                                {c.name} (Thu nhập ×{c.incomeIndex.toFixed(2)})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="space-y-1">
+                          <label htmlFor="v4-biz-model" className="text-[var(--text-secondary)] font-medium">
+                            Mô hình vận hành
+                          </label>
+                          <select
+                            id="v4-biz-model"
+                            value={bizModel}
+                            onChange={(e) => setBizModel(e.target.value as BusinessModelType)}
+                            className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-sm text-[var(--text-primary)]"
+                          >
+                            <option value="MASS_MARKET">Phổ thông (Mass Market)</option>
+                            <option value="PREMIUM_NICHE">Cao cấp (Premium Niche)</option>
+                            <option value="B2B_CONTRACT">Hợp đồng B2B</option>
+                            <option value="FRANCHISE_CHAIN">Chuỗi mở rộng</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {bizCity !== 'HCMC' && (
+                        <div className="rounded-xl border border-[var(--accent)]/35 bg-[var(--accent)]/10 px-3.5 py-2.5 text-xs text-[var(--text-secondary)]">
+                          Lưu ý bản đồ: Doanh nghiệp đặt trụ sở ngoài TP. Hồ Chí Minh sẽ hiển thị trong mục{' '}
+                          <strong className="text-[var(--text-primary)]">Quản lý Đa Thành Phố</strong>, không đặt nhầm lên bản đồ Sài Gòn 2.5D.
+                        </div>
+                      )}
+
+                      <div className="space-y-1 text-xs">
+                        <label htmlFor="v4-biz-location" className="text-[var(--text-secondary)] font-medium">
+                          Địa điểm trụ sở
+                        </label>
+                        <input
+                          id="v4-biz-location"
+                          value={bizLocation}
+                          onChange={(e) => setBizLocation(e.target.value)}
+                          className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-sm text-[var(--text-primary)]"
+                        />
                       </div>
                     </div>
                   </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                    <div className="sm:col-span-2 space-y-1">
-                      <label htmlFor="v4-biz-name" className="text-[var(--text-secondary)] font-medium">
-                        Tên thương hiệu doanh nghiệp
-                      </label>
-                      <input
-                        id="v4-biz-name"
-                        data-testid="wizard-biz-name-input"
-                        required
-                        minLength={3}
-                        value={bizName}
-                        onChange={(e) => setBizName(e.target.value)}
-                        className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-sm text-[var(--text-primary)]"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label htmlFor="v4-biz-ticker" className="text-[var(--text-secondary)] font-medium">
-                        Mã (Ticker)
-                      </label>
-                      <input
-                        id="v4-biz-ticker"
-                        required
-                        minLength={2}
-                        maxLength={8}
-                        value={bizTicker}
-                        onChange={(e) => setBizTicker(e.target.value.toUpperCase())}
-                        className="w-full px-3.5 py-2.5 rounded-xl font-mono bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-sm text-[var(--text-primary)]"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                    <div className="space-y-1">
-                      <label htmlFor="v4-biz-city" className="text-[var(--text-secondary)] font-medium">
-                        Thành phố đặt trụ sở
-                      </label>
-                      <select
-                        id="v4-biz-city"
-                        value={bizCity}
-                        onChange={(e) => setBizCity(e.target.value as V4CityCode)}
-                        className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-sm text-[var(--text-primary)]"
-                      >
-                        {data.cities.map((c) => (
-                          <option key={c.code} value={c.code}>
-                            {c.name} (Thu nhập ×{c.incomeIndex.toFixed(2)})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="space-y-1">
-                      <label htmlFor="v4-biz-model" className="text-[var(--text-secondary)] font-medium">
-                        Mô hình vận hành
-                      </label>
-                      <select
-                        id="v4-biz-model"
-                        value={bizModel}
-                        onChange={(e) => setBizModel(e.target.value as BusinessModelType)}
-                        className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-sm text-[var(--text-primary)]"
-                      >
-                        <option value="MASS_MARKET">Phổ thông (Mass Market)</option>
-                        <option value="PREMIUM_NICHE">Cao cấp (Premium Niche)</option>
-                        <option value="B2B_CONTRACT">Hợp đồng B2B</option>
-                        <option value="FRANCHISE_CHAIN">Chuỗi mở rộng</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="space-y-1 text-xs">
-                    <label htmlFor="v4-biz-location" className="text-[var(--text-secondary)] font-medium">
-                      Địa điểm trụ sở
-                    </label>
-                    <input
-                      id="v4-biz-location"
-                      value={bizLocation}
-                      onChange={(e) => setBizLocation(e.target.value)}
-                      className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-sm text-[var(--text-primary)]"
-                    />
-                  </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* STEP 3: BUDGET REVIEW & CONFIRM */}
-              {wizardStep === 3 && selectedCatalogItem && (
-                <div className="max-w-2xl mx-auto space-y-4">
-                  <div className="rounded-2xl border border-[var(--accent)]/40 bg-[var(--bg-surface)] p-5 space-y-4">
-                    <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[var(--border-subtle)]">
-                      <div>
-                        <div className="text-xs font-mono text-[var(--accent)]">
-                          {selectedCatalogItem.industryLabel} · {bizTicker}
+              {wizardStep === 3 && selectedCatalogItem && (() => {
+                const reviewVisual = getBusinessVisual(
+                  selectedCatalogItem.typeId,
+                  1,
+                  'CATALOG',
+                  selectedCatalogItem.industry,
+                );
+                return (
+                  <div className="max-w-3xl mx-auto space-y-4">
+                    <div className="rounded-2xl border border-[var(--accent)]/40 bg-[var(--bg-surface)] p-5 space-y-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[var(--border-subtle)]">
+                        <div className="flex items-center gap-4 min-w-0">
+                          <IsoBuildingPreview
+                            archetype={reviewVisual.archetype}
+                            tier={1}
+                            accentHex={bizBrandColor}
+                            variant={reviewVisual.spriteVariant}
+                            size="sm"
+                            compact
+                          />
+                          <div className="min-w-0">
+                            <div className="text-xs font-mono text-[var(--accent)]">
+                              {selectedCatalogItem.industryLabel} · {bizTicker}
+                            </div>
+                            <div className="text-xl font-bold text-[var(--text-primary)] truncate">
+                              {bizName}
+                            </div>
+                            <div className="text-xs text-[var(--text-secondary)]">
+                              {data.cities.find((c) => c.code === bizCity)?.name} · {bizLocation}
+                            </div>
+                          </div>
                         </div>
-                        <div className="text-xl font-bold text-[var(--text-primary)]">{bizName}</div>
-                        <div className="text-xs text-[var(--text-secondary)]">
-                          {data.cities.find((c) => c.code === bizCity)?.name} · {bizLocation}
+                        <div className="text-left sm:text-right font-mono tabular-nums shrink-0">
+                          <div className="text-[11px] text-[var(--text-muted)]">Ví cá nhân khả dụng</div>
+                          <div className="text-base font-bold text-[var(--text-primary)]">
+                            {formatCR(player?.wallet.availableMinor ?? 0)} CR
+                          </div>
                         </div>
                       </div>
-                      <div className="text-right font-mono tabular-nums">
-                        <div className="text-[11px] text-[var(--text-muted)]">Ví cá nhân khả dụng</div>
-                        <div className="text-base font-bold text-[var(--text-primary)]">
-                          {formatCR(player?.wallet.availableMinor ?? 0)} CR
-                        </div>
-                      </div>
-                    </div>
 
-                    <div className="space-y-2 text-xs">
-                      <label htmlFor="v4-biz-capital" className="font-semibold text-[var(--text-primary)] block">
-                        Tổng vốn góp ban đầu (CR)
-                      </label>
-                      <input
-                        id="v4-biz-capital"
-                        type="number"
-                        required
-                        min={selectedCatalogItem.startupCostCR}
-                        step={1000}
-                        value={bizCapitalCR}
-                        onChange={(e) => setBizCapitalCR(Number(e.target.value))}
-                        className="w-full px-3.5 py-2.5 rounded-xl font-mono text-base font-bold bg-[var(--bg-panel)] border border-[var(--border-subtle)] text-[var(--text-primary)]"
-                      />
-                    </div>
+                      <div className="space-y-2 text-xs">
+                        <label htmlFor="v4-biz-capital" className="font-semibold text-[var(--text-primary)] block">
+                          Tổng vốn góp ban đầu (CR)
+                        </label>
+                        <input
+                          id="v4-biz-capital"
+                          data-testid="wizard-capital-input"
+                          type="number"
+                          required
+                          min={selectedCatalogItem.startupCostCR}
+                          step={1000}
+                          value={bizCapitalCR}
+                          onChange={(e) => setBizCapitalCR(Number(e.target.value))}
+                          className="w-full px-3.5 py-2.5 rounded-xl font-mono text-base font-bold bg-[var(--bg-panel)] border border-[var(--border-subtle)] text-[var(--text-primary)]"
+                        />
+                      </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs font-mono tabular-nums">
-                      <div className="p-3 rounded-xl bg-[var(--bg-panel)] border border-[var(--border-subtle)]">
-                        <div className="text-[10px] text-[var(--text-muted)]">Chi phí thành lập</div>
-                        <div className="font-bold text-[var(--text-primary)] mt-1">
-                          {selectedCatalogItem.startupCostCR.toLocaleString('en-US')} CR
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs font-mono tabular-nums">
+                        <div className="p-3 rounded-xl bg-[var(--bg-panel)] border border-[var(--border-subtle)]">
+                          <div className="text-[10px] text-[var(--text-muted)]">Chi phí thành lập</div>
+                          <div className="font-bold text-[var(--text-primary)] mt-1">
+                            {selectedCatalogItem.startupCostCR.toLocaleString('en-US')} CR
+                          </div>
+                        </div>
+                        <div className="p-3 rounded-xl bg-[var(--bg-panel)] border border-[var(--border-subtle)]">
+                          <div className="text-[10px] text-[var(--text-muted)]">Vốn lưu động công ty</div>
+                          <div className="font-bold text-[var(--positive)] mt-1">
+                            {Math.max(0, bizCapitalCR - selectedCatalogItem.startupCostCR).toLocaleString('en-US')} CR
+                          </div>
+                        </div>
+                        <div className="p-3 rounded-xl bg-[var(--bg-panel)] border border-[var(--border-subtle)]">
+                          <div className="text-[10px] text-[var(--text-muted)]">Ví còn lại dự kiến</div>
+                          <div
+                            className={`font-bold mt-1 ${
+                              availableWalletCR - bizCapitalCR >= 0
+                                ? 'text-[var(--accent)]'
+                                : 'text-[var(--negative)]'
+                            }`}
+                          >
+                            {(availableWalletCR - bizCapitalCR).toLocaleString('en-US')} CR
+                          </div>
                         </div>
                       </div>
-                      <div className="p-3 rounded-xl bg-[var(--bg-panel)] border border-[var(--border-subtle)]">
-                        <div className="text-[10px] text-[var(--text-muted)]">Vốn lưu động công ty</div>
-                        <div className="font-bold text-[var(--positive)] mt-1">
-                          {Math.max(0, bizCapitalCR - selectedCatalogItem.startupCostCR).toLocaleString('en-US')} CR
-                        </div>
-                      </div>
-                      <div className="p-3 rounded-xl bg-[var(--bg-panel)] border border-[var(--border-subtle)]">
-                        <div className="text-[10px] text-[var(--text-muted)]">Ví còn lại dự kiến</div>
+
+                      {availableWalletCR < bizCapitalCR && (
                         <div
-                          className={`font-bold mt-1 ${
-                            availableWalletCR - bizCapitalCR >= 0
-                              ? 'text-[var(--accent)]'
-                              : 'text-[var(--negative)]'
-                          }`}
+                          data-testid="wizard-insufficient-capital-warning"
+                          className="p-3 rounded-xl bg-[var(--negative)]/12 border border-[var(--negative)]/35 text-xs text-[var(--negative)]"
                         >
-                          {(availableWalletCR - bizCapitalCR).toLocaleString('en-US')} CR
+                          Số dư khả dụng trong ví chưa đủ mức vốn góp này. Hãy giảm vốn góp về mức tối thiểu{' '}
+                          {selectedCatalogItem.startupCostCR.toLocaleString('en-US')} CR hoặc chọn ngành nghề phù hợp hơn.
                         </div>
-                      </div>
+                      )}
                     </div>
-
-                    {availableWalletCR < bizCapitalCR && (
-                      <div className="p-3 rounded-xl bg-[var(--negative)]/12 border border-[var(--negative)]/35 text-xs text-[var(--negative)]">
-                        Số dư khả dụng trong ví chưa đủ mức vốn góp này. Hãy giảm vốn góp về mức tối thiểu{' '}
-                        {selectedCatalogItem.startupCostCR.toLocaleString('en-US')} CR hoặc chọn ngành nghề phù hợp hơn.
-                      </div>
-                    )}
                   </div>
-                </div>
-              )}
+                );
+              })()}
             </div>
 
             {/* Wizard Footer */}

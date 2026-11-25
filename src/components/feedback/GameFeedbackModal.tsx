@@ -5,6 +5,7 @@ import {
   Building2,
   CheckCircle2,
   Handshake,
+  MapPin,
   TrendingUp,
   X,
 } from 'lucide-react';
@@ -12,7 +13,7 @@ import { getNpcPortraitUrl, getSceneImageUrl } from '../../features/career/caree
 import { useAppStore } from '../../store/useAppStore';
 
 export function GameFeedbackModal() {
-  const { gameFeedback, dismissGameFeedback, setActivePage, playMode } = useAppStore();
+  const { gameFeedback, dismissGameFeedback, setActivePage, focusBusinessOnMap, playMode } = useAppStore();
 
   useEffect(() => {
     if (!gameFeedback) return;
@@ -69,6 +70,17 @@ export function GameFeedbackModal() {
     const target = gameFeedback.ctaTargetPage;
     dismissGameFeedback();
     if (target) {
+      setActivePage(target);
+    }
+  };
+
+  const handleSecondaryCta = () => {
+    const bizId = gameFeedback.secondaryCtaBusinessId;
+    const target = gameFeedback.secondaryCtaTargetPage;
+    dismissGameFeedback();
+    if (bizId) {
+      focusBusinessOnMap(bizId, true);
+    } else if (target) {
       setActivePage(target);
     }
   };
@@ -207,6 +219,17 @@ export function GameFeedbackModal() {
             >
               Đóng
             </button>
+            {gameFeedback.secondaryCtaLabel && (
+              <button
+                type="button"
+                data-testid="game-feedback-secondary-cta"
+                onClick={handleSecondaryCta}
+                className="px-4 py-2.5 rounded-xl border border-[var(--accent)]/65 bg-[var(--bg-surface)] hover:bg-[var(--accent)]/15 text-[var(--accent)] text-sm font-bold inline-flex items-center gap-2 transition-colors cursor-pointer min-h-[44px]"
+              >
+                <MapPin className="w-4 h-4" />
+                <span>{gameFeedback.secondaryCtaLabel}</span>
+              </button>
+            )}
             <button
               type="button"
               data-testid="game-feedback-primary-cta"

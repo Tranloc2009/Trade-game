@@ -4,6 +4,7 @@ import {
   FastForward,
   FolderPlus,
   HardDrive,
+  Monitor,
   Save,
   UserPen,
   Volume2,
@@ -12,6 +13,10 @@ import {
 import type { CareerDifficulty, GamePlayMode } from '../../../../shared/contracts/careerStory';
 import { formatCR } from '../../../../shared/contracts/money';
 import { useAppStore } from '../../../store/useAppStore';
+import {
+  GRAPHICS_QUALITY_PRESETS,
+  type GraphicsQuality,
+} from '../../city-engine/isoMath';
 
 interface CareerSettingsPageProps {
   onRenameCharacter: (name: string) => Promise<void>;
@@ -35,6 +40,8 @@ export function CareerSettingsPage({
     toggleCareerTypewriter,
     tradingMode,
     setTradingMode,
+    graphicsQuality,
+    setGraphicsQuality,
   } = useAppStore();
 
   const [charNameInput, setCharNameInput] = useState(careerStory?.characterName ?? '');
@@ -157,6 +164,53 @@ export function CareerSettingsPage({
               {tradingMode === 'BEGINNER' ? 'Cơ bản (dễ làm quen)' : 'Nâng cao (sổ lệnh đầy đủ)'}
             </div>
           </button>
+        </div>
+      </section>
+
+      {/* City 2.5D Graphics Quality Settings */}
+      <section
+        data-testid="career-graphics-settings"
+        className="rounded-xl border border-[#342D24] bg-[#191612] p-5 space-y-3"
+      >
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-sm font-semibold text-[#F5EFE6]">
+            <Monitor className="w-4 h-4 text-[#D4AF6A]" />
+            <span>Đồ họa Thành phố 2.5D (PixiJS WebGL)</span>
+          </div>
+          <span className="text-[11px] font-mono text-[#D4AF6A]">
+            {GRAPHICS_QUALITY_PRESETS[graphicsQuality].labelVi}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+          {(['LOW', 'MEDIUM', 'HIGH', 'ULTRA'] as GraphicsQuality[]).map((q) => {
+            const preset = GRAPHICS_QUALITY_PRESETS[q];
+            const active = graphicsQuality === q;
+            return (
+              <button
+                key={q}
+                type="button"
+                data-testid={`settings-graphics-${q}`}
+                onClick={() => setGraphicsQuality(q)}
+                className={`p-3 rounded-lg border text-left space-y-1 transition-colors cursor-pointer ${
+                  active
+                    ? 'border-[#D4AF6A] bg-[#262016]'
+                    : 'border-[#342D24] bg-[#201C17] hover:border-[#D4AF6A]/60'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-[#F5EFE6]">{preset.shortLabel}</span>
+                  <span className="text-[10px] font-mono text-[#D4AF6A]">
+                    {preset.maxDpr}× · {preset.maxFps} FPS
+                  </span>
+                </div>
+                <div className="text-[11px] font-medium text-[#E5DAC8]">{preset.labelVi}</div>
+                <div className="text-[10px] text-[#A89C89] leading-relaxed">
+                  {preset.descriptionVi}
+                </div>
+              </button>
+            );
+          })}
         </div>
       </section>
 
