@@ -73,27 +73,25 @@ export function CareerShell({
   onLogout,
   busy = false,
 }: CareerShellProps) {
-  const {
-    activePage,
-    setActivePage,
-    sidebarCollapsed,
-    toggleSidebar,
-    careerStory,
-    player,
-    gameClock,
-    careerSoundMuted,
-    toggleCareerSoundMuted,
-    reducedMotionPref,
-    toggleReducedMotion,
-    setPhoneOpen,
-    setJournalOpen,
-    setMainMenuOpen,
-    setEndingModalOpen,
-    openBusinessCreationWizard,
-    openBusinessWorkspaceTab,
-    toasts,
-    dismissToast,
-  } = useAppStore();
+  const activePage = useAppStore((s) => s.activePage);
+  const setActivePage = useAppStore((s) => s.setActivePage);
+  const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
+  const toggleSidebar = useAppStore((s) => s.toggleSidebar);
+  const careerStory = useAppStore((s) => s.careerStory);
+  const player = useAppStore((s) => s.player);
+  const gameClock = useAppStore((s) => s.gameClock);
+  const careerSoundMuted = useAppStore((s) => s.careerSoundMuted);
+  const toggleCareerSoundMuted = useAppStore((s) => s.toggleCareerSoundMuted);
+  const reducedMotionPref = useAppStore((s) => s.reducedMotionPref);
+  const toggleReducedMotion = useAppStore((s) => s.toggleReducedMotion);
+  const setPhoneOpen = useAppStore((s) => s.setPhoneOpen);
+  const setJournalOpen = useAppStore((s) => s.setJournalOpen);
+  const setMainMenuOpen = useAppStore((s) => s.setMainMenuOpen);
+  const setEndingModalOpen = useAppStore((s) => s.setEndingModalOpen);
+  const openBusinessCreationWizard = useAppStore((s) => s.openBusinessCreationWizard);
+  const openBusinessWorkspaceTab = useAppStore((s) => s.openBusinessWorkspaceTab);
+  const toasts = useAppStore((s) => s.toasts);
+  const dismissToast = useAppStore((s) => s.dismissToast);
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);

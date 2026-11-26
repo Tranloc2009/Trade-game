@@ -65,29 +65,27 @@ export function AppShell({
   onResetPractice,
   practiceBusy = false,
 }: AppShellProps) {
-  const {
-    activePage,
-    setActivePage,
-    sidebarCollapsed,
-    toggleSidebar,
-    theme,
-    toggleTheme,
-    reducedMotionPref,
-    toggleReducedMotion,
-    worldId,
-    worldMode,
-    isDemoTemporaryServer,
-    connectionState,
-    gameClock,
-    player,
-    notifications,
-    markNotificationsRead,
-    toasts,
-    dismissToast,
-    setGlossaryDrawerOpen,
-    setTutorialOpen,
-    setMainMenuOpen,
-  } = useAppStore();
+  const activePage = useAppStore((s) => s.activePage);
+  const setActivePage = useAppStore((s) => s.setActivePage);
+  const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
+  const toggleSidebar = useAppStore((s) => s.toggleSidebar);
+  const theme = useAppStore((s) => s.theme);
+  const toggleTheme = useAppStore((s) => s.toggleTheme);
+  const reducedMotionPref = useAppStore((s) => s.reducedMotionPref);
+  const toggleReducedMotion = useAppStore((s) => s.toggleReducedMotion);
+  const worldId = useAppStore((s) => s.worldId);
+  const worldMode = useAppStore((s) => s.worldMode);
+  const isDemoTemporaryServer = useAppStore((s) => s.isDemoTemporaryServer);
+  const connectionState = useAppStore((s) => s.connectionState);
+  const gameClock = useAppStore((s) => s.gameClock);
+  const player = useAppStore((s) => s.player);
+  const notifications = useAppStore((s) => s.notifications);
+  const markNotificationsRead = useAppStore((s) => s.markNotificationsRead);
+  const toasts = useAppStore((s) => s.toasts);
+  const dismissToast = useAppStore((s) => s.dismissToast);
+  const setGlossaryDrawerOpen = useAppStore((s) => s.setGlossaryDrawerOpen);
+  const setTutorialOpen = useAppStore((s) => s.setTutorialOpen);
+  const setMainMenuOpen = useAppStore((s) => s.setMainMenuOpen);
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);

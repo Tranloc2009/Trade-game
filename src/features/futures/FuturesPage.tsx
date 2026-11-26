@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Activity,
@@ -10,6 +10,8 @@ import {
   X,
 } from 'lucide-react';
 import {
+  calcFuturesPnlMinor,
+  fromPriceInt,
   type FuturesAccountSummary,
   type FuturesPosition,
 } from '../../../shared/contracts/futures';
@@ -19,7 +21,8 @@ import { BeginnerFuturesPanel } from '../../components/beginner/BeginnerFuturesP
 import { GlossaryTerm } from '../../components/beginner/GlossaryTerm';
 import { SimplePriceChart } from '../../components/beginner/SimplePriceChart';
 import { TradingModeToggle } from '../../components/beginner/TradingModeToggle';
-import { CandlestickChart } from '../../components/charts/CandlestickChart';
+import { CandlestickChart, type ChartPriceLineSpec } from '../../components/charts/CandlestickChart';
+import { extractLiveCandleForTimeframe } from '../../lib/chartSync';
 import { formatDateTimeShort, formatTimeShort } from '../../lib/indicators';
 import { setAuthoritativeFuturesAccount } from '../../lib/queryClient';
 import { FuturesService } from '../../services/api';
@@ -46,25 +49,30 @@ function formatCountdown(targetIso: string, nowMs: number): string {
 }
 
 export function FuturesPage() {
-  const {
-    player,
-    setPlayer,
-    theme,
-    timeframe,
-    setTimeframe,
-    selectedFuturesSymbol,
-    setSelectedFuturesSymbol,
-    futuresOverview,
-    setFuturesOverview,
-    futuresOrderBooks,
-    setFuturesOrderBook,
-    futuresRecentTradesBySymbol,
-    setFuturesRecentTrades,
-    futuresLiveCandleTick,
-    futuresSyncSeq,
-    pushToast,
-    tradingMode,
-  } = useAppStore();
+  const player = useAppStore((s) => s.player);
+  const setPlayer = useAppStore((s) => s.setPlayer);
+  const theme = useAppStore((s) => s.theme);
+  const timeframe = useAppStore((s) => s.timeframe);
+  const setTimeframe = useAppStore((s) => s.setTimeframe);
+  const selectedFuturesSymbol = useAppStore((s) => s.selectedFuturesSymbol);
+  const setSelectedFuturesSymbol = useAppStore((s) => s.setSelectedFuturesSymbol);
+  const futuresOverview = useAppStore((s) => s.futuresOverview);
+  const setFuturesOverview = useAppStore((s) => s.setFuturesOverview);
+  const setFuturesOrderBook = useAppStore((s) => s.setFuturesOrderBook);
+  const setFuturesRecentTrades = useAppStore((s) => s.setFuturesRecentTrades);
+  const applyFuturesPulse = useAppStore((s) => s.applyFuturesPulse);
+  const futuresLiveCandleTick = useAppStore((s) => s.futuresLiveCandleTick);
+  const futuresSyncSeq = useAppStore((s) => s.futuresSyncSeq);
+  const pushToast = useAppStore((s) => s.pushToast);
+  const tradingMode = useAppStore((s) => s.tradingMode);
+  const playMode = useAppStore((s) => s.playMode);
+  const worldMode = useAppStore((s) => s.worldMode);
+  const activeCareerSaveId = useAppStore((s) => s.activeCareerSaveId);
+  const careerPaused = useAppStore((s) => Boolean(s.careerStory?.paused));
+  const careerClockSpeed = useAppStore((s) => s.careerStory?.clockSpeed ?? '1x');
+
+  const activeOrderBook = useAppStore((s) => s.futuresOrderBooks[selectedFuturesSymbol]);
+  const activeTrades = useAppStore((s) => s.futuresRecentTradesBySymbol[selectedFuturesSymbol]) ?? [];
 
   const [bottomTab, setBottomTab] = useState<BottomTab>('POSITIONS');
   const [pickedPrice, setPickedPrice] = useState<number | null>(null);
@@ -72,6 +80,7 @@ export function FuturesPage() {
   const [addMarginTarget, setAddMarginTarget] = useState<FuturesPosition | null>(null);
   const [addMarginAmount, setAddMarginAmount] = useState('500');
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
+  const closingLockRef = useRef<Set<string>>(new Set());
   const [nowMs, setNowMs] = useState(Date.now());
   const [beginnerTab, setBeginnerTab] = useState<'POSITIONS' | 'OPEN_ORDERS' | 'HISTORY'>('POSITIONS');
 
@@ -81,10 +90,71 @@ export function FuturesPage() {
     return () => clearInterval(id);
   }, []);
 
-  // Subscribe to selected futures room over Socket.IO
+  // Subscribe to selected futures room over Socket.IO in Online Live mode and unsubscribe on unmount
   useEffect(() => {
+    if (playMode !== 'ONLINE' || worldMode !== 'LIVE') return;
     realtimeClient.subscribeFutures(selectedFuturesSymbol);
-  }, [selectedFuturesSymbol]);
+    return () => {
+      realtimeClient.unsubscribeFutures(selectedFuturesSymbol);
+    };
+  }, [selectedFuturesSymbol, playMode, worldMode]);
+
+  // Lightweight single-symbol realtime pulse for isolated Career & Practice worlds
+  useEffect(() => {
+    if (!selectedFuturesSymbol) return;
+    if (playMode === 'ONLINE' && worldMode === 'LIVE') return;
+    if (playMode === 'CAREER' && (careerPaused || careerClockSpeed === 'PAUSE')) return;
+
+    let disposed = false;
+    let inFlight = false;
+    let activeController: AbortController | null = null;
+
+    const pollOnce = async () => {
+      if (disposed || inFlight) return;
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      inFlight = true;
+      const controller = new AbortController();
+      activeController = controller;
+      try {
+        const pulse = await FuturesService.getFuturesPulse(
+          selectedFuturesSymbol,
+          timeframe,
+          12,
+          controller.signal,
+        );
+        if (!disposed) {
+          applyFuturesPulse(pulse);
+          if (pulse.account && player?.id) {
+            setAuthoritativeFuturesAccount(player.id, sanitizeFuturesAccount(pulse.account));
+          }
+        }
+      } catch {
+        // Ignore abort / transient errors cleanly
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    const intervalId = window.setInterval(() => {
+      void pollOnce();
+    }, 1_100);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(intervalId);
+      activeController?.abort();
+    };
+  }, [
+    selectedFuturesSymbol,
+    timeframe,
+    playMode,
+    worldMode,
+    activeCareerSaveId,
+    careerPaused,
+    careerClockSpeed,
+    applyFuturesPulse,
+    player?.id,
+  ]);
 
   const { data: overviewData, refetch: refetchOverview } = useQuery({
     queryKey: ['futures-overview'],
@@ -151,17 +221,87 @@ export function FuturesPage() {
     refetchInterval: 15_000,
   });
 
-  const activeOrderBook = futuresOrderBooks[selectedFuturesSymbol];
-  const activeTrades = futuresRecentTradesBySymbol[selectedFuturesSymbol] ?? [];
-  const liveCandle =
-    futuresLiveCandleTick && futuresLiveCandleTick.symbol === selectedFuturesSymbol
-      ? futuresLiveCandleTick.candles[timeframe] ?? null
-      : null;
+  const liveCandle = useMemo(
+    () => extractLiveCandleForTimeframe(futuresLiveCandleTick, selectedFuturesSymbol, timeframe),
+    [futuresLiveCandleTick, selectedFuturesSymbol, timeframe],
+  );
 
   const activePosition = useMemo(
     () => (accountData?.positions ?? []).find((p) => p.symbol === selectedFuturesSymbol) ?? null,
     [accountData?.positions, selectedFuturesSymbol],
   );
+
+  // Dynamic live unrealized PnL & ROE computed from latest contract markPriceInt
+  const computeLivePositionMetrics = (pos: FuturesPosition) => {
+    const contract = contracts.find((x) => x.symbol === pos.symbol);
+    const liveMarkInt = contract?.markPriceInt ?? pos.markPriceInt;
+    const priceScale = contract?.priceScale ?? 100;
+    const multiplier = contract?.contractMultiplier ?? 1;
+    const livePnlMinor =
+      contract && liveMarkInt !== pos.markPriceInt
+        ? calcFuturesPnlMinor(pos.side, pos.entryPriceInt, liveMarkInt, pos.qtyInt, priceScale, multiplier)
+        : pos.unrealizedPnlMinor;
+    const liveRoePct =
+      pos.initialMarginMinor > 0
+        ? Number(((livePnlMinor / pos.initialMarginMinor) * 100).toFixed(2))
+        : pos.roePct;
+    return { liveMarkInt, livePnlMinor, liveRoePct };
+  };
+
+  // Entry, Liquidation, SL & TP overlay price lines on the Pro CandlestickChart
+  const chartPriceLines = useMemo<ChartPriceLineSpec[]>(() => {
+    if (!activeContract) return [];
+    const lines: ChartPriceLineSpec[] = [];
+    if (activePosition) {
+      lines.push({
+        id: `entry_${activePosition.id}`,
+        price: fromPriceInt(activePosition.entryPriceInt, activeContract.priceScale),
+        title: `Entry ${activePosition.side} ${activePosition.leverage}x`,
+        color: '#22d3ee',
+        lineStyle: 'solid',
+      });
+      if (activePosition.liquidationPriceInt > 0) {
+        lines.push({
+          id: `liq_${activePosition.id}`,
+          price: fromPriceInt(activePosition.liquidationPriceInt, activeContract.priceScale),
+          title: 'Thanh lý (Liq)',
+          color: '#f43f5e',
+          lineStyle: 'dashed',
+        });
+      }
+    }
+    const conditionals = (accountData?.openOrders ?? []).filter(
+      (o) =>
+        o.symbol === activeContract.symbol &&
+        o.status === 'PENDING_TRIGGER' &&
+        o.triggerPriceInt != null &&
+        o.triggerPriceInt > 0,
+    );
+    for (const cond of conditionals) {
+      const isTp = cond.type === 'TAKE_PROFIT_MARKET';
+      lines.push({
+        id: `cond_${cond.id}`,
+        price: fromPriceInt(cond.triggerPriceInt!, activeContract.priceScale),
+        title: isTp ? 'TP' : 'SL',
+        color: isTp ? '#10b981' : '#f59e0b',
+        lineStyle: 'dotted',
+      });
+    }
+    return lines;
+  }, [activeContract, activePosition, accountData?.openOrders]);
+
+  const liveTotalUnrealizedPnlMinor = useMemo(() => {
+    const positions = accountData?.positions ?? [];
+    if (positions.length === 0) return 0;
+    return positions.reduce((sum, pos) => {
+      const c = contracts.find((item) => item.symbol === pos.symbol);
+      const liveMarkInt = c?.markPriceInt ?? pos.markPriceInt;
+      const livePnl = c
+        ? calcFuturesPnlMinor(pos.side, pos.entryPriceInt, liveMarkInt, pos.qtyInt, c.priceScale, c.contractMultiplier)
+        : pos.unrealizedPnlMinor;
+      return sum + livePnl;
+    }, 0);
+  }, [accountData?.positions, contracts]);
 
   const handleOrderSuccess = (nextAccount: FuturesAccountSummary) => {
     setAuthoritativeFuturesAccount(player?.id, nextAccount);
@@ -194,6 +334,8 @@ export function FuturesPage() {
   };
 
   const handleQuickClose = async (pos: FuturesPosition, ratio: 0.5 | 1) => {
+    if (closingLockRef.current.has(pos.id)) return;
+    closingLockRef.current.add(pos.id);
     setBusyActionId(`${pos.id}_${ratio}`);
     try {
       const contract = contracts.find((c) => c.symbol === pos.symbol);
@@ -210,11 +352,19 @@ export function FuturesPage() {
       setPlayer(res.profile);
       setAuthoritativeFuturesAccount(player?.id, res.account);
       void refetchOverview();
-      pushToast({
-        tone: 'success',
-        title: `Đã đóng ${ratio === 1 ? 'toàn bộ' : '50%'} vị thế ${pos.symbol}`,
-        description: `Khớp ${formatQty(res.order.filledQuantity)} hợp đồng trên sổ lệnh thực.`,
-      });
+      if (res.order.filledQuantity > 0) {
+        pushToast({
+          tone: 'success',
+          title: `Đã đóng ${ratio === 1 ? 'toàn bộ' : '50%'} vị thế ${pos.symbol}`,
+          description: `Khớp ${formatQty(res.order.filledQuantity)} hợp đồng trên sổ lệnh thực.`,
+        });
+      } else {
+        pushToast({
+          tone: 'warning',
+          title: `Không khớp lệnh đóng ${pos.symbol}`,
+          description: 'Sổ lệnh đối ứng tạm thời không đủ thanh khoản. Vị thế vẫn đang mở.',
+        });
+      }
     } catch (err) {
       pushToast({
         tone: 'error',
@@ -222,6 +372,7 @@ export function FuturesPage() {
         description: err instanceof Error ? err.message : 'Lỗi không xác định.',
       });
     } finally {
+      closingLockRef.current.delete(pos.id);
       setBusyActionId(null);
     }
   };
@@ -351,6 +502,7 @@ export function FuturesPage() {
             <SimplePriceChart
               symbol={activeContract.symbol}
               candles={candleData?.candles ?? []}
+              liveCandle={liveCandle}
               timeframe={timeframe}
               onTimeframeChange={setTimeframe}
               positive={activeContract.priceChange24hPct >= 0}
@@ -409,6 +561,7 @@ export function FuturesPage() {
                           const c = contracts.find((x) => x.symbol === pos.symbol);
                           const pScale = c?.priceScale ?? 100;
                           const pDec = c?.priceDecimals ?? 2;
+                          const { livePnlMinor, liveRoePct } = computeLivePositionMetrics(pos);
                           return (
                             <tr key={pos.id}>
                               <td className="px-3 py-2.5">
@@ -426,14 +579,14 @@ export function FuturesPage() {
                               </td>
                               <td
                                 className={`px-3 py-2.5 text-right font-semibold ${
-                                  pos.unrealizedPnlMinor >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                                  livePnlMinor >= 0 ? 'text-emerald-400' : 'text-rose-400'
                                 }`}
                               >
-                                {pos.unrealizedPnlMinor >= 0 ? 'Lời +' : 'Lỗ '}
-                                {formatCR(pos.unrealizedPnlMinor)} CR
+                                {livePnlMinor >= 0 ? 'Lời +' : 'Lỗ '}
+                                {formatCR(livePnlMinor)} CR
                                 <div className="text-[10px]">
-                                  ({pos.roePct >= 0 ? '+' : ''}
-                                  {pos.roePct.toFixed(2)}%)
+                                  ({liveRoePct >= 0 ? '+' : ''}
+                                  {liveRoePct.toFixed(2)}%)
                                 </div>
                               </td>
                               <td className="px-3 py-2.5 text-right">
@@ -727,6 +880,7 @@ export function FuturesPage() {
             loading={candlesLoading}
             theme={theme}
             priceDecimals={activeContract.priceDecimals}
+            priceLines={chartPriceLines}
             onTimeframeChange={setTimeframe}
           />
         </div>
@@ -794,13 +948,13 @@ export function FuturesPage() {
                 Unrealized PnL:{' '}
                 <strong
                   className={
-                    accountData.totalUnrealizedPnlMinor >= 0
+                    liveTotalUnrealizedPnlMinor >= 0
                       ? 'text-[var(--positive)]'
                       : 'text-[var(--negative)]'
                   }
                 >
-                  {accountData.totalUnrealizedPnlMinor >= 0 ? '+' : ''}
-                  {formatCR(accountData.totalUnrealizedPnlMinor)} CR
+                  {liveTotalUnrealizedPnlMinor >= 0 ? '+' : ''}
+                  {formatCR(liveTotalUnrealizedPnlMinor)} CR
                 </strong>
               </span>
             </div>
@@ -834,6 +988,7 @@ export function FuturesPage() {
                 ) : (
                   accountData.positions.map((pos) => {
                     const c = contracts.find((x) => x.symbol === pos.symbol) ?? activeContract;
+                    const { liveMarkInt, livePnlMinor, liveRoePct } = computeLivePositionMetrics(pos);
                     const isDanger = pos.marginRatioPct >= 80;
                     return (
                       <tr key={pos.id} className="hover:bg-[var(--bg-surface)]/40">
@@ -867,7 +1022,7 @@ export function FuturesPage() {
                           {formatRate(pos.entryPriceInt, c.priceScale, c.priceDecimals)}
                         </td>
                         <td className="px-3 py-2.5 text-right text-[var(--warning)]">
-                          {formatRate(pos.markPriceInt, c.priceScale, c.priceDecimals)}
+                          {formatRate(liveMarkInt, c.priceScale, c.priceDecimals)}
                         </td>
                         <td className="px-3 py-2.5 text-right font-semibold text-[var(--negative)]">
                           {formatRate(pos.liquidationPriceInt, c.priceScale, c.priceDecimals)}
@@ -889,16 +1044,16 @@ export function FuturesPage() {
                         </td>
                         <td
                           className={`px-3 py-2.5 text-right font-semibold ${
-                            pos.unrealizedPnlMinor >= 0 ? 'text-[var(--positive)]' : 'text-[var(--negative)]'
+                            livePnlMinor >= 0 ? 'text-[var(--positive)]' : 'text-[var(--negative)]'
                           }`}
                         >
                           <div>
-                            {pos.unrealizedPnlMinor >= 0 ? '+' : ''}
-                            {formatCR(pos.unrealizedPnlMinor)} CR
+                            {livePnlMinor >= 0 ? '+' : ''}
+                            {formatCR(livePnlMinor)} CR
                           </div>
                           <div className="text-[10px]">
-                            ({pos.roePct >= 0 ? '+' : ''}
-                            {pos.roePct.toFixed(2)}%)
+                            ({liveRoePct >= 0 ? '+' : ''}
+                            {liveRoePct.toFixed(2)}%)
                           </div>
                         </td>
                         <td className="px-3 py-2.5 text-right whitespace-nowrap">

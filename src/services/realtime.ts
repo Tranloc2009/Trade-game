@@ -97,10 +97,28 @@ class RealtimeClient {
     }
   }
 
+  unsubscribeMarket(symbol?: string): void {
+    if (!symbol || this.subscribedSymbol === symbol) {
+      this.subscribedSymbol = null;
+    }
+    if (this.socket?.connected) {
+      this.socket.emit('market:unsubscribe', symbol);
+    }
+  }
+
   subscribeFutures(symbol: string): void {
     this.subscribedFuturesSymbol = symbol;
     if (this.socket?.connected) {
       this.socket.emit('futures:subscribe', symbol);
+    }
+  }
+
+  unsubscribeFutures(symbol?: string): void {
+    if (!symbol || this.subscribedFuturesSymbol === symbol) {
+      this.subscribedFuturesSymbol = null;
+    }
+    if (this.socket?.connected) {
+      this.socket.emit('futures:unsubscribe', symbol);
     }
   }
 

@@ -19,7 +19,8 @@ import { GlossaryTerm } from '../../components/beginner/GlossaryTerm';
 import { SimplePriceChart } from '../../components/beginner/SimplePriceChart';
 import { SimpleTradeFlow } from '../../components/beginner/SimpleTradeFlow';
 import { TradingModeToggle } from '../../components/beginner/TradingModeToggle';
-import { CandlestickChart } from '../../components/charts/CandlestickChart';
+import { CandlestickChart, type ChartTradeMarkerSpec } from '../../components/charts/CandlestickChart';
+import { extractLiveCandleForTimeframe } from '../../lib/chartSync';
 import { formatTimeShort } from '../../lib/indicators';
 import { applySpotOrderToQueryCache } from '../../lib/queryClient';
 import { ApiClientError, TradingService } from '../../services/api';
@@ -37,30 +38,32 @@ interface ExchangePageProps {
 
 export function ExchangePage({ forcedMarketClass }: ExchangePageProps = {}) {
   const queryClient = useQueryClient();
-  const {
-    assets,
-    selectedSymbol,
-    setSelectedSymbol,
-    exchangeClassFilter,
-    setExchangeClassFilter,
-    timeframe,
-    setTimeframe,
-    theme,
-    watchlist,
-    toggleWatchlist,
-    orderBooks,
-    setOrderBook,
-    recentTradesBySymbol,
-    setRecentTrades,
-    liveCandleTick,
-    player,
-    setPlayer,
-    economy,
-    pushToast,
-    tradingMode,
-    setTradingMode,
-    setActivePage,
-  } = useAppStore();
+  const assets = useAppStore((s) => s.assets);
+  const selectedSymbol = useAppStore((s) => s.selectedSymbol);
+  const setSelectedSymbol = useAppStore((s) => s.setSelectedSymbol);
+  const exchangeClassFilter = useAppStore((s) => s.exchangeClassFilter);
+  const setExchangeClassFilter = useAppStore((s) => s.setExchangeClassFilter);
+  const timeframe = useAppStore((s) => s.timeframe);
+  const setTimeframe = useAppStore((s) => s.setTimeframe);
+  const theme = useAppStore((s) => s.theme);
+  const watchlist = useAppStore((s) => s.watchlist);
+  const toggleWatchlist = useAppStore((s) => s.toggleWatchlist);
+  const setOrderBook = useAppStore((s) => s.setOrderBook);
+  const setRecentTrades = useAppStore((s) => s.setRecentTrades);
+  const applyMarketPulse = useAppStore((s) => s.applyMarketPulse);
+  const liveCandleTick = useAppStore((s) => s.liveCandleTick);
+  const player = useAppStore((s) => s.player);
+  const setPlayer = useAppStore((s) => s.setPlayer);
+  const economy = useAppStore((s) => s.economy);
+  const pushToast = useAppStore((s) => s.pushToast);
+  const tradingMode = useAppStore((s) => s.tradingMode);
+  const setTradingMode = useAppStore((s) => s.setTradingMode);
+  const setActivePage = useAppStore((s) => s.setActivePage);
+  const playMode = useAppStore((s) => s.playMode);
+  const worldMode = useAppStore((s) => s.worldMode);
+  const activeCareerSaveId = useAppStore((s) => s.activeCareerSaveId);
+  const careerPaused = useAppStore((s) => Boolean(s.careerStory?.paused));
+  const careerClockSpeed = useAppStore((s) => s.careerStory?.clockSpeed ?? '1x');
 
   const [search, setSearch] = useState('');
   const [watchlistOnly, setWatchlistOnly] = useState(false);
@@ -108,11 +111,57 @@ export function ExchangePage({ forcedMarketClass }: ExchangePageProps = {}) {
     }
   }, [forcedMarketClass, scopedAssets, selectedSymbol, setSelectedSymbol]);
 
-  // Subscribe to active symbol's Socket.IO room so orderbook/trades/candles stream live
+  const activeOrderBook = useAppStore((s) => s.orderBooks[activeSymbol]);
+  const recentTrades = useAppStore((s) => s.recentTradesBySymbol[activeSymbol]) ?? [];
+
+  // Subscribe to active symbol's Socket.IO room in Online Live mode, and unsubscribe cleanly on unmount
   useEffect(() => {
-    realtimeClient.subscribeMarket(activeSymbol);
     setPrefilledPrice(null);
-  }, [activeSymbol]);
+    if (playMode !== 'ONLINE' || worldMode !== 'LIVE') return;
+    realtimeClient.subscribeMarket(activeSymbol);
+    return () => {
+      realtimeClient.unsubscribeMarket(activeSymbol);
+    };
+  }, [activeSymbol, playMode, worldMode]);
+
+  // Lightweight single-symbol realtime pulse for isolated Career & Practice worlds (strictly active symbol only)
+  useEffect(() => {
+    if (!activeSymbol) return;
+    if (playMode === 'ONLINE' && worldMode === 'LIVE') return;
+    if (playMode === 'CAREER' && (careerPaused || careerClockSpeed === 'PAUSE')) return;
+
+    let disposed = false;
+    let inFlight = false;
+    let activeController: AbortController | null = null;
+
+    const pollOnce = async () => {
+      if (disposed || inFlight) return;
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      inFlight = true;
+      const controller = new AbortController();
+      activeController = controller;
+      try {
+        const pulse = await TradingService.getMarketPulse(activeSymbol, timeframe, 12, controller.signal);
+        if (!disposed) {
+          applyMarketPulse(pulse);
+        }
+      } catch {
+        // Ignore abort / transient errors cleanly
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    const intervalId = window.setInterval(() => {
+      void pollOnce();
+    }, 1_100);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(intervalId);
+      activeController?.abort();
+    };
+  }, [activeSymbol, timeframe, playMode, worldMode, activeCareerSaveId, careerPaused, careerClockSpeed, applyMarketPulse]);
 
   const { data: candleResp, isLoading: candlesLoading } = useQuery({
     queryKey: ['candles', activeSymbol, timeframe],
@@ -159,11 +208,27 @@ export function ExchangePage({ forcedMarketClass }: ExchangePageProps = {}) {
     });
   }, [scopedAssets, watchlistOnly, watchlist, search]);
 
-  const activeOrderBook = orderBooks[activeSymbol];
-  const recentTrades = recentTradesBySymbol[activeSymbol] ?? [];
   const openOrders = useMemo(() => filterOpenOrders(playerOrders), [playerOrders]);
-  const liveCandle =
-    liveCandleTick && liveCandleTick.symbol === activeSymbol ? liveCandleTick.candles[timeframe] ?? null : null;
+  const liveCandle = useMemo(
+    () => extractLiveCandleForTimeframe(liveCandleTick, activeSymbol, timeframe),
+    [liveCandleTick, activeSymbol, timeframe],
+  );
+  const chartTradeMarkers = useMemo<ChartTradeMarkerSpec[]>(() => {
+    if (!player) return [];
+    const markers: ChartTradeMarkerSpec[] = [];
+    for (const tr of recentTrades) {
+      if (tr.buyerId !== player.id && tr.sellerId !== player.id) continue;
+      const unixSec = Math.floor(new Date(tr.timestamp).getTime() / 1000);
+      if (!Number.isFinite(unixSec) || unixSec <= 0) continue;
+      const side: 'BUY' | 'SELL' = tr.buyerId === player.id ? 'BUY' : 'SELL';
+      markers.push({
+        time: unixSec,
+        side,
+        text: side === 'BUY' ? `M ${formatQty(tr.quantity)}` : `B ${formatQty(tr.quantity)}`,
+      });
+    }
+    return markers.slice(0, 12);
+  }, [recentTrades, player]);
 
   const handleCancelOrder = async (orderId: string) => {
     setCancellingId(orderId);
@@ -311,6 +376,7 @@ export function ExchangePage({ forcedMarketClass }: ExchangePageProps = {}) {
             <SimplePriceChart
               symbol={activeSymbol}
               candles={candleResp?.candles ?? []}
+              liveCandle={liveCandle}
               timeframe={timeframe}
               onTimeframeChange={setTimeframe}
               positive={isPositive}
@@ -940,6 +1006,8 @@ export function ExchangePage({ forcedMarketClass }: ExchangePageProps = {}) {
               liveCandle={liveCandle}
               loading={candlesLoading}
               theme={theme}
+              priceDecimals={selectedAsset.priceDecimals ?? 2}
+              tradeMarkers={chartTradeMarkers}
               onTimeframeChange={setTimeframe}
             />
           </div>

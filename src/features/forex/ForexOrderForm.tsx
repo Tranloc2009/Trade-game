@@ -12,6 +12,7 @@ import {
   toScaledInt,
 } from '../../../shared/contracts/money';
 import type { Asset, Order, OrderBookSnapshot, OrderSide, OrderType, PlayerProfile, TimeInForce } from '../../../shared/contracts/types';
+import { formatSpotOrderFeedback } from '../../lib/tradeExecutionFeedback';
 import { ApiClientError, TradingService } from '../../services/api';
 
 interface ForexOrderFormProps {
@@ -45,7 +46,7 @@ export function ForexOrderForm({
   const quoteCurrency = (pair.quoteCurrency ?? 'USD-SIM') as CurrencyCode;
 
   const [side, setSide] = useState<OrderSide>('BUY');
-  const [orderType, setOrderType] = useState<OrderType>('LIMIT');
+  const [orderType, setOrderType] = useState<OrderType>('MARKET');
   const [timeInForce, setTimeInForce] = useState<TimeInForce>('GTC');
   const [priceInput, setPriceInput] = useState<string>((pair.lastPriceMinor / scale).toFixed(decimals));
   const [qtyInput, setQtyInput] = useState<string>('100');
@@ -151,16 +152,18 @@ export function ForexOrderForm({
         status: res.order.status,
       });
 
+      const feedback = formatSpotOrderFeedback({
+        order: res.order,
+        trades: res.trades,
+        baseLabel: baseCurrency,
+        quoteLabel: quoteCurrency,
+        priceScale: scale,
+        priceDecimals: decimals,
+      });
       onNotify({
-        tone: 'success',
-        title:
-          res.trades.length > 0
-            ? `Đã khớp ${side === 'BUY' ? 'MUA' : 'BÁN'} ${pair.symbol}`
-            : `Đã đặt lệnh chờ ${side === 'BUY' ? 'MUA' : 'BÁN'} ${pair.symbol}`,
-        description:
-          res.trades.length > 0
-            ? `Khớp ${res.order.filledQuantity.toLocaleString('en-US')} ${baseCurrency} tại ${formatRate(res.trades[0].priceMinor, scale, decimals)} ${quoteCurrency}.`
-            : `Khối lượng ${parsedQty.toLocaleString('en-US')} ${baseCurrency} @ ${parsedPrice?.toFixed(decimals)} ${quoteCurrency}.`,
+        tone: feedback.tone,
+        title: feedback.title,
+        description: feedback.description,
       });
     } catch (err) {
       const msg = err instanceof ApiClientError ? err.message : 'Không thể gửi lệnh giao dịch Forex.';
@@ -210,7 +213,7 @@ export function ForexOrderForm({
       {/* Order Type & TIF */}
       <div className="flex items-center justify-between gap-2 text-xs">
         <div className="flex items-center gap-1">
-          {(['LIMIT', 'MARKET'] as const).map((t) => (
+          {(['MARKET', 'LIMIT'] as const).map((t) => (
             <button
               key={t}
               type="button"
@@ -221,7 +224,7 @@ export function ForexOrderForm({
                   : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
               }`}
             >
-              {t === 'LIMIT' ? 'Limit' : 'Market'}
+              {t === 'MARKET' ? 'Market' : 'Limit'}
             </button>
           ))}
         </div>

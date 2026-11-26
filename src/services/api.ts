@@ -7,6 +7,7 @@ import type {
 } from '../../shared/contracts/beginner';
 import type {
   FuturesAccountSummary,
+  FuturesContract,
   FuturesFundingSettlementEvent,
   FuturesMarginMode,
   FuturesOrder,
@@ -69,6 +70,7 @@ import type {
   LeaderboardEntry,
   LedgerEntry,
   Loan,
+  MarketPulseSnapshot,
   NewsItem,
   Order,
   OrderBookSnapshot,
@@ -212,7 +214,10 @@ async function request<T>(path: string, init: RequestInit = {}, modeOverride?: W
       ...init,
       headers,
     });
-  } catch {
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw err;
+    }
     throw new ApiClientError('DISCONNECTED', 'Mất kết nối tạm thời với máy chủ.', 0);
   }
 
@@ -260,14 +265,20 @@ export const TradingService = {
     request<{ symbol: string; timeframe: Timeframe; candles: Candle[] }>(
       `/api/markets/${encodeURIComponent(symbol)}/candles?timeframe=${timeframe}&limit=${limit}`,
     ),
+  getMarketPulse: (symbol: string, timeframe: Timeframe, depth = 12, signal?: AbortSignal) =>
+    request<MarketPulseSnapshot>(
+      `/api/markets/${encodeURIComponent(symbol)}/pulse?timeframe=${timeframe}&depth=${depth}`,
+      { signal },
+    ),
   getOrders: (symbol?: string) =>
     request<Order[]>(symbol ? `/api/orders?symbol=${encodeURIComponent(symbol)}` : '/api/orders'),
   getOpenOrders: (symbol?: string) =>
     request<Order[]>(symbol ? `/api/orders/open?symbol=${encodeURIComponent(symbol)}` : '/api/orders/open'),
-  previewOrder: (params: OrderPreviewRequest) =>
+  previewOrder: (params: OrderPreviewRequest, signal?: AbortSignal) =>
     request<OrderPreviewResponse>('/api/orders/preview', {
       method: 'POST',
       body: JSON.stringify(params),
+      signal,
     }),
   placeOrder: (params: {
     symbol: string;
@@ -492,10 +503,25 @@ export const FuturesService = {
         body: JSON.stringify({ acknowledged: true }),
       },
     ),
-  previewOrder: (params: FuturesPreviewRequest) =>
+  getFuturesPulse: (symbol: string, timeframe: Timeframe, depth = 12, signal?: AbortSignal) =>
+    request<{
+      symbol: string;
+      contract: FuturesContract;
+      orderBook: FuturesOrderBookSnapshot;
+      latestCandle: Candle | null;
+      latestCandles: Record<Timeframe, Candle> | null;
+      recentTrades: FuturesTrade[];
+      account: FuturesAccountSummary | null;
+      serverTimeMs: number;
+    }>(
+      `/api/futures/contracts/${encodeURIComponent(symbol)}/pulse?timeframe=${timeframe}&depth=${depth}`,
+      { signal },
+    ),
+  previewOrder: (params: FuturesPreviewRequest, signal?: AbortSignal) =>
     request<FuturesPreviewResponse>('/api/futures/preview', {
       method: 'POST',
       body: JSON.stringify(params),
+      signal,
     }),
   placeOrder: (params: {
     symbol: string;

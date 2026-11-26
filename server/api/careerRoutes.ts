@@ -424,6 +424,16 @@ export function createCareerImmersionRouter(manager: CareerWorldManager): Router
     req.headers.authorization = `Bearer ${save.careerToken}`;
     save.lastActivityAtMs = Date.now();
 
+    const spotPulseMatch = /^\/markets\/([^/]+)\/pulse$/i.exec(req.path);
+    if (spotPulseMatch?.[1]) {
+      save.watchedSpotSymbol = decodeURIComponent(spotPulseMatch[1]).toUpperCase();
+    } else {
+      const futuresPulseMatch = /^\/futures\/contracts\/([^/]+)\/pulse$/i.exec(req.path);
+      if (futuresPulseMatch?.[1]) {
+        save.watchedFuturesSymbol = decodeURIComponent(futuresPulseMatch[1]).toUpperCase();
+      }
+    }
+
     if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS') {
       res.on('finish', () => {
         if (res.statusCode < 400) {

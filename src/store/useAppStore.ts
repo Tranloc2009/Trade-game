@@ -26,6 +26,7 @@ import type {
   EconomyState,
   ForexOverviewSnapshot,
   GameClock,
+  MarketPulseSnapshot,
   NewsItem,
   Order,
   OrderBookSnapshot,
@@ -381,6 +382,14 @@ interface AppState {
   applyWorldSnapshot: (snapshot: WorldSnapshot) => void;
   setOrderBook: (book: OrderBookSnapshot) => void;
   setRecentTrades: (symbol: string, trades: Trade[]) => void;
+  applyMarketPulse: (pulse: MarketPulseSnapshot) => void;
+  applyFuturesPulse: (pulse: {
+    symbol: string;
+    contract: FuturesContract;
+    orderBook: FuturesOrderBookSnapshot;
+    latestCandles: Record<Timeframe, Candle> | null;
+    recentTrades: FuturesTrade[];
+  }) => void;
   upsertSpotOrder: (order: Order) => void;
   setChatMessages: (messages: ChatMessage[]) => void;
   applyRealtimeEnvelope: (envelope: RealtimeEnvelope) => boolean; // returns true if sequence gap detected
@@ -790,6 +799,47 @@ export const useAppStore = create<AppState>((set, get) => ({
       recentTradesBySymbol: { ...state.recentTradesBySymbol, [symbol]: trades },
     })),
 
+  applyMarketPulse: (pulse) =>
+    set((state) => {
+      const sym = pulse.symbol;
+      const nextAssets = state.assets.some((a) => a.symbol === sym)
+        ? state.assets.map((a) => (a.symbol === sym ? pulse.asset : a))
+        : [...state.assets, pulse.asset];
+      const validCandles =
+        pulse.latestCandles && !Array.isArray(pulse.latestCandles) ? pulse.latestCandles : null;
+      return {
+        assets: nextAssets,
+        orderBooks: { ...state.orderBooks, [sym]: pulse.orderBook },
+        recentTradesBySymbol: { ...state.recentTradesBySymbol, [sym]: pulse.recentTrades },
+        liveCandleTick: validCandles ? { symbol: sym, candles: validCandles } : state.liveCandleTick,
+      };
+    }),
+
+  applyFuturesPulse: (pulse) =>
+    set((state) => {
+      const sym = pulse.symbol;
+      const validCandles =
+        pulse.latestCandles && !Array.isArray(pulse.latestCandles) ? pulse.latestCandles : null;
+      return {
+        futuresOverview: state.futuresOverview
+          ? {
+              ...state.futuresOverview,
+              contracts: state.futuresOverview.contracts.map((c) =>
+                c.symbol === sym ? pulse.contract : c,
+              ),
+            }
+          : state.futuresOverview,
+        futuresOrderBooks: { ...state.futuresOrderBooks, [sym]: pulse.orderBook },
+        futuresRecentTradesBySymbol: {
+          ...state.futuresRecentTradesBySymbol,
+          [sym]: pulse.recentTrades,
+        },
+        futuresLiveCandleTick: validCandles
+          ? { symbol: sym, candles: validCandles }
+          : state.futuresLiveCandleTick,
+      };
+    }),
+
   upsertSpotOrder: (order) => {
     const player = get().player;
     if (player && order.playerId === player.id) {
@@ -921,8 +971,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
 
       case 'market.candle.updated': {
-        const payload = envelope.payload as { symbol: string; candles: Record<Timeframe, Candle> };
-        set({ lastSequenceNumber: nextSeq, liveCandleTick: payload });
+        const payload = envelope.payload as { symbol?: string; candles?: Record<Timeframe, Candle> };
+        if (payload?.symbol && payload.candles && typeof payload.candles === 'object' && !Array.isArray(payload.candles)) {
+          set({
+            lastSequenceNumber: nextSeq,
+            liveCandleTick: { symbol: payload.symbol, candles: payload.candles },
+          });
+        } else {
+          set({ lastSequenceNumber: nextSeq });
+        }
         break;
       }
 
@@ -1055,8 +1112,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
 
       case 'futures.candle.updated': {
-        const payload = envelope.payload as { symbol: string; candles: Record<Timeframe, Candle> };
-        set({ lastSequenceNumber: nextSeq, futuresLiveCandleTick: payload });
+        const payload = envelope.payload as { symbol?: string; candles?: Record<Timeframe, Candle> };
+        if (payload?.symbol && payload.candles && typeof payload.candles === 'object' && !Array.isArray(payload.candles)) {
+          set({
+            lastSequenceNumber: nextSeq,
+            futuresLiveCandleTick: { symbol: payload.symbol, candles: payload.candles },
+          });
+        } else {
+          set({ lastSequenceNumber: nextSeq });
+        }
         break;
       }
 

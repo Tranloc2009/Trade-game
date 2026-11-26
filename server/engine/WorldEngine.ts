@@ -21,6 +21,7 @@ import {
   type PlayerProfile,
   type RealtimeEnvelope,
   type RealtimeEventType,
+  type Trade,
   type WorldSnapshot,
 } from '../../shared/contracts/types';
 import {
@@ -199,6 +200,14 @@ export class WorldEngine {
   // Updated by SocketGateway with real connected clients (NEVER fabricated!)
   private activeConnectionCount = 0;
   private onlineHumanPlayerIds = new Set<string>();
+  private activeWatchedSpotSymbols = new Set<string>();
+  private activeWatchedFuturesSymbols = new Set<string>();
+  private marketQuoteInFlight = false;
+  private marketSimInFlight = false;
+  private riskInFlight = false;
+  private macroInFlight = false;
+  private fastTickCounter = 0;
+  private careerMarketTickCounter = 0;
 
   constructor(options: WorldEngineOptions = {}) {
     this.worldId = options.worldId ?? DEFAULT_WORLD_ID;
@@ -702,42 +711,70 @@ export class WorldEngine {
   public startBackgroundLoops(): void {
     this.stopBackgroundLoops();
 
-    // Every 8s: simulated economic agent tick (ECX/ESE + EFX real orders through MatchingEngine) + auction expiry check
-    const marketTimer = setInterval(() => {
+    // 1. High-frequency Quote & Micro-Liquidity Loop (1,000ms) — strictly non-overlapping & CPU-bounded
+    const marketQuoteTimer = setInterval(() => {
+      if (this.marketQuoteInFlight) return;
+      this.marketQuoteInFlight = true;
       try {
-        const res = this.marketMakers.runSimulationTick(this.economy.state);
+        this.fastTickCounter += 1;
+        const watchedSpot = Array.from(this.activeWatchedSpotSymbols);
+        const watchedFutures = Array.from(this.activeWatchedFuturesSymbols);
+
+        // Spot / Crypto fast micro-tick prioritizing actively watched symbols (smaller lot size so volume stays balanced)
+        const res = this.marketMakers.runFastLiquidityTick(this.economy.state, watchedSpot);
         for (const trade of res.trades) {
           this.onTradeExecuted(trade);
         }
-        for (const sym of res.affectedSymbols) {
-          const asset = this.matching.getAsset(sym);
-          if (asset) {
-            this.eventBus.publish('market.quote.updated', asset);
-            this.eventBus.publish('market.orderbook.updated', this.matching.getOrderBook(sym), `market:${sym}`);
+        this.publishSpotMarketUpdates(res.affectedSymbols, res.trades);
+
+        // Every 2s: light Forex quote/crossing tick (prioritizing watched FX pair if any)
+        if (this.fastTickCounter % 2 === 0) {
+          const watchedFx = watchedSpot.find((sym) => this.matching.getAsset(sym)?.marketClass === 'FOREX');
+          const fxRes = this.forexBots.runForexTick(watchedFx);
+          for (const trade of fxRes.trades) {
+            this.onTradeExecuted(trade);
           }
+          this.publishSpotMarketUpdates(fxRes.affectedSymbols, fxRes.trades);
         }
 
-        const fxRes = this.forexBots.runForexTick();
-        for (const trade of fxRes.trades) {
-          this.onTradeExecuted(trade);
+        // Every 2s (staggered): if players are actively viewing a Futures contract, run targeted light futures tick
+        if (this.fastTickCounter % 2 === 1 && watchedFutures.length > 0) {
+          const watchedContract = watchedFutures[this.fastTickCounter % watchedFutures.length];
+          this.futuresBots.runFuturesTick(this.economy.state, watchedContract);
+          this.futures.refreshAllMarkPrices();
         }
-        for (const sym of fxRes.affectedSymbols) {
-          const asset = this.matching.getAsset(sym);
-          if (asset) {
-            this.eventBus.publish('market.quote.updated', asset);
-            this.eventBus.publish('market.orderbook.updated', this.matching.getOrderBook(sym), `market:${sym}`);
-          }
-        }
+      } catch (err) {
+        console.error('[WorldEngine] market quote tick error:', err);
+      } finally {
+        this.marketQuoteInFlight = false;
+      }
+    }, 1_000);
 
-        // Expire any stale orders across Spot/Crypto/Forex and Futures
-        this.expireStaleOrders();
-
-        // Empire Futures Exchange tick: AI bot liquidity & orders -> Mark Price refresh -> Liquidation Engine -> Due Funding
+    // 2. Market Simulation Loop (3,000ms) — Autonomous AI Bots (bounded budget) + Futures Ecosystem
+    const marketSimTimer = setInterval(() => {
+      if (this.marketSimInFlight) return;
+      this.marketSimInFlight = true;
+      try {
+        // Empire Futures Exchange tick: AI bot liquidity & orders -> Mark Price refresh
         this.futuresBots.runFuturesTick(this.economy.state);
 
-        // Autonomous AI Trading Ecosystem V2 tick (24/7 server-authoritative across Spot, Meme Coins & Futures)
-        this.runAutonomousBotTick();
+        // Autonomous AI Trading Ecosystem V2 tick (bounded per-tick agent budget so 3s loop stays lean)
+        this.runAutonomousBotTick({ maxAgentsPerTick: 10 });
+      } catch (err) {
+        console.error('[WorldEngine] market sim tick error:', err);
+      } finally {
+        this.marketSimInFlight = false;
+      }
+    }, 3_000);
 
+    // 3. Risk, Mark Price, Liquidation, Funding & Expiry Loop (2,000ms)
+    const riskTimer = setInterval(() => {
+      if (this.riskInFlight) return;
+      this.riskInFlight = true;
+      try {
+        this.expireStaleOrders();
+        this.futures.refreshAllMarkPrices();
+        this.futures.runLiquidationCheck();
         this.futures.settleDueFunding();
 
         const settledAuctions = this.properties.settleExpiredAuctions();
@@ -745,12 +782,16 @@ export class WorldEngine {
           this.eventBus.publish('auction.ended', auc);
         }
       } catch (err) {
-        console.error('[WorldEngine] market tick error:', err);
+        console.error('[WorldEngine] risk tick error:', err);
+      } finally {
+        this.riskInFlight = false;
       }
-    }, 8_000);
+    }, 2_000);
 
-    // Every 60s: economy event, Central Bank FX policy cycle, business operating cycle, rental payouts, bank interest, leaderboard broadcast
+    // 4. Macro, Economy, Business, Rental, Bank Interest & Leaderboard Loop (60,000ms — UNCHANGED)
     const macroTimer = setInterval(() => {
+      if (this.macroInFlight) return;
+      this.macroInFlight = true;
       try {
         const { newEvent, newNews } = this.economy.tickEconomy(this.matching);
         this.economy.syncLedgerMetrics(this.ledger);
@@ -793,15 +834,21 @@ export class WorldEngine {
         this.eventBus.publish('leaderboard.updated', this.getLeaderboard('PLAYERS'));
       } catch (err) {
         console.error('[WorldEngine] macro tick error:', err);
+      } finally {
+        this.macroInFlight = false;
       }
     }, 60_000);
 
-    this.timers.push(marketTimer, macroTimer);
+    this.timers.push(marketQuoteTimer, marketSimTimer, riskTimer, macroTimer);
   }
 
   public stopBackgroundLoops(): void {
     for (const t of this.timers) clearInterval(t);
     this.timers = [];
+    this.marketQuoteInFlight = false;
+    this.marketSimInFlight = false;
+    this.riskInFlight = false;
+    this.macroInFlight = false;
   }
 
   public setRealtimePresence(activeConnections: number, onlineHumanIds: string[]): void {
@@ -809,8 +856,72 @@ export class WorldEngine {
     this.onlineHumanPlayerIds = new Set(onlineHumanIds);
   }
 
+  public setActiveWatchedSymbols(spotSymbols: string[], futuresSymbols: string[]): void {
+    this.activeWatchedSpotSymbols = new Set(spotSymbols.map((s) => s.toUpperCase()));
+    this.activeWatchedFuturesSymbols = new Set(futuresSymbols.map((s) => s.toUpperCase()));
+  }
+
+  public getActiveWatchedSymbols(): { spot: string[]; futures: string[] } {
+    return {
+      spot: Array.from(this.activeWatchedSpotSymbols),
+      futures: Array.from(this.activeWatchedFuturesSymbols),
+    };
+  }
+
   public getOnlineHumanPlayersCount(): number {
     return this.onlineHumanPlayerIds.size;
+  }
+
+  /**
+   * Isolated, CPU-bounded realtime market tick for Career Mode saves.
+   * Advances real spot/crypto, FX, and futures order books & candles inside this Career WorldEngine
+   * without touching the global Online WORLD-01 or inflating macro/business cycles.
+   */
+  public runCareerFastMarketTick(prioritySpotSymbol?: string, priorityFuturesSymbol?: string): {
+    spotTradesCount: number;
+    fxTradesCount: number;
+    futuresTradesCount: number;
+  } {
+    this.careerMarketTickCounter += 1;
+    let spotTradesCount = 0;
+    let fxTradesCount = 0;
+    let futuresTradesCount = 0;
+
+    const spotPriority = prioritySpotSymbol ? [prioritySpotSymbol] : [];
+    const spotRes = this.marketMakers.runFastLiquidityTick(this.economy.state, spotPriority);
+    for (const trade of spotRes.trades) {
+      this.onTradeExecuted(trade);
+    }
+    spotTradesCount = spotRes.trades.length;
+    this.publishSpotMarketUpdates(spotRes.affectedSymbols, spotRes.trades);
+
+    // Alternate FX and Futures light ticks so per-tick CPU stays tiny even with multiple active Career saves
+    if (this.careerMarketTickCounter % 2 === 0) {
+      const fxTarget =
+        prioritySpotSymbol && this.matching.getAsset(prioritySpotSymbol)?.marketClass === 'FOREX'
+          ? prioritySpotSymbol
+          : undefined;
+      const fxRes = this.forexBots.runForexTick(fxTarget);
+      for (const trade of fxRes.trades) {
+        this.onTradeExecuted(trade);
+      }
+      fxTradesCount = fxRes.trades.length;
+      this.publishSpotMarketUpdates(fxRes.affectedSymbols, fxRes.trades);
+    } else {
+      const futTarget =
+        priorityFuturesSymbol && this.futures.listContracts().some((c) => c.symbol === priorityFuturesSymbol)
+          ? priorityFuturesSymbol
+          : undefined;
+      const futRes = this.futuresBots.runFuturesTick(this.economy.state, futTarget);
+      futuresTradesCount = futRes.trades.length;
+    }
+
+    this.expireStaleOrders();
+    this.futures.refreshAllMarkPrices();
+    this.futures.runLiquidationCheck();
+    this.futures.settleDueFunding();
+
+    return { spotTradesCount, fxTradesCount, futuresTradesCount };
   }
 
   /**
@@ -1094,13 +1205,7 @@ export class WorldEngine {
     for (const trade of reaction.trades) {
       this.onTradeExecuted(trade);
     }
-    for (const sym of reaction.affectedSymbols) {
-      const asset = this.matching.getAsset(sym);
-      if (asset) {
-        this.eventBus.publish('market.quote.updated', asset);
-        this.eventBus.publish('market.orderbook.updated', this.matching.getOrderBook(sym), `market:${sym}`);
-      }
-    }
+    this.publishSpotMarketUpdates(reaction.affectedSymbols, reaction.trades);
 
     const overview = this.getForexOverview();
     this.eventBus.publish('forex.central_bank.updated', overview);
@@ -1256,22 +1361,45 @@ export class WorldEngine {
     );
   }
 
+  /**
+   * Publishes standardized quote, orderbook, and `Record<Timeframe, Candle>` candle updates
+   * for all affected spot/crypto/forex symbols. Only emits `market.candle.updated` for symbols
+   * that actually recorded real matched trades (never fabricates candles, never emits `Candle[]`).
+   */
+  protected publishSpotMarketUpdates(affectedSymbols: Iterable<string>, executedTrades: Trade[] = []): void {
+    const tradedSymbols = new Set<string>();
+    for (const trade of executedTrades) {
+      tradedSymbols.add(trade.symbol);
+    }
+    const allSymbols = new Set<string>(affectedSymbols);
+    for (const sym of tradedSymbols) {
+      allSymbols.add(sym);
+    }
+
+    for (const sym of allSymbols) {
+      const asset = this.matching.getAsset(sym);
+      if (!asset) continue;
+      this.eventBus.publish('market.quote.updated', asset);
+      this.eventBus.publish('market.orderbook.updated', this.matching.getOrderBook(sym), `market:${sym}`);
+      if (tradedSymbols.has(sym)) {
+        const latestByTf = this.candles.getLatestCandlesByTimeframe(sym);
+        if (latestByTf) {
+          this.eventBus.publish(
+            'market.candle.updated',
+            { symbol: sym, candles: latestByTf },
+            `market:${sym}`,
+          );
+        }
+      }
+    }
+  }
+
   public runAutonomousBotTick(options: BotTickOptions = {}): BotTickResult {
     const result = this.bots.runTick(this.economy.state, this.economy.news, options);
     for (const trade of result.spotTrades) {
       this.onTradeExecuted(trade);
     }
-    for (const sym of result.affectedSpotSymbols) {
-      const asset = this.matching.getAsset(sym);
-      if (asset) {
-        this.eventBus.publish('market.quote.updated', asset);
-        this.eventBus.publish('market.orderbook.updated', this.matching.getOrderBook(sym), `market:${sym}`);
-        const latestCandles = this.candles.getCandles(sym, '5m', 2);
-        if (latestCandles.length > 0) {
-          this.eventBus.publish('market.candle.updated', { symbol: sym, candles: latestCandles }, `market:${sym}`);
-        }
-      }
-    }
+    this.publishSpotMarketUpdates(result.affectedSpotSymbols, result.spotTrades);
     this.futures.refreshAllMarkPrices();
     this.futures.runLiquidationCheck();
     this.economy.syncLedgerMetrics(this.ledger);
@@ -1283,13 +1411,7 @@ export class WorldEngine {
     for (const trade of reaction.spotTrades) {
       this.onTradeExecuted(trade);
     }
-    for (const sym of reaction.affectedSpotSymbols) {
-      const asset = this.matching.getAsset(sym);
-      if (asset) {
-        this.eventBus.publish('market.quote.updated', asset);
-        this.eventBus.publish('market.orderbook.updated', this.matching.getOrderBook(sym), `market:${sym}`);
-      }
-    }
+    this.publishSpotMarketUpdates(reaction.affectedSpotSymbols, reaction.spotTrades);
     this.futures.refreshAllMarkPrices();
     this.futures.runLiquidationCheck();
     this.economy.syncLedgerMetrics(this.ledger);
@@ -1364,6 +1486,20 @@ export class WorldEngine {
         { symbol: result.order.symbol, candles: result.updatedCandles },
         `market:${result.order.symbol}`,
       );
+    }
+
+    // Immediate Market Maker Liquidity V2 replenishment if player trades thinned the order book
+    if (result.trades.length > 0) {
+      const replenished = this.marketMakers.replenishLiquidityIfThin(
+        result.order.symbol,
+        this.economy.state.volatilityRegime,
+        3,
+      );
+      if (replenished) {
+        const refreshedBook = this.matching.getOrderBook(result.order.symbol);
+        result.orderBook = refreshedBook;
+        this.eventBus.publish('market.orderbook.updated', refreshedBook, `market:${result.order.symbol}`);
+      }
     }
 
     this.economy.syncLedgerMetrics(this.ledger);

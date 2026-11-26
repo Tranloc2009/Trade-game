@@ -1,5 +1,6 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import {
+  ALL_TIMEFRAMES,
   API_CONTRACT_VERSION,
   ERROR_MESSAGES_VI,
   type ApiFailure,
@@ -80,7 +81,7 @@ function fail(res: Response, code: ErrorCode, message?: string, status = 400, de
   res.status(status).json(body);
 }
 
-const VALID_TIMEFRAMES = new Set<Timeframe>(['1m', '5m', '15m', '1h', '4h', '1D']);
+const VALID_TIMEFRAMES = new Set<Timeframe>(ALL_TIMEFRAMES);
 
 export function createApiRouter(world: WorldEngine): Router {
   const router = Router();
@@ -222,6 +223,30 @@ export function createApiRouter(world: WorldEngine): Router {
         symbol,
         timeframe,
         candles: world.futures.candles.getCandles(symbol, timeframe, limit),
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get('/futures/contracts/:symbol/pulse', (req, res, next) => {
+    try {
+      const symbol = req.params.symbol.toUpperCase();
+      const contract = world.futures.getContract(symbol);
+      if (!contract) throw new DomainError('ASSET_NOT_FOUND', undefined, 404);
+      const tfRaw = typeof req.query.timeframe === 'string' ? req.query.timeframe : '5m';
+      const timeframe: Timeframe = VALID_TIMEFRAMES.has(tfRaw as Timeframe) ? (tfRaw as Timeframe) : '5m';
+      const depth = Math.min(25, Math.max(5, Number(req.query.depth) || 12));
+      const playerId = resolvePlayerId(req);
+      ok(res, {
+        symbol,
+        contract,
+        orderBook: world.futures.getOrderBook(symbol, depth),
+        latestCandle: world.futures.candles.getLatestCandle(symbol, timeframe),
+        latestCandles: world.futures.candles.getLatestCandlesByTimeframe(symbol),
+        recentTrades: world.futures.listTrades(symbol, 25),
+        account: playerId ? world.getFuturesAccount(playerId) : null,
+        serverTimeMs: Date.now(),
       });
     } catch (err) {
       next(err);
@@ -442,6 +467,28 @@ export function createApiRouter(world: WorldEngine): Router {
         symbol,
         timeframe,
         candles: world.candles.getCandles(symbol, timeframe, limit),
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get('/markets/:symbol/pulse', (req, res, next) => {
+    try {
+      const symbol = req.params.symbol.toUpperCase();
+      const asset = world.matching.getAsset(symbol);
+      if (!asset) throw new DomainError('ASSET_NOT_FOUND', undefined, 404);
+      const tfRaw = typeof req.query.timeframe === 'string' ? req.query.timeframe : '5m';
+      const timeframe: Timeframe = VALID_TIMEFRAMES.has(tfRaw as Timeframe) ? (tfRaw as Timeframe) : '5m';
+      const depth = Math.min(25, Math.max(5, Number(req.query.depth) || 12));
+      ok(res, {
+        symbol,
+        asset,
+        orderBook: world.matching.getOrderBook(symbol, depth),
+        latestCandle: world.candles.getLatestCandle(symbol, timeframe),
+        latestCandles: world.candles.getLatestCandlesByTimeframe(symbol),
+        recentTrades: world.matching.listTrades(symbol, 25),
+        serverTimeMs: Date.now(),
       });
     } catch (err) {
       next(err);

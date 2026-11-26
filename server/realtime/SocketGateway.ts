@@ -57,6 +57,7 @@ export class SocketGateway implements IRealtimeTransport {
           }
         }
         socket.join(`market:${normalized}`);
+        this.syncWatchedSymbols();
         // Immediately send authoritative order book snapshot for subscribed symbol
         try {
           const book = this.world.matching.getOrderBook(normalized);
@@ -74,6 +75,19 @@ export class SocketGateway implements IRealtimeTransport {
         }
       });
 
+      socket.on('market:unsubscribe', (symbol?: string) => {
+        if (typeof symbol === 'string' && symbol.length > 0 && symbol.length <= 24) {
+          socket.leave(`market:${symbol.toUpperCase()}`);
+        } else {
+          for (const room of socket.rooms) {
+            if (room.startsWith('market:')) {
+              socket.leave(room);
+            }
+          }
+        }
+        this.syncWatchedSymbols();
+      });
+
       socket.on('futures:subscribe', (symbol: string) => {
         if (typeof symbol !== 'string' || symbol.length > 24) return;
         const normalized = symbol.toUpperCase();
@@ -83,6 +97,7 @@ export class SocketGateway implements IRealtimeTransport {
           }
         }
         socket.join(`futures:${normalized}`);
+        this.syncWatchedSymbols();
         try {
           const book = this.world.futures.getOrderBook(normalized);
           socket.emit('world:event', {
@@ -97,6 +112,19 @@ export class SocketGateway implements IRealtimeTransport {
         } catch {
           // Invalid futures symbol ignored safely
         }
+      });
+
+      socket.on('futures:unsubscribe', (symbol?: string) => {
+        if (typeof symbol === 'string' && symbol.length > 0 && symbol.length <= 24) {
+          socket.leave(`futures:${symbol.toUpperCase()}`);
+        } else {
+          for (const room of socket.rooms) {
+            if (room.startsWith('futures:')) {
+              socket.leave(room);
+            }
+          }
+        }
+        this.syncWatchedSymbols();
       });
 
       socket.on('futures:resync', (symbol?: string) => {
@@ -169,6 +197,7 @@ export class SocketGateway implements IRealtimeTransport {
         const prevPlayer = this.socketPlayerMap.get(socket.id);
         this.socketPlayerMap.delete(socket.id);
         this.syncPresence();
+        this.syncWatchedSymbols();
         if (prevPlayer) {
           this.world.eventBus.publish('player.left', {
             playerId: prevPlayer,
@@ -253,6 +282,21 @@ export class SocketGateway implements IRealtimeTransport {
     const activeConnections = this.io.engine.clientsCount;
     const onlinePlayerIds = this.getOnlinePlayerIds();
     this.world.setRealtimePresence(activeConnections, onlinePlayerIds);
+  }
+
+  private syncWatchedSymbols(): void {
+    const spotSymbols: string[] = [];
+    const futuresSymbols: string[] = [];
+    const rooms = this.io.sockets.adapter.rooms;
+    for (const [roomName, sockets] of rooms.entries()) {
+      if (sockets.size === 0) continue;
+      if (roomName.startsWith('market:')) {
+        spotSymbols.push(roomName.slice('market:'.length));
+      } else if (roomName.startsWith('futures:')) {
+        futuresSymbols.push(roomName.slice('futures:'.length));
+      }
+    }
+    this.world.setActiveWatchedSymbols(spotSymbols, futuresSymbols);
   }
 
   public broadcast<T>(envelope: RealtimeEnvelope<T>, room?: string): void {

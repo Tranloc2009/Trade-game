@@ -35,6 +35,10 @@ export interface IsolatedCareerSave {
   careerToken: string;
   director: StoryDirector;
   tickTimer?: NodeJS.Timeout;
+  marketTimer?: NodeJS.Timeout;
+  marketTickInFlight?: boolean;
+  watchedSpotSymbol?: string;
+  watchedFuturesSymbol?: string;
   idleTimer?: NodeJS.Timeout;
   lastActivityAtMs: number;
 }
@@ -71,6 +75,17 @@ const SPEED_INTERVAL_MS: Record<Exclude<CareerClockSpeed, 'PAUSE'>, number> = {
   '2x': 12_000,
   '5x': 5_000,
   '10x': 2_500,
+};
+
+/**
+ * Lightweight Career realtime market interval (strictly bounded at 750ms even on 10x so NPC volume
+ * stays realistic and never explodes the Career economy or CPU).
+ */
+const CAREER_MARKET_INTERVAL_MS: Record<Exclude<CareerClockSpeed, 'PAUSE'>, number> = {
+  '1x': 1_500,
+  '2x': 1_150,
+  '5x': 900,
+  '10x': 750,
 };
 
 const DEFAULT_SESSION_TTL_MS = 8 * 60 * 60 * 1000; // 8 hours
@@ -797,11 +812,29 @@ export class CareerWorldManager {
     return save;
   }
 
+  public setCareerWatchedMarket(
+    accountKey: string,
+    opts: { spotSymbol?: string; futuresSymbol?: string },
+  ): void {
+    const account = this.accounts.get(accountKey);
+    if (!account?.preferences.activeCareerSaveId) return;
+    const save = this.saves.get(account.preferences.activeCareerSaveId);
+    if (!save) return;
+    if (opts.spotSymbol) save.watchedSpotSymbol = opts.spotSymbol.toUpperCase();
+    if (opts.futuresSymbol) save.watchedFuturesSymbol = opts.futuresSymbol.toUpperCase();
+    save.lastActivityAtMs = Date.now();
+  }
+
   private clearSaveClockTimer(save: IsolatedCareerSave): void {
     if (save.tickTimer) {
       clearInterval(save.tickTimer);
       save.tickTimer = undefined;
     }
+    if (save.marketTimer) {
+      clearInterval(save.marketTimer);
+      save.marketTimer = undefined;
+    }
+    save.marketTickInFlight = false;
     if (save.idleTimer) {
       clearTimeout(save.idleTimer);
       save.idleTimer = undefined;
@@ -853,6 +886,26 @@ export class CareerWorldManager {
       }
     }, intervalMs);
     save.tickTimer.unref?.();
+
+    const marketIntervalMs = CAREER_MARKET_INTERVAL_MS[save.director.clockSpeed];
+    save.marketTimer = setInterval(() => {
+      if (Date.now() - save.lastActivityAtMs >= this.maxIdlePauseMs) {
+        save.director.pauseForModeSwitch();
+        this.clearSaveClockTimer(save);
+        this.persistNow();
+        return;
+      }
+      if (save.director.paused || save.director.activeSceneId || save.marketTickInFlight) return;
+      save.marketTickInFlight = true;
+      try {
+        save.world.runCareerFastMarketTick(save.watchedSpotSymbol, save.watchedFuturesSymbol);
+      } catch {
+        // Never crash isolated career market loop
+      } finally {
+        save.marketTickInFlight = false;
+      }
+    }, marketIntervalMs);
+    save.marketTimer.unref?.();
   }
 
   private buildAccountOverview(account: AccountRecord): AccountOverviewPayload {

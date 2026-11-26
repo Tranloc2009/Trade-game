@@ -1,7 +1,10 @@
 import { CR_SCALE } from '../../../shared/contracts/money';
-import type { Candle, Timeframe, Trade } from '../../../shared/contracts/types';
+import { ALL_TIMEFRAMES, type Candle, type Timeframe, type Trade } from '../../../shared/contracts/types';
 
 export const TIMEFRAME_SECONDS: Record<Timeframe, number> = {
+  '5s': 5,
+  '15s': 15,
+  '30s': 30,
   '1m': 60,
   '5m': 300,
   '15m': 900,
@@ -9,8 +12,6 @@ export const TIMEFRAME_SECONDS: Record<Timeframe, number> = {
   '4h': 14400,
   '1D': 86400,
 };
-
-const ALL_TIMEFRAMES: Timeframe[] = ['1m', '5m', '15m', '1h', '4h', '1D'];
 
 /**
  * Deterministic PRNG (Mulberry32) used ONLY for initial simulated historical seed data
@@ -46,8 +47,9 @@ export class CandleAggregator {
   }
 
   /**
-   * Generates deterministic historical simulated candles ending at `basePriceMinor` right before server boot.
-   * Marked explicitly with `isHistoricalSeed: true`.
+   * Generates deterministic historical simulated candles ending right BEFORE the current live bucket.
+   * Marked explicitly with `isHistoricalSeed: true` so live matched trade candles (`isHistoricalSeed: false`)
+   * never mix seeded volume with real matched trade volume.
    */
   seedSymbol(
     symbol: string,
@@ -68,7 +70,8 @@ export class CandleAggregator {
       const stepSec = TIMEFRAME_SECONDS[tf];
       const count = 80;
       const rng = seededRng(`${symbol}:${tf}:WORLD-01`);
-      const lastBucket = Math.floor(nowSec / stepSec) * stepSec;
+      // End historical seed one bucket before current time so live trades start a pure live bucket
+      const lastHistoricalBucket = Math.floor(nowSec / stepSec) * stepSec - stepSec;
 
       const closes: number[] = new Array(count);
       closes[count - 1] = Number(endPrice.toFixed(priceDecimals));
@@ -82,13 +85,16 @@ export class CandleAggregator {
 
       const series: Candle[] = [];
       for (let i = 0; i < count; i++) {
-        const bucketTime = lastBucket - (count - 1 - i) * stepSec;
+        const bucketTime = lastHistoricalBucket - (count - 1 - i) * stepSec;
         const open = i === 0 ? closes[0] : closes[i - 1];
         const close = closes[i];
-        const wickSpan = Math.max(minTick * 2, Math.abs(close - open) + close * volatilityFactor * 0.35 * rng());
+        const wickSpan = Math.max(
+          minTick * 2,
+          Math.abs(close - open) + close * volatilityFactor * Math.min(1, tfScale) * 0.35 * rng(),
+        );
         const high = Number((Math.max(open, close) + wickSpan * rng()).toFixed(priceDecimals));
         const low = Number(Math.max(minTick, Math.min(open, close) - wickSpan * rng()).toFixed(priceDecimals));
-        const volume = Number((15 + rng() * 140 * Math.max(1, tfScale)).toFixed(2));
+        const volume = Number((Math.max(1, 15 * tfScale) + rng() * 140 * Math.max(0.15, tfScale)).toFixed(2));
 
         series.push({
           time: bucketTime,
@@ -109,6 +115,7 @@ export class CandleAggregator {
   /**
    * Updates every timeframe candle strictly from an executed trade event.
    * Never fabricates candles or volume without real matched trades.
+   * Handles duplicate/out-of-order trade timestamps without breaking ascending time order.
    */
   recordTrade(trade: Trade): Record<Timeframe, Candle> {
     const tfMap = this.candles.get(trade.symbol) ?? new Map<Timeframe, Candle[]>();
@@ -117,8 +124,10 @@ export class CandleAggregator {
     }
 
     const prec = this.precisionBySymbol.get(trade.symbol) ?? { scale: CR_SCALE, decimals: 2 };
-    const tradeSec = Math.floor(new Date(trade.timestamp).getTime() / 1000);
+    const parsedMs = Date.parse(trade.timestamp);
+    const tradeSec = Math.floor((Number.isFinite(parsedMs) ? parsedMs : Date.now()) / 1000);
     const price = Number((trade.priceMinor / prec.scale).toFixed(prec.decimals));
+    const qty = Math.max(0, Number.isFinite(trade.quantity) ? trade.quantity : 0);
     const updated = {} as Record<Timeframe, Candle>;
 
     for (const tf of ALL_TIMEFRAMES) {
@@ -132,24 +141,46 @@ export class CandleAggregator {
 
       const last = series[series.length - 1];
       if (last && last.time === bucketTime) {
-        last.high = Math.max(last.high, price);
-        last.low = Math.min(last.low, price);
-        last.close = price;
-        last.volume = Number((last.volume + trade.quantity).toFixed(4));
-        last.isHistoricalSeed = false;
+        if (last.isHistoricalSeed) {
+          // Transition cleanly from historical seed to real live trade data
+          last.open = price;
+          last.high = price;
+          last.low = price;
+          last.close = price;
+          last.volume = Number(qty.toFixed(4));
+          last.isHistoricalSeed = false;
+        } else {
+          last.high = Math.max(last.high, price);
+          last.low = Math.min(last.low, price);
+          last.close = price;
+          last.volume = Number((last.volume + qty).toFixed(4));
+        }
+        updated[tf] = { ...last };
+      } else if (last && bucketTime < last.time) {
+        // Out-of-order older trade: update matching historical bucket if present, preserve ascending order
+        const existingIdx = series.findIndex((c) => c.time === bucketTime);
+        if (existingIdx !== -1) {
+          const target = series[existingIdx];
+          target.high = Math.max(target.high, price);
+          target.low = Math.min(target.low, price);
+          target.close = price;
+          target.volume = Number((target.volume + qty).toFixed(4));
+          target.isHistoricalSeed = false;
+        }
         updated[tf] = { ...last };
       } else {
+        const openPrice = last ? last.close : price;
         const candle: Candle = {
           time: bucketTime,
-          open: last ? last.close : price,
-          high: Math.max(last ? last.close : price, price),
-          low: Math.min(last ? last.close : price, price),
+          open: openPrice,
+          high: Math.max(openPrice, price),
+          low: Math.min(openPrice, price),
           close: price,
-          volume: Number(trade.quantity.toFixed(4)),
+          volume: Number(qty.toFixed(4)),
           isHistoricalSeed: false,
         };
         series.push(candle);
-        if (series.length > 300) {
+        if (series.length > 360) {
           series.shift();
         }
         updated[tf] = { ...candle };
@@ -159,8 +190,36 @@ export class CandleAggregator {
     return updated;
   }
 
+  /**
+   * Returns the latest authoritative candle for every timeframe as `Record<Timeframe, Candle>`.
+   * Guarantees the canonical realtime contract shape (`Record<Timeframe, Candle>`, never `Candle[]`).
+   */
+  getLatestCandlesByTimeframe(symbol: string): Record<Timeframe, Candle> | null {
+    const tfMap = this.candles.get(symbol);
+    if (!tfMap) return null;
+
+    const result = {} as Record<Timeframe, Candle>;
+    let foundAny = false;
+    for (const tf of ALL_TIMEFRAMES) {
+      const series = tfMap.get(tf);
+      const last = series && series.length > 0 ? series[series.length - 1] : null;
+      if (last) {
+        result[tf] = { ...last };
+        foundAny = true;
+      }
+    }
+    return foundAny ? result : null;
+  }
+
+  getLatestCandle(symbol: string, timeframe: Timeframe): Candle | null {
+    const series = this.candles.get(symbol)?.get(timeframe);
+    if (!series || series.length === 0) return null;
+    return { ...series[series.length - 1] };
+  }
+
   getCandles(symbol: string, timeframe: Timeframe, limit = 120): Candle[] {
     const series = this.candles.get(symbol)?.get(timeframe) ?? [];
     return series.slice(-limit).map((c) => ({ ...c }));
   }
 }
+

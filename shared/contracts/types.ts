@@ -41,7 +41,15 @@ export type EconomicPhase =
   | 'RECESSION'
   | 'RECOVERY';
 
-export type Timeframe = '1m' | '5m' | '15m' | '1h' | '4h' | '1D';
+export type ShortTimeframe = '5s' | '15s' | '30s';
+export type Timeframe = '5s' | '15s' | '30s' | '1m' | '5m' | '15m' | '1h' | '4h' | '1D';
+
+export const SHORT_TIMEFRAMES: readonly ShortTimeframe[] = ['5s', '15s', '30s'] as const;
+export const ALL_TIMEFRAMES: readonly Timeframe[] = ['5s', '15s', '30s', '1m', '5m', '15m', '1h', '4h', '1D'] as const;
+
+export function isShortTimeframe(tf: Timeframe): boolean {
+  return tf === '5s' || tf === '15s' || tf === '30s';
+}
 
 export type AccountRole = 'PLAYER' | 'MARKET_MAKER' | 'INVESTOR_BOT' | 'SYSTEM';
 
@@ -350,6 +358,16 @@ export interface Candle {
   close: number;
   volume: number;
   isHistoricalSeed: boolean;
+}
+
+export interface MarketPulseSnapshot {
+  symbol: string;
+  asset: Asset;
+  orderBook: OrderBookSnapshot;
+  latestCandle: Candle | null;
+  latestCandles: Record<Timeframe, Candle> | null;
+  recentTrades: Trade[];
+  serverTimeMs: number;
 }
 
 export interface CurrencyBalance {

@@ -10,6 +10,7 @@ import {
   toMinor,
 } from '../../../shared/contracts/money';
 import type { Asset, Order, OrderBookSnapshot, OrderSide, OrderType, TimeInForce } from '../../../shared/contracts/types';
+import { formatSpotOrderFeedback } from '../../lib/tradeExecutionFeedback';
 import { ApiClientError, TradingService } from '../../services/api';
 import { useAppStore } from '../../store/useAppStore';
 
@@ -26,10 +27,14 @@ export function OrderPlacementPanel({
   prefilledPrice,
   onOrderSubmitted,
 }: OrderPlacementPanelProps) {
-  const { player, setPlayer, setOrderBook, upsertSpotOrder, pushToast } = useAppStore();
+  const player = useAppStore((s) => s.player);
+  const setPlayer = useAppStore((s) => s.setPlayer);
+  const setOrderBook = useAppStore((s) => s.setOrderBook);
+  const upsertSpotOrder = useAppStore((s) => s.upsertSpotOrder);
+  const pushToast = useAppStore((s) => s.pushToast);
 
   const [side, setSide] = useState<OrderSide>('BUY');
-  const [orderType, setOrderType] = useState<OrderType>('LIMIT');
+  const [orderType, setOrderType] = useState<OrderType>('MARKET');
   const [timeInForce, setTimeInForce] = useState<TimeInForce>('GTC');
   const [priceInput, setPriceInput] = useState<string>(fromMinor(asset.lastPriceMinor).toFixed(2));
   const [qtyInput, setQtyInput] = useState<string>(String(asset.qtyStep >= 1 ? 10 : asset.minQty * 5));
@@ -143,15 +148,19 @@ export function OrderPlacementPanel({
       setOrderBook(res.orderBook);
       upsertSpotOrder(res.order);
 
-      const filledInfo =
-        res.trades.length > 0
-          ? `Đã khớp ${formatQty(res.order.filledQuantity)} ${asset.symbol} @ TB ${formatCR(res.order.avgExecutionPriceMinor)} CR`
-          : `Đang chờ khớp trên sổ lệnh @ ${formatCR(res.order.priceMinor)} CR`;
+      const feedback = formatSpotOrderFeedback({
+        order: res.order,
+        trades: res.trades,
+        baseLabel: asset.symbol,
+        quoteLabel: 'CR',
+        priceScale: asset.priceScale ?? 100,
+        priceDecimals: asset.priceDecimals ?? 2,
+      });
 
       pushToast({
-        tone: 'success',
-        title: `${side === 'BUY' ? 'Đặt lệnh Mua' : 'Đặt lệnh Bán'} ${asset.symbol} thành công`,
-        description: filledInfo,
+        tone: feedback.tone,
+        title: feedback.title,
+        description: feedback.description,
       });
       onOrderSubmitted(res.order);
     } catch (err) {
@@ -209,7 +218,7 @@ export function OrderPlacementPanel({
       {/* Order Type & Time in Force */}
       <div className="flex items-center justify-between gap-2 text-xs">
         <div className="flex items-center gap-1">
-          {(['LIMIT', 'MARKET'] as const).map((t) => (
+          {(['MARKET', 'LIMIT'] as const).map((t) => (
             <button
               key={t}
               type="button"
@@ -223,7 +232,7 @@ export function OrderPlacementPanel({
                   : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
               }`}
             >
-              {t === 'LIMIT' ? 'Giới hạn (LO)' : 'Thị trường (MP)'}
+              {t === 'MARKET' ? 'Thị trường (MP)' : 'Giới hạn (LO)'}
             </button>
           ))}
         </div>
@@ -315,6 +324,14 @@ export function OrderPlacementPanel({
         {/* Financial Preview Breakdown */}
         <div className="p-2.5 rounded-md bg-[var(--bg-app)] border border-[var(--border-subtle)]/80 space-y-1 text-[11px]">
           <div className="flex justify-between">
+            <span className="text-[var(--text-muted)]">
+              {orderType === 'MARKET' ? 'Giá khớp dự kiến (Best Book)' : 'Giá giới hạn'}
+            </span>
+            <span className="font-mono font-semibold text-[var(--text-primary)]">
+              {estPriceMinor > 0 ? `${formatCR(estPriceMinor)} CR` : '—'}
+            </span>
+          </div>
+          <div className="flex justify-between">
             <span className="text-[var(--text-muted)]">Giá trị lệnh dự kiến</span>
             <span className="font-mono text-[var(--text-primary)]">{formatCR(estGrossMinor)} CR</span>
           </div>
@@ -326,7 +343,7 @@ export function OrderPlacementPanel({
           </div>
           {side === 'BUY' && (
             <div className="flex justify-between">
-              <span className="text-[var(--text-muted)]">CR phong tỏa tối đa</span>
+              <span className="text-[var(--text-muted)]">CR cần thiết tối đa</span>
               <span className="font-mono font-semibold text-[var(--text-primary)]">{formatCR(lockedMinor)} CR</span>
             </div>
           )}

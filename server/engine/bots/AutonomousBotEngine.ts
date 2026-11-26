@@ -56,6 +56,7 @@ export interface BotTickOptions {
   targetSymbol?: string;
   forceAllAgents?: boolean;
   includeNova?: boolean;
+  maxAgentsPerTick?: number;
   nowMs?: number;
 }
 
@@ -426,7 +427,12 @@ export class AutonomousBotEngine {
     // Round-robin scheduling across all configured agents with strict CPU budget enforcement
     const orderedAgents = this.roster;
     const totalAgents = orderedAgents.length;
-    const maxBatch = options.forceAllAgents ? totalAgents : Math.min(totalAgents, Math.max(8, Math.ceil(totalAgents * 0.65)));
+    const defaultBatch = Math.min(totalAgents, Math.max(8, Math.ceil(totalAgents * 0.65)));
+    const maxBatch = options.forceAllAgents
+      ? totalAgents
+      : options.maxAgentsPerTick && options.maxAgentsPerTick > 0
+        ? Math.min(totalAgents, Math.floor(options.maxAgentsPerTick))
+        : defaultBatch;
 
     for (let step = 0; step < maxBatch; step++) {
       if (!options.forceAllAgents && step > 0 && performance.now() - startPerf >= this.cpuBudgetMsPerTick) {

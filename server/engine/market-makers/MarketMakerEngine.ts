@@ -70,6 +70,8 @@ export class MarketMakerEngine {
   private readonly ledger: LedgerService;
   private readonly matching: MatchingEngine;
   private rng: () => number;
+  private initialInventoryByAgent = new Map<string, Map<string, number>>();
+  private fastTickRotationCursor = 0;
 
   constructor(ledger: LedgerService, matching: MatchingEngine, seed = 20261123) {
     this.ledger = ledger;
@@ -79,12 +81,15 @@ export class MarketMakerEngine {
 
   reset(seed = 20261123): void {
     this.rng = mulberry32(seed);
+    this.initialInventoryByAgent.clear();
+    this.fastTickRotationCursor = 0;
   }
 
   /**
    * Allocates transparent, finite capital and asset inventory to NPC Market Makers & Investor Bots.
    */
   fundAgents(assets: Asset[]): void {
+    this.initialInventoryByAgent.clear();
     for (const agent of SIMULATED_AGENTS) {
       const capitalCR = agent.role === 'MARKET_MAKER' ? 12_000_000 : 4_500_000;
       this.ledger.createWallet(
@@ -92,6 +97,9 @@ export class MarketMakerEngine {
         toMinor(capitalCR),
         `Cấp vốn khởi tạo giới hạn cho ${agent.username}`,
       );
+
+      const invMap = new Map<string, number>();
+      this.initialInventoryByAgent.set(agent.id, invMap);
 
       for (const asset of assets) {
         if (asset.marketClass === 'FOREX') continue;
@@ -113,6 +121,7 @@ export class MarketMakerEngine {
                     : 4_000;
 
         this.ledger.grantInitialAsset(agent.id, asset.symbol, asset.marketClass, baseQty, asset.referencePriceMinor);
+        invMap.set(asset.symbol, baseQty);
       }
     }
   }
@@ -135,24 +144,39 @@ export class MarketMakerEngine {
 
   private getSpreadBps(asset: Asset, volatility: VolatilityRegime, isInitialNova: boolean): number {
     if (isInitialNova) return 220; // 2.2% half-spread around 50 CR -> 48.90 bid / 51.10 ask
-    const base = asset.marketClass === 'CRYPTO' ? 28 : 35;
+    const base = asset.marketClass === 'CRYPTO' ? 24 : 30;
     switch (volatility) {
       case 'LOW_VOLATILITY':
         return Math.round(base * 0.75);
       case 'NORMAL_VOLATILITY':
         return base;
       case 'HIGH_VOLATILITY':
-        return Math.round(base * 1.8);
+        return Math.round(base * 1.75);
       case 'MARKET_PANIC':
-        return Math.round(base * 3.0);
+        return Math.round(base * 2.8);
     }
+  }
+
+  /**
+   * Computes bounded inventory-aware price skew (in basis points) so Market Makers naturally
+   * rebalance finite inventory without ever minting CR or assets.
+   * Excess inventory -> negative skew (encourages sells); low inventory -> positive skew (encourages buys).
+   */
+  private computeInventorySkewBps(makerId: string, symbol: string, currentTotalQty: number): number {
+    const targetQty = this.initialInventoryByAgent.get(makerId)?.get(symbol) ?? 0;
+    if (targetQty <= 0) return 0;
+    const imbalanceRatio = (currentTotalQty - targetQty) / targetQty; // e.g., +0.25 means 25% above baseline
+    if (Math.abs(imbalanceRatio) < 0.08) return 0;
+    const rawSkew = -Math.round(imbalanceRatio * 22);
+    return Math.max(-18, Math.min(18, rawSkew));
   }
 
   refreshMakerQuotesForAsset(asset: Asset, volatility: VolatilityRegime, initialBoot = false): void {
     if (asset.status !== 'OPEN') return;
     const makers = SIMULATED_AGENTS.filter((a) => a.role === 'MARKET_MAKER');
     const mid = asset.lastPriceMinor;
-    const halfSpreadBps = this.getSpreadBps(asset, volatility, initialBoot && asset.symbol === 'NOVA');
+    const isInitialNova = initialBoot && asset.symbol === 'NOVA';
+    const halfSpreadBps = this.getSpreadBps(asset, volatility, isInitialNova);
 
     for (let mIdx = 0; mIdx < makers.length; mIdx++) {
       const maker = makers[mIdx];
@@ -163,13 +187,25 @@ export class MarketMakerEngine {
       const holding = this.ledger.wallets.getHolding(maker.id, asset.symbol);
       if (!wallet || !holding) continue;
 
-      const levels = 3;
-      for (let lvl = 0; lvl < levels; lvl++) {
-        const levelOffsetBps = Math.round(halfSpreadBps * maker.spreadMultiplier * (1 + lvl * 0.65));
-        const bidMinor = alignToTick(Math.floor((mid * (10_000 - levelOffsetBps)) / 10_000), asset.priceTickMinor, 'floor');
-        const askMinor = alignToTick(Math.ceil((mid * (10_000 + levelOffsetBps)) / 10_000), asset.priceTickMinor, 'ceil');
+      const totalHoldingQty = holding.availableQty + holding.lockedQty;
+      const skewBps = isInitialNova ? 0 : this.computeInventorySkewBps(maker.id, asset.symbol, totalHoldingQty);
+      const skewedMid = Math.max(asset.priceTickMinor, Math.round((mid * (10_000 + skewBps)) / 10_000));
 
-        const baseLot = this.defaultLotSize(asset) * (lvl + 1);
+      const levels = 5;
+      for (let lvl = 0; lvl < levels; lvl++) {
+        const levelOffsetBps = Math.round(halfSpreadBps * maker.spreadMultiplier * (1 + lvl * 0.52));
+        const bidMinor = alignToTick(
+          Math.floor((skewedMid * (10_000 - levelOffsetBps)) / 10_000),
+          asset.priceTickMinor,
+          'floor',
+        );
+        const askMinor = alignToTick(
+          Math.ceil((skewedMid * (10_000 + levelOffsetBps)) / 10_000),
+          asset.priceTickMinor,
+          'ceil',
+        );
+
+        const baseLot = this.defaultLotSize(asset) * (1 + lvl * 0.75);
         const qty = this.roundToStep(baseLot, asset.qtyStep);
 
         // Respect finite cash strictly
@@ -214,6 +250,73 @@ export class MarketMakerEngine {
   }
 
   /**
+   * Immediately replenishes resting Market Maker liquidity if either side of a Spot/Crypto
+   * order book drops below `minLevels`. Strictly bounded by finite maker cash & inventory.
+   */
+  public replenishLiquidityIfThin(symbol: string, volatility: VolatilityRegime, minLevels = 3): boolean {
+    const asset = this.matching.getAsset(symbol);
+    if (!asset || asset.status !== 'OPEN' || asset.marketClass === 'FOREX' || MEME_SYMBOL_SET.has(symbol)) {
+      return false;
+    }
+    const book = this.matching.getOrderBook(symbol, Math.max(minLevels, 5));
+    if (book.bids.length >= minLevels && book.asks.length >= minLevels) {
+      return false;
+    }
+    this.refreshMakerQuotesForAsset(asset, volatility, false);
+    return true;
+  }
+
+  /**
+   * High-frequency, CPU-bounded liquidity & micro-crossing tick (designed for 1s scheduler).
+   * Prioritizes actively watched symbols and scales per-tick lot size down (0.35x–0.75x) so
+   * higher tick cadence produces smooth realtime candles without inflating NPC trading volume.
+   */
+  public runFastLiquidityTick(
+    economy: EconomyState,
+    prioritySymbols: string[] = [],
+  ): { trades: Trade[]; affectedSymbols: string[] } {
+    const openAssets = this.matching
+      .listAssets()
+      .filter((a) => a.status === 'OPEN' && a.marketClass !== 'FOREX' && !MEME_SYMBOL_SET.has(a.symbol));
+    if (openAssets.length === 0) return { trades: [], affectedSymbols: [] };
+
+    const candidates: Asset[] = [];
+    const seen = new Set<string>();
+
+    // 1. Prioritize up to 1 actively watched symbol (excluding NOVA for automated crossing)
+    for (const rawSym of prioritySymbols) {
+      const sym = rawSym.toUpperCase();
+      if (sym === 'NOVA' || seen.has(sym)) continue;
+      const found = openAssets.find((a) => a.symbol === sym);
+      if (found) {
+        candidates.push(found);
+        seen.add(found.symbol);
+        break;
+      }
+    }
+
+    // 2. Always include 1 rotating open market (excluding NOVA) so broader market stays alive
+    const nonNova = openAssets.filter((a) => a.symbol !== 'NOVA' && !seen.has(a.symbol));
+    if (nonNova.length > 0) {
+      const idx = this.fastTickRotationCursor % nonNova.length;
+      this.fastTickRotationCursor = (this.fastTickRotationCursor + 1) % nonNova.length;
+      candidates.push(nonNova[idx]);
+      seen.add(nonNova[idx].symbol);
+    }
+
+    const trades: Trade[] = [];
+    const affectedSymbols = new Set<string>();
+
+    for (const asset of candidates) {
+      const step = this.executeSingleAssetMicroStep(economy, asset, 0.32 + this.rng() * 0.42, true);
+      for (const tr of step.trades) trades.push(tr);
+      for (const sym of step.affectedSymbols) affectedSymbols.add(sym);
+    }
+
+    return { trades, affectedSymbols: Array.from(affectedSymbols) };
+  }
+
+  /**
    * Executes one realistic economic agent step:
    * - Picks an open market (never overwrites human orders illegally; simply submits a small real crossing order
    *   from an Investor Bot against Market Maker resting liquidity based on economy & fundamentals).
@@ -229,6 +332,17 @@ export class MarketMakerEngine {
       (targetSymbol ? openAssets.find((a) => a.symbol === targetSymbol) : null) ??
       openAssets[Math.floor(this.rng() * openAssets.length)];
 
+    // Keep NOVA untouched by automated background bots unless explicitly targeted so Section 32 manual test is never disrupted
+    const allowAutoCross = targetSymbol !== undefined || selectedAsset.symbol !== 'NOVA';
+    return this.executeSingleAssetMicroStep(economy, selectedAsset, 0.4 + this.rng() * 0.85, allowAutoCross);
+  }
+
+  private executeSingleAssetMicroStep(
+    economy: EconomyState,
+    selectedAsset: Asset,
+    lotScale: number,
+    allowAutoCross: boolean,
+  ): { trades: Trade[]; affectedSymbols: string[] } {
     const trades: Trade[] = [];
     const affectedSymbols = new Set<string>();
 
@@ -245,7 +359,6 @@ export class MarketMakerEngine {
     }
 
     if (selectedAsset.fundamentals) {
-      // Value investor compares lastPrice against intrinsicRefPrice
       if (selectedAsset.lastPriceMinor < selectedAsset.fundamentals.intrinsicRefPriceMinor) {
         buyProbability += 0.08;
       } else if (selectedAsset.lastPriceMinor > selectedAsset.fundamentals.intrinsicRefPriceMinor * 1.06) {
@@ -266,14 +379,10 @@ export class MarketMakerEngine {
 
     buyProbability = Math.max(0.2, Math.min(0.8, buyProbability));
     const side: Order['side'] = this.rng() < buyProbability ? 'BUY' : 'SELL';
-    const qty = this.roundToStep(this.defaultLotSize(selectedAsset) * (0.4 + this.rng() * 0.9), selectedAsset.qtyStep);
+    const qty = this.roundToStep(this.defaultLotSize(selectedAsset) * lotScale, selectedAsset.qtyStep);
 
     const book = this.matching.getOrderBook(selectedAsset.symbol, 5);
     const hasCounterparty = side === 'BUY' ? book.asks.length > 0 : book.bids.length > 0;
-
-    // Protect human resting orders on NOVA only if human orders sit at top? No—real market allows matching!
-    // However, keep NOVA untouched by automated background bots unless explicitly triggered or non-NOVA so Section 32 manual test is never disrupted by bots eating Alice's 50.00 CR order before Bob sells!
-    const allowAutoCross = targetSymbol !== undefined || selectedAsset.symbol !== 'NOVA';
 
     if (hasCounterparty && allowAutoCross) {
       const targetPriceMinor = side === 'BUY' ? book.asks[0].priceMinor : book.bids[0].priceMinor;
@@ -297,10 +406,8 @@ export class MarketMakerEngine {
       }
     }
 
-    // Re-quote liquidity on this asset if depth dropped below 2 levels
-    const afterBook = this.matching.getOrderBook(selectedAsset.symbol, 5);
-    if (afterBook.bids.length < 2 || afterBook.asks.length < 2) {
-      this.refreshMakerQuotesForAsset(selectedAsset, economy.volatilityRegime, false);
+    // Re-quote liquidity on this asset if depth dropped below 3 levels
+    if (this.replenishLiquidityIfThin(selectedAsset.symbol, economy.volatilityRegime, 3)) {
       affectedSymbols.add(selectedAsset.symbol);
     }
 

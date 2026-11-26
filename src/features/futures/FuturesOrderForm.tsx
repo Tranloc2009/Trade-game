@@ -8,6 +8,7 @@ import {
   fromPriceInt,
   getAllowedLeveragesForContract,
   resolveEffectiveMarginParams,
+  resolveRiskTier,
   toPriceInt,
   toQtyInt,
   type FuturesAccountSummary,
@@ -20,6 +21,7 @@ import {
   type FuturesTriggerSource,
 } from '../../../shared/contracts/futures';
 import { formatCR, formatQty, formatRate } from '../../../shared/contracts/money';
+import { formatFuturesOrderFeedback } from '../../lib/tradeExecutionFeedback';
 import { ApiClientError, FuturesService } from '../../services/api';
 import { useAppStore } from '../../store/useAppStore';
 
@@ -43,10 +45,12 @@ export function FuturesOrderForm({
   onRequireRiskAck,
   onOrderSuccess,
 }: FuturesOrderFormProps) {
-  const { player, setPlayer, pushToast } = useAppStore();
+  const player = useAppStore((s) => s.player);
+  const setPlayer = useAppStore((s) => s.setPlayer);
+  const pushToast = useAppStore((s) => s.pushToast);
 
   const [mode, setMode] = useState<TicketMode>('OPEN_LONG');
-  const [orderTab, setOrderTab] = useState<OrderTabType>('LIMIT');
+  const [orderTab, setOrderTab] = useState<OrderTabType>('MARKET');
   const [condSubType, setCondSubType] = useState<'MARKET' | 'LIMIT'>('MARKET');
   const [triggerSource, setTriggerSource] = useState<FuturesTriggerSource>('MARK_PRICE');
   const [leverage, setLeverage] = useState<FuturesLeverage>(1); // Safe default: 1x
@@ -64,9 +68,16 @@ export function FuturesOrderForm({
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  const serverRiskTierMaxLev = resolveRiskTier(0).maxLeverage;
+  const effectiveMaxLeverage = Math.min(
+    contract.maxLeverage,
+    contract.effectiveMaxLeverage ?? contract.maxLeverage,
+    serverRiskTierMaxLev,
+  );
+
   const allowedLeverages = useMemo(
-    () => getAllowedLeveragesForContract(contract.maxLeverage, contract.effectiveMaxLeverage),
-    [contract.maxLeverage, contract.effectiveMaxLeverage],
+    () => getAllowedLeveragesForContract(contract.maxLeverage, effectiveMaxLeverage),
+    [contract.maxLeverage, effectiveMaxLeverage],
   );
 
   // Reset form defaults cleanly when switching contract
@@ -78,9 +89,8 @@ export function FuturesOrderForm({
     setSlInput('');
     setTpInput('');
     setErrorMsg(null);
-    const maxCap = Math.min(contract.maxLeverage, contract.effectiveMaxLeverage ?? contract.maxLeverage);
-    setLeverage((prev) => (prev > maxCap ? (allowedLeverages[allowedLeverages.length - 1] ?? 1) : prev));
-  }, [contract.symbol, contract.effectiveMaxLeverage]);
+    setLeverage((prev) => (prev > effectiveMaxLeverage ? (allowedLeverages[allowedLeverages.length - 1] ?? 1) : prev));
+  }, [contract.symbol, effectiveMaxLeverage, allowedLeverages]);
 
   // Apply clicked orderbook price
   useEffect(() => {
@@ -152,12 +162,13 @@ export function FuturesOrderForm({
       contract.priceScale,
       contract.contractMultiplier,
     );
+    const riskTier = resolveRiskTier(notionalMinor);
     const marginParams = resolveEffectiveMarginParams(
       notionalMinor,
       contract.riskProfile ?? 'EQUITY_FX',
       contract.maxLeverage,
       leverage,
-      contract.effectiveMaxLeverage,
+      Math.min(effectiveMaxLeverage, riskTier.maxLeverage),
     );
     const initialMarginMinor = effectiveReduceOnly ? 0 : calcInitialMarginMinor(notionalMinor, leverage);
     const feeBps = postOnly && effectiveOrderType === 'LIMIT' ? contract.makerFeeBps : contract.takerFeeBps;
@@ -173,7 +184,7 @@ export function FuturesOrderForm({
           marginMinor: initialMarginMinor,
           priceScale: contract.priceScale,
           contractMultiplier: contract.contractMultiplier,
-          mmrBps: marginParams.maintenanceMarginBps,
+          mmrBps: riskTier.maintenanceMarginBps,
           liqFeeBps: marginParams.liquidationFeeBps,
         });
 
@@ -183,15 +194,16 @@ export function FuturesOrderForm({
       (contract.estimatedFundingRateBps > 0 && sideForLiq === 'LONG') ||
       (contract.estimatedFundingRateBps < 0 && sideForLiq === 'SHORT');
     const estFundingMinor = absRate === 0 ? 0 : paysFunding ? -rawFunding : rawFunding;
+    const tierMaxAllowed = Math.min(effectiveMaxLeverage, riskTier.maxLeverage);
 
     return {
       notionalMinor,
       initialMarginMinor,
       estFeeMinor,
       estLiqPriceInt: liquidationPriceInt,
-      mmrBps: marginParams.maintenanceMarginBps,
+      mmrBps: riskTier.maintenanceMarginBps,
       liqFeeBps: marginParams.liquidationFeeBps,
-      tierLabel: `Tier ${marginParams.tier.tier} (max ${marginParams.maxAllowedLeverage}x)`,
+      tierLabel: `Tier ${riskTier.tier} (max ${tierMaxAllowed}x)`,
       estFundingMinor,
     };
   }, [
@@ -273,17 +285,20 @@ export function FuturesOrderForm({
       setPlayer(res.profile);
       onOrderSuccess(res.account);
 
-      const filledTxt =
-        res.trades.length > 0
-          ? `Khớp ${formatQty(res.order.filledQuantity)} @ ${formatRate(res.order.avgExecutionPriceInt, contract.priceScale, contract.priceDecimals)} CR`
-          : res.order.status === 'PENDING_TRIGGER'
-            ? `Đã đặt lệnh điều kiện kích hoạt @ ${triggerInput} CR`
-            : `Đã đặt vào sổ lệnh @ ${priceInput} CR`;
+      const feedback = formatFuturesOrderFeedback({
+        order: res.order,
+        trades: res.trades,
+        side: effectiveSide,
+        leverage,
+        priceScale: contract.priceScale,
+        priceDecimals: contract.priceDecimals,
+        reduceOnly: effectiveReduceOnly,
+      });
 
       pushToast({
-        tone: 'success',
-        title: `${effectiveSide === 'BUY' ? 'Long' : 'Short'} ${contract.symbol} (${leverage}x)`,
-        description: filledTxt,
+        tone: feedback.tone,
+        title: feedback.title,
+        description: feedback.description,
       });
     } catch (err) {
       if (err instanceof ApiClientError && err.code === 'FUTURES_RISK_NOT_ACKNOWLEDGED') {
@@ -326,7 +341,7 @@ export function FuturesOrderForm({
         <div className="space-y-1">
           <div className="flex items-center justify-between text-[11px]">
             <span className="text-[var(--text-secondary)]">
-              Đòn bẩy (Tối đa {contract.effectiveMaxLeverage ?? contract.maxLeverage}x)
+              Đòn bẩy (Tối đa {effectiveMaxLeverage}x)
             </span>
             <span className="font-mono font-bold text-[var(--accent)]">{leverage}x</span>
           </div>
@@ -399,8 +414,8 @@ export function FuturesOrderForm({
       <div className="grid grid-cols-4 gap-1 text-[11px]">
         {(
           [
-            { id: 'LIMIT', label: 'Limit' },
             { id: 'MARKET', label: 'Market' },
+            { id: 'LIMIT', label: 'Limit' },
             { id: 'STOP_LOSS', label: 'Stop Loss' },
             { id: 'TAKE_PROFIT', label: 'Take Profit' },
           ] as const

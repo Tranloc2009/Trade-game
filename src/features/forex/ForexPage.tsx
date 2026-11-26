@@ -15,6 +15,7 @@ import { SimplePriceChart } from '../../components/beginner/SimplePriceChart';
 import { SimpleTradeFlow } from '../../components/beginner/SimpleTradeFlow';
 import { TradingModeToggle } from '../../components/beginner/TradingModeToggle';
 import { CandlestickChart } from '../../components/charts/CandlestickChart';
+import { extractLiveCandleForTimeframe } from '../../lib/chartSync';
 import { formatDateTimeShort, formatTimeShort } from '../../lib/indicators';
 import { applySpotOrderToQueryCache } from '../../lib/queryClient';
 import { ApiClientError, ForexService, TradingService } from '../../services/api';
@@ -36,26 +37,28 @@ const ARCHETYPE_LABELS: Record<string, string> = {
 
 export function ForexPage() {
   const queryClient = useQueryClient();
-  const {
-    assets,
-    selectedForexSymbol,
-    setSelectedForexSymbol,
-    forexOverview,
-    setForexOverview,
-    timeframe,
-    setTimeframe,
-    theme,
-    orderBooks,
-    setOrderBook,
-    recentTradesBySymbol,
-    setRecentTrades,
-    liveCandleTick,
-    player,
-    setPlayer,
-    news,
-    pushToast,
-    tradingMode,
-  } = useAppStore();
+  const assets = useAppStore((s) => s.assets);
+  const selectedForexSymbol = useAppStore((s) => s.selectedForexSymbol);
+  const setSelectedForexSymbol = useAppStore((s) => s.setSelectedForexSymbol);
+  const forexOverview = useAppStore((s) => s.forexOverview);
+  const setForexOverview = useAppStore((s) => s.setForexOverview);
+  const timeframe = useAppStore((s) => s.timeframe);
+  const setTimeframe = useAppStore((s) => s.setTimeframe);
+  const theme = useAppStore((s) => s.theme);
+  const setOrderBook = useAppStore((s) => s.setOrderBook);
+  const setRecentTrades = useAppStore((s) => s.setRecentTrades);
+  const applyMarketPulse = useAppStore((s) => s.applyMarketPulse);
+  const liveCandleTick = useAppStore((s) => s.liveCandleTick);
+  const player = useAppStore((s) => s.player);
+  const setPlayer = useAppStore((s) => s.setPlayer);
+  const news = useAppStore((s) => s.news);
+  const pushToast = useAppStore((s) => s.pushToast);
+  const tradingMode = useAppStore((s) => s.tradingMode);
+  const playMode = useAppStore((s) => s.playMode);
+  const worldMode = useAppStore((s) => s.worldMode);
+  const activeCareerSaveId = useAppStore((s) => s.activeCareerSaveId);
+  const careerPaused = useAppStore((s) => Boolean(s.careerStory?.paused));
+  const careerClockSpeed = useAppStore((s) => s.careerStory?.clockSpeed ?? '1x');
 
   const [bottomTab, setBottomTab] = useState<BottomTab>('CENTRAL_BANKS');
   const [mobileTab, setMobileTab] = useState<MobileTab>('CHART');
@@ -71,11 +74,57 @@ export function ForexPage() {
   const scale = activePair?.priceScale ?? 10_000;
   const decimals = activePair?.priceDecimals ?? 4;
 
-  // Subscribe to active FX symbol realtime room
+  const activeOrderBook = useAppStore((s) => s.orderBooks[activeSymbol]);
+  const recentTrades = useAppStore((s) => s.recentTradesBySymbol[activeSymbol]) ?? [];
+
+  // Subscribe to active FX symbol realtime room in Online Live mode and unsubscribe on unmount
   useEffect(() => {
-    realtimeClient.subscribeMarket(activeSymbol);
     setPrefilledPrice(null);
-  }, [activeSymbol]);
+    if (playMode !== 'ONLINE' || worldMode !== 'LIVE') return;
+    realtimeClient.subscribeMarket(activeSymbol);
+    return () => {
+      realtimeClient.unsubscribeMarket(activeSymbol);
+    };
+  }, [activeSymbol, playMode, worldMode]);
+
+  // Lightweight single-symbol realtime pulse for Career & Practice modes
+  useEffect(() => {
+    if (!activeSymbol) return;
+    if (playMode === 'ONLINE' && worldMode === 'LIVE') return;
+    if (playMode === 'CAREER' && (careerPaused || careerClockSpeed === 'PAUSE')) return;
+
+    let disposed = false;
+    let inFlight = false;
+    let activeController: AbortController | null = null;
+
+    const pollOnce = async () => {
+      if (disposed || inFlight) return;
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      inFlight = true;
+      const controller = new AbortController();
+      activeController = controller;
+      try {
+        const pulse = await TradingService.getMarketPulse(activeSymbol, timeframe, 12, controller.signal);
+        if (!disposed) {
+          applyMarketPulse(pulse);
+        }
+      } catch {
+        // Ignore abort / transient errors cleanly
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    const intervalId = window.setInterval(() => {
+      void pollOnce();
+    }, 1_100);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(intervalId);
+      activeController?.abort();
+    };
+  }, [activeSymbol, timeframe, playMode, worldMode, activeCareerSaveId, careerPaused, careerClockSpeed, applyMarketPulse]);
 
   const { data: fetchedOverview, refetch: refetchOverview } = useQuery({
     queryKey: ['forex-overview'],
@@ -128,10 +177,10 @@ export function ForexPage() {
     [playerOrders],
   );
 
-  const activeOrderBook = orderBooks[activeSymbol];
-  const recentTrades = recentTradesBySymbol[activeSymbol] ?? [];
-  const liveCandle =
-    liveCandleTick && liveCandleTick.symbol === activeSymbol ? liveCandleTick.candles[timeframe] ?? null : null;
+  const liveCandle = useMemo(
+    () => extractLiveCandleForTimeframe(liveCandleTick, activeSymbol, timeframe),
+    [liveCandleTick, activeSymbol, timeframe],
+  );
 
   const fxNews = useMemo(
     () => news.filter((n) => n.category === 'FOREX' || n.relatedSymbols.some((s) => s.includes('/'))),
@@ -271,6 +320,7 @@ export function ForexPage() {
             <SimplePriceChart
               symbol={activeSymbol}
               candles={candleResp?.candles ?? []}
+              liveCandle={liveCandle}
               timeframe={timeframe}
               onTimeframeChange={setTimeframe}
               positive={activePair.priceChange24hPct >= 0}

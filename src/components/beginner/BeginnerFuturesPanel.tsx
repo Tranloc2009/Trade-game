@@ -14,12 +14,20 @@ import {
   type FuturesPreviewResponse,
 } from '../../../shared/contracts/beginner';
 import {
+  getAllowedLeveragesForContract,
+  resolveRiskTier,
   type FuturesAccountSummary,
   type FuturesContract,
   type FuturesOrderSide,
 } from '../../../shared/contracts/futures';
 import { formatCR, formatRate, fromMinor } from '../../../shared/contracts/money';
 import { setAuthoritativeFuturesAccount } from '../../lib/queryClient';
+import {
+  buildFuturesPreviewContextKey,
+  formatFuturesOrderFeedback,
+  isPreviewResponseCurrent,
+  sanitizeLeverageChoice,
+} from '../../lib/tradeExecutionFeedback';
 import { ApiClientError, FuturesService } from '../../services/api';
 import { useAppStore } from '../../store/useAppStore';
 import { GlossaryTerm } from './GlossaryTerm';
@@ -35,6 +43,7 @@ export const BeginnerFuturesPanel: React.FC<BeginnerFuturesPanelProps> = ({
   account,
   onOrderSuccess,
 }) => {
+  const worldId = useAppStore((s) => s.worldId);
   const player = useAppStore((s) => s.player);
   const setPlayer = useAppStore((s) => s.setPlayer);
   const setFuturesOrderBook = useAppStore((s) => s.setFuturesOrderBook);
@@ -44,27 +53,61 @@ export const BeginnerFuturesPanel: React.FC<BeginnerFuturesPanelProps> = ({
 
   const [side, setSide] = useState<FuturesOrderSide>('BUY'); // BUY = LONG, SELL = SHORT
   const [marginInput, setMarginInput] = useState<string>('500');
-  const [leverage, setLeverage] = useState<number>(1); // Strictly defaults to 1x
+  const [leverage, setLeverage] = useState<number>(1); // Safe default 1x; all contract-allowed leverages unlocked
   const [showHighLeverage, setShowHighLeverage] = useState<boolean>(false);
   const [stopLossInput, setStopLossInput] = useState<string>('');
   const [takeProfitInput, setTakeProfitInput] = useState<string>('');
 
   const [preview, setPreview] = useState<FuturesPreviewResponse | null>(null);
+  const [previewContextKey, setPreviewContextKey] = useState<string>('');
   const [previewLoading, setPreviewLoading] = useState<boolean>(false);
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [errorBox, setErrorBox] = useState<{ title: string; message: string; actionHint: string } | null>(null);
   const [confirmMessage, setConfirmMessage] = useState<string | null>(null);
+  const [confirmTone, setConfirmTone] = useState<'success' | 'warning'>('success');
 
   const inFlightRef = useRef(false);
+  const previewSeqRef = useRef(0);
+  const previewAbortRef = useRef<AbortController | null>(null);
 
-  // Reset leverage to safe 1x when switching contract
+  const effectiveMaxLeverage = Math.min(
+    contract.maxLeverage,
+    contract.effectiveMaxLeverage ?? contract.maxLeverage,
+    resolveRiskTier(0).maxLeverage,
+  );
+  const allowedLeverages = useMemo(
+    () => getAllowedLeveragesForContract(contract.maxLeverage, effectiveMaxLeverage),
+    [contract.maxLeverage, effectiveMaxLeverage],
+  );
+
+  const currentContextKey = useMemo(
+    () =>
+      buildFuturesPreviewContextKey({
+        worldId,
+        playerId: player?.id,
+        symbol: contract.symbol,
+        side,
+        leverage,
+        marginInput,
+      }),
+    [worldId, player?.id, contract.symbol, side, leverage, marginInput],
+  );
+  const currentContextKeyRef = useRef(currentContextKey);
+  currentContextKeyRef.current = currentContextKey;
+
+  // Reset leverage to safe 1x when switching contract, or clamp if regime lowers effectiveMaxLeverage
   useEffect(() => {
     setLeverage(1);
     setShowHighLeverage(false);
     setPreview(null);
+    setPreviewContextKey('');
     setErrorBox(null);
     setConfirmMessage(null);
   }, [contract.symbol]);
+
+  useEffect(() => {
+    setLeverage((prev) => sanitizeLeverageChoice(prev, allowedLeverages, 1));
+  }, [allowedLeverages]);
 
   const availableCRMinor = player?.wallet.availableMinor ?? 0;
 
@@ -74,51 +117,108 @@ export const BeginnerFuturesPanel: React.FC<BeginnerFuturesPanelProps> = ({
     const val = Math.max(50, Math.floor((availMajor * pct) / 100));
     setMarginInput(String(val));
     setPreview(null);
+    setPreviewContextKey('');
     setErrorBox(null);
   };
 
-  // Debounced server-verified preview so Risk Preview table always matches backend BigInt engine
-  const requestPreview = async (explicitMargin?: string, explicitLev?: number, explicitSide?: FuturesOrderSide) => {
+  // Race-free server-verified preview with AbortController + monotonic sequence + contextKey guard
+  const requestPreview = async (
+    targetContextKey: string,
+    explicitMargin: string,
+    explicitLev: number,
+    explicitSide: FuturesOrderSide,
+  ) => {
     if (!player) return;
-    const m = Number((explicitMargin ?? marginInput).replace(/,/g, '').trim());
+    const m = Number(explicitMargin.replace(/,/g, '').trim());
+    const safeLev = sanitizeLeverageChoice(explicitLev, allowedLeverages, 1);
+
+    previewAbortRef.current?.abort();
+    const requestSeq = ++previewSeqRef.current;
+
     if (!Number.isFinite(m) || m <= 0) {
       setPreview(null);
+      setPreviewContextKey('');
+      setPreviewLoading(false);
       return;
     }
+
+    const controller = new AbortController();
+    previewAbortRef.current = controller;
     setPreviewLoading(true);
     setErrorBox(null);
+
     try {
-      const res = await FuturesService.previewOrder({
-        symbol: contract.symbol,
-        side: explicitSide ?? side,
-        type: 'MARKET',
-        leverage: explicitLev ?? leverage,
-        marginCR: m,
-      });
+      const res = await FuturesService.previewOrder(
+        {
+          symbol: contract.symbol,
+          side: explicitSide,
+          type: 'MARKET',
+          leverage: safeLev,
+          marginCR: m,
+        },
+        controller.signal,
+      );
+
+      if (
+        !isPreviewResponseCurrent({
+          requestSeq,
+          latestSeq: previewSeqRef.current,
+          requestContextKey: targetContextKey,
+          currentContextKey: currentContextKeyRef.current,
+        })
+      ) {
+        return;
+      }
+
       setPreview(res);
+      setPreviewContextKey(targetContextKey);
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return;
+      }
+      if (
+        !isPreviewResponseCurrent({
+          requestSeq,
+          latestSeq: previewSeqRef.current,
+          requestContextKey: targetContextKey,
+          currentContextKey: currentContextKeyRef.current,
+        })
+      ) {
+        return;
+      }
       if (err instanceof ApiClientError) {
         setErrorBox(mapHumanErrorMessage(err.code, err.message));
       } else {
         setErrorBox(mapHumanErrorMessage('DISCONNECTED'));
       }
       setPreview(null);
+      setPreviewContextKey('');
     } finally {
-      setPreviewLoading(false);
+      if (requestSeq === previewSeqRef.current) {
+        setPreviewLoading(false);
+      }
     }
   };
 
   useEffect(() => {
     if (!player || !futuresIntroSeen) return;
+    // Immediately invalidate stale preview when inputs change so Confirm stays safely locked until latest preview resolves
+    setPreviewLoading(true);
+    const snapshotKey = currentContextKey;
     const timer = setTimeout(() => {
-      void requestPreview(marginInput, leverage, side);
-    }, 280);
-    return () => clearTimeout(timer);
+      void requestPreview(snapshotKey, marginInput, leverage, side);
+    }, 200);
+    return () => {
+      clearTimeout(timer);
+      previewAbortRef.current?.abort();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [player?.id, contract.symbol, side, leverage, marginInput, futuresIntroSeen]);
+  }, [currentContextKey, futuresIntroSeen]);
+
+  const isPreviewFresh = Boolean(preview && previewContextKey === currentContextKey && !previewLoading);
 
   const handleConfirm = async () => {
-    if (!player || !preview || !preview.canExecute || inFlightRef.current || submitting) return;
+    if (!player || !preview || !isPreviewFresh || !preview.canExecute || inFlightRef.current || submitting) return;
     inFlightRef.current = true;
     setSubmitting(true);
     setErrorBox(null);
@@ -133,6 +233,7 @@ export const BeginnerFuturesPanel: React.FC<BeginnerFuturesPanelProps> = ({
 
       const slVal = stopLossInput.trim() ? Number(stopLossInput.replace(/,/g, '').trim()) : undefined;
       const tpVal = takeProfitInput.trim() ? Number(takeProfitInput.replace(/,/g, '').trim()) : undefined;
+      const safeLeverage = sanitizeLeverageChoice(leverage, allowedLeverages, 1);
 
       const idemKey = `beg_fut_${contract.symbol}_${side}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       const res = await FuturesService.placeOrder({
@@ -141,7 +242,7 @@ export const BeginnerFuturesPanel: React.FC<BeginnerFuturesPanelProps> = ({
         type: 'MARKET',
         timeInForce: 'IOC',
         marginMode: 'ISOLATED',
-        leverage,
+        leverage: safeLeverage,
         quantity: preview.estimatedQuantity,
         stopLossCR: slVal && Number.isFinite(slVal) && slVal > 0 ? slVal : undefined,
         takeProfitCR: tpVal && Number.isFinite(tpVal) && tpVal > 0 ? tpVal : undefined,
@@ -153,14 +254,20 @@ export const BeginnerFuturesPanel: React.FC<BeginnerFuturesPanelProps> = ({
       setFuturesOrderBook(res.orderBook);
       setAuthoritativeFuturesAccount(res.profile.id, res.account);
 
-      const dirLabel = side === 'BUY' ? 'LONG (Kỳ vọng tăng)' : 'SHORT (Kỳ vọng giảm)';
-      setConfirmMessage(
-        `Đã mở vị thế ${dirLabel} ${res.order.filledQuantity} ${contract.symbol} với đòn bẩy ${leverage}x (Isolated Margin). Kiểm tra vị thế ở bảng Vị thế đang mở bên dưới.`,
-      );
+      const feedback = formatFuturesOrderFeedback({
+        order: res.order,
+        trades: res.trades,
+        side,
+        leverage: safeLeverage,
+        priceScale: contract.priceScale,
+        priceDecimals: contract.priceDecimals,
+      });
+      setConfirmTone(feedback.tone === 'success' ? 'success' : 'warning');
+      setConfirmMessage(`${feedback.title}. ${feedback.description}`);
       pushToast({
-        tone: 'success',
-        title: `Đã mở vị thế ${side === 'BUY' ? 'LONG' : 'SHORT'} ${contract.symbol}`,
-        description: `Khớp ${res.order.filledQuantity} hợp đồng · Đòn bẩy ${leverage}x`,
+        tone: feedback.tone,
+        title: feedback.title,
+        description: feedback.description,
       });
       onOrderSuccess?.();
     } catch (err) {
@@ -241,8 +348,8 @@ export const BeginnerFuturesPanel: React.FC<BeginnerFuturesPanelProps> = ({
   }
 
   const positionSideLabel = side === 'BUY' ? 'LONG · Kỳ vọng tăng' : 'SHORT · Kỳ vọng giảm';
-  const safeLeverages = [1, 2, 3].filter((l) => l <= contract.maxLeverage);
-  const higherLeverages = [5, 10].filter((l) => l <= contract.maxLeverage);
+  const safeLeverages = allowedLeverages.filter((l) => l <= 3);
+  const higherLeverages = allowedLeverages.filter((l) => l > 3);
 
   return (
     <div
@@ -333,11 +440,11 @@ export const BeginnerFuturesPanel: React.FC<BeginnerFuturesPanelProps> = ({
         </div>
       </div>
 
-      {/* Leverage Selector — defaults to 1x; high leverage behind expandable disclosure */}
+      {/* Leverage Selector — defaults to 1x; ALL contract-allowed leverages available identically to Pro */}
       <div className="space-y-2">
         <div className="flex items-center justify-between text-xs">
           <span className="inline-flex items-center gap-1 font-medium text-slate-200">
-            Đòn bẩy (Mặc định 1x)
+            Đòn bẩy (Tối đa {effectiveMaxLeverage}x)
             <GlossaryTerm termKey="leverage" />
           </span>
           <span className="font-mono font-semibold text-cyan-300" data-testid="beginner-futures-leverage-value">
@@ -351,7 +458,7 @@ export const BeginnerFuturesPanel: React.FC<BeginnerFuturesPanelProps> = ({
               type="button"
               onClick={() => setLeverage(lev)}
               data-testid={`beginner-leverage-${lev}x`}
-              className={`min-h-[38px] rounded-lg border text-xs font-semibold transition-colors ${
+              className={`min-h-[38px] rounded-lg border text-xs font-semibold transition-colors cursor-pointer ${
                 leverage === lev
                   ? 'border-cyan-500 bg-cyan-500/20 text-cyan-200'
                   : 'border-slate-800 bg-slate-950 text-slate-300 hover:border-slate-700'
@@ -367,26 +474,29 @@ export const BeginnerFuturesPanel: React.FC<BeginnerFuturesPanelProps> = ({
             <button
               type="button"
               onClick={() => setShowHighLeverage((v) => !v)}
-              className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-300/90 hover:text-amber-200"
+              data-testid="beginner-high-leverage-toggle"
+              className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-300/90 hover:text-amber-200 cursor-pointer"
             >
               {showHighLeverage ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-              Tùy chọn đòn bẩy cao hơn (rủi ro thanh lý nhanh hơn)
+              Đòn bẩy cao ({higherLeverages[0]}x – {higherLeverages[higherLeverages.length - 1]}x · đồng bộ luật Pro)
             </button>
             {showHighLeverage && (
               <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2.5">
                 <p className="mb-2 text-[11px] text-amber-200/90">
-                  Đòn bẩy cao làm Giá thanh lý tiến rất sát giá vào lệnh. Chỉ nên thử sau khi đã quen ở mức 1x–2x.
+                  Mọi mức đòn bẩy hợp lệ của hợp đồng ({effectiveMaxLeverage}x) đều mở như chế độ Pro. Đòn bẩy cao làm Giá thanh lý tiến sát giá vào lệnh.
                 </p>
-                <div className="grid grid-cols-2 gap-1.5">
+                <div className="flex flex-wrap gap-1.5">
                   {higherLeverages.map((lev) => (
                     <button
                       key={lev}
                       type="button"
                       onClick={() => setLeverage(lev)}
                       data-testid={`beginner-leverage-${lev}x`}
-                      className={`min-h-[36px] rounded-md border text-xs font-semibold ${
+                      className={`min-h-[34px] min-w-[52px] flex-1 rounded-md border px-2 text-xs font-mono font-semibold cursor-pointer ${
                         leverage === lev
-                          ? 'border-amber-500 bg-amber-500/20 text-amber-200'
+                          ? lev >= 25
+                            ? 'border-rose-500 bg-rose-500/20 text-rose-200'
+                            : 'border-amber-500 bg-amber-500/20 text-amber-200'
                           : 'border-slate-800 bg-slate-950 text-slate-300 hover:border-amber-500/40'
                       }`}
                     >
@@ -572,19 +682,27 @@ export const BeginnerFuturesPanel: React.FC<BeginnerFuturesPanelProps> = ({
       {confirmMessage && (
         <div
           data-testid="beginner-futures-success"
-          className="flex items-start gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-3 text-xs text-emerald-200"
+          className={`flex items-start gap-2 rounded-lg border p-3 text-xs ${
+            confirmTone === 'success'
+              ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
+              : 'border-amber-500/40 bg-amber-500/10 text-amber-200'
+          }`}
         >
-          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
+          <CheckCircle2
+            className={`mt-0.5 h-4 w-4 shrink-0 ${
+              confirmTone === 'success' ? 'text-emerald-400' : 'text-amber-400'
+            }`}
+          />
           <span>{confirmMessage}</span>
         </div>
       )}
 
       <button
         type="button"
-        disabled={!preview?.canExecute || submitting || previewLoading}
+        disabled={!isPreviewFresh || !preview?.canExecute || submitting}
         onClick={() => void handleConfirm()}
         data-testid="beginner-futures-confirm-btn"
-        className={`flex min-h-[46px] w-full items-center justify-center gap-2 rounded-lg text-sm font-semibold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+        className={`flex min-h-[46px] w-full items-center justify-center gap-2 rounded-lg text-sm font-semibold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer ${
           side === 'BUY'
             ? 'bg-emerald-600 hover:bg-emerald-500'
             : 'bg-rose-600 hover:bg-rose-500'
@@ -594,6 +712,11 @@ export const BeginnerFuturesPanel: React.FC<BeginnerFuturesPanelProps> = ({
           <>
             <Loader2 className="h-4 w-4 animate-spin" />
             Đang mở vị thế trên máy chủ...
+          </>
+        ) : previewLoading || !isPreviewFresh ? (
+          <>
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Đang cập nhật xem trước...
           </>
         ) : (
           `Xác nhận mở ${side === 'BUY' ? 'LONG' : 'SHORT'} ${leverage}x (${preview ? formatCR(preview.initialMarginMinor) : ''})`

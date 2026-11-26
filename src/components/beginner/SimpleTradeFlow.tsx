@@ -740,26 +740,49 @@ export const SimpleTradeFlow: React.FC<SimpleTradeFlowProps> = ({
       )}
 
       {/* STEP 3: SERVER-CONFIRMED RESULT */}
-      {step === 'SUCCESS' && lastExecution && (
-        <div className="space-y-3.5" data-testid="simple-success-panel">
-          <div className="rounded-lg border border-emerald-500/35 bg-emerald-500/10 p-4 text-center">
-            <CheckCircle2 className="mx-auto h-8 w-8 text-emerald-400" />
-            <h4 className="mt-2 text-sm font-semibold text-white">
-              {lastExecution.order.status === 'FILLED'
-                ? 'Giao dịch đã khớp hoàn toàn'
-                : lastExecution.order.status === 'PARTIALLY_FILLED'
-                  ? 'Lệnh đã khớp một phần'
-                  : lastExecution.order.status === 'OPEN'
+      {step === 'SUCCESS' && lastExecution && (() => {
+        const ord = lastExecution.order;
+        const isIocOrder = ord.type === 'MARKET' || ord.timeInForce === 'IOC';
+        const isZeroFillCancelled =
+          (ord.status === 'CANCELLED' || ord.status === 'EXPIRED') && ord.filledQuantity <= 0;
+        const isPartialIoc =
+          (ord.status === 'CANCELLED' || ord.status === 'EXPIRED' || ord.status === 'PARTIALLY_FILLED') &&
+          isIocOrder &&
+          ord.filledQuantity > 0;
+        const bannerStyle = isZeroFillCancelled
+          ? 'border-amber-500/40 bg-amber-500/10'
+          : isPartialIoc
+            ? 'border-amber-500/35 bg-amber-500/10'
+            : 'border-emerald-500/35 bg-emerald-500/10';
+        const headingText =
+          ord.status === 'FILLED'
+            ? 'Giao dịch đã khớp hoàn toàn'
+            : isPartialIoc
+              ? 'Lệnh Thị trường đã khớp một phần (IOC)'
+              : ord.status === 'PARTIALLY_FILLED'
+                ? 'Lệnh Giới hạn đã khớp một phần'
+                : isZeroFillCancelled
+                  ? 'Lệnh không khớp được do thiếu thanh khoản'
+                  : ord.status === 'OPEN'
                     ? 'Lệnh chờ đã được ghi nhận trên sổ lệnh'
-                    : 'Lệnh đã hoàn tất xử lý'}
-            </h4>
-            <p className="mt-1 text-xs text-slate-300">
-              {lastExecution.order.status === 'FILLED'
-                ? 'Số dư ví và danh mục của bạn đã được máy chủ cập nhật ngay lập tức. Lệnh này đã chuyển sang Lịch sử.'
-                : lastExecution.order.status === 'PARTIALLY_FILLED'
-                  ? `Đã khớp ${lastExecution.order.filledQuantity} / ${lastExecution.order.quantity} ${baseUnitLabel}. Phần còn lại (${lastExecution.order.remainingQuantity} ${baseUnitLabel}) vẫn nằm trong Lệnh đang mở.`
-                  : 'Lệnh đang chờ khớp tại mức giá bạn đặt. Bạn có thể theo dõi hoặc hủy bất cứ lúc nào trong tab Lệnh đang mở.'}
-            </p>
+                    : 'Lệnh đã hoàn tất xử lý';
+        const detailText =
+          ord.status === 'FILLED'
+            ? 'Số dư ví và danh mục của bạn đã được máy chủ cập nhật ngay lập tức. Lệnh này đã chuyển sang Lịch sử.'
+            : isPartialIoc
+              ? `Đã khớp ${ord.filledQuantity} / ${ord.quantity} ${baseUnitLabel}. Phần chưa khớp đã tự động hủy (IOC) và hoàn trả số dư ngay lập tức — không nằm trong Lệnh đang mở.`
+              : ord.status === 'PARTIALLY_FILLED'
+                ? `Đã khớp ${ord.filledQuantity} / ${ord.quantity} ${baseUnitLabel}. Phần còn lại (${ord.remainingQuantity} ${baseUnitLabel}) vẫn nằm trong Lệnh đang mở.`
+                : isZeroFillCancelled
+                  ? 'Không đủ thanh khoản đối ứng trong giới hạn trượt giá nên lệnh đã tự động hủy và hoàn toàn bộ số dư khóa.'
+                  : 'Lệnh đang chờ khớp tại mức giá bạn đặt. Bạn có thể theo dõi hoặc hủy bất cứ lúc nào trong tab Lệnh đang mở.';
+
+        return (
+        <div className="space-y-3.5" data-testid="simple-success-panel">
+          <div className={`rounded-lg border p-4 text-center ${bannerStyle}`}>
+            <CheckCircle2 className={`mx-auto h-8 w-8 ${isZeroFillCancelled ? 'text-amber-400' : 'text-emerald-400'}`} />
+            <h4 className="mt-2 text-sm font-semibold text-white">{headingText}</h4>
+            <p className="mt-1 text-xs text-slate-300">{detailText}</p>
           </div>
 
           <dl className="space-y-1.5 rounded-lg border border-slate-800 bg-slate-950/70 p-3 text-xs">
@@ -799,7 +822,8 @@ export const SimpleTradeFlow: React.FC<SimpleTradeFlowProps> = ({
             Tạo giao dịch mới
           </button>
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 };
